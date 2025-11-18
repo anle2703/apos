@@ -1,0 +1,1082 @@
+// lib/bills/bill_history_screen.dart
+
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+import 'dart:ui' as ui;
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
+import '../theme/app_theme.dart';
+import '../theme/number_utils.dart';
+import '../models/order_item_model.dart';
+import '../models/user_model.dart';
+import '../models/bill_model.dart';
+import '../services/firestore_service.dart';
+import '../services/toast_service.dart';
+import '../services/printing_service.dart';
+import '../models/print_job_model.dart';
+import '../services/print_queue_service.dart';
+import '../widgets/app_dropdown.dart';
+import 'package:omni_datetime_picker/omni_datetime_picker.dart';
+
+class BillService {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  Stream<List<BillModel>> getBillsStream({
+    required String storeId,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? tableName,
+    String? employeeName,
+    String? customerName,
+    String? status,
+    String? debtStatus,
+  }) {
+    Query query = _db
+        .collection('bills')
+        .where('storeId', isEqualTo: storeId)
+        .orderBy('createdAt', descending: true);
+
+    if (startDate != null) {
+      query = query.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
+    }
+    if (endDate != null) {
+      query = query.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(endDate.add(const Duration(days: 1))));
+    }
+    if (tableName != null && tableName.isNotEmpty) {
+      query = query.where('tableName', isEqualTo: tableName);
+    }
+    if (employeeName != null && employeeName.isNotEmpty) {
+      query = query.where('createdByName', isEqualTo: employeeName);
+    }
+    if (customerName != null && customerName.isNotEmpty) {
+      query = query.where('customerName', isEqualTo: customerName);
+    }
+    if (status != null && status.isNotEmpty) {
+      final dbStatus = (status == 'Đã hủy') ? 'cancelled' : 'completed';
+      query = query.where('status', isEqualTo: dbStatus);
+    }
+    if (debtStatus != null && debtStatus.isNotEmpty) {
+      if (debtStatus == 'Có') {
+        query = query.where('debtAmount', isGreaterThan: 0);
+      } else if (debtStatus == 'Không') {
+        query = query.where('debtAmount', isEqualTo: 0);
+      }
+    }
+
+    return query.limit(100).snapshots().map((snapshot) =>
+        snapshot.docs.map((doc) => BillModel.fromFirestore(doc)).toList());
+  }
+
+  Future<Map<String, List<String>>> getDistinctFilterValues(String storeId) async {
+    try {
+      final snapshot = await _db.collection('bills')
+          .where('storeId', isEqualTo: storeId)
+          .orderBy('createdAt', descending: true)
+          .limit(500)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return {'tables': [], 'users': [], 'customers': []};
+      }
+
+      final tables = snapshot.docs.map((doc) => doc.data()['tableName'] as String?).nonNulls.toSet();
+      final users = snapshot.docs.map((doc) => doc.data()['createdByName'] as String?).nonNulls.toSet();
+      final customers = snapshot.docs.map((doc) => doc.data()['customerName'] as String?).nonNulls
+          .where((name) => name.isNotEmpty).toSet();
+
+      return {
+        'tables': tables.toList()..sort(),
+        'users': users.toList()..sort(),
+        'customers': customers.toList()..sort(),
+      };
+    } catch (e) {
+      debugPrint('Lỗi khi lấy dữ liệu bộ lọc hóa đơn: $e');
+      return {'tables': [], 'users': [], 'customers': []};
+    }
+  }
+
+  Future<void> cancelBillAndReverseTransactions(BillModel bill, String storeId) async {
+    final writeBatch = _db.batch();
+
+    final billRef = _db.collection('bills').doc(bill.id);
+    writeBatch.update(billRef, {'status': 'cancelled'});
+
+    if (bill.customerId != null && bill.customerId!.isNotEmpty) {
+      final customerRef = _db.collection('customers').doc(bill.customerId);
+      final int pointsChangeToReverse = bill.customerPointsUsed.round() - bill.pointsEarned.round();
+      writeBatch.update(customerRef, {
+        'points': FieldValue.increment(pointsChangeToReverse),
+        'debt': FieldValue.increment(-bill.debtAmount),
+        'totalSpent': FieldValue.increment(-bill.totalPayable),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    if (bill.voucherCode != null && bill.voucherCode!.isNotEmpty) {
+      final voucherQuery = await _db.collection('promotions')
+          .where('code', isEqualTo: bill.voucherCode)
+          .where('storeId', isEqualTo: storeId)
+          .limit(1).get();
+      if (voucherQuery.docs.isNotEmpty) {
+        final voucherRef = voucherQuery.docs.first.reference;
+        writeBatch.update(voucherRef, {
+          'quantity': FieldValue.increment(1),
+          'usedCount': FieldValue.increment(-1),
+        });
+      }
+    }
+
+    final String? reportDateString = bill.reportDateKey;
+    final String? shiftId = bill.shiftId;
+
+    if (reportDateString == null || reportDateString.isEmpty) {
+      throw Exception('Bill thiếu reportDateKey. Không thể hủy an toàn.');
+    }
+    if (shiftId == null || shiftId.isEmpty) {
+      throw Exception('Bill thiếu shiftId. Không thể hủy an toàn.');
+    }
+
+    final String reportId = '${storeId}_$reportDateString';
+    final dailyReportRef = _db.collection('daily_reports').doc(reportId);
+    final String shiftKeyPrefix = 'shifts.$shiftId';
+
+    double cashPaymentToReverse = 0.0;
+    double otherPaymentsToReverse = 0.0;
+
+    bill.payments.forEach((paymentMethodKey, paymentAmount) {
+      final double amount = (paymentAmount as num?)?.toDouble() ?? 0.0;
+      if (amount <= 0) return;
+      if (paymentMethodKey == 'Tiền mặt') {
+        cashPaymentToReverse += amount;
+      } else {
+        otherPaymentsToReverse += amount;
+      }
+    });
+
+    final double totalSurchargesToReverse = bill.surcharges.fold(0.0, (tong, e) {
+      if (e['isPercent'] == true) {
+        return tong + (bill.subtotal * (e['amount'] ?? 0) / 100);
+      }
+      return tong + (e['amount'] ?? 0);
+    });
+
+    final double totalBillDiscountToReverse = (bill.discountType == 'VND')
+        ? bill.discountInput
+        : (bill.subtotal * bill.discountInput / 100);
+
+    final Map<String, dynamic> dailyReportUpdates = {
+      'billCount': FieldValue.increment(-1),
+      'totalRevenue': FieldValue.increment(-bill.totalPayable),
+      'totalProfit': FieldValue.increment(-bill.totalProfit),
+      'totalDebt': FieldValue.increment(-bill.debtAmount),
+      'totalTax': FieldValue.increment(-bill.taxAmount),
+      'totalDiscount': FieldValue.increment(-bill.discount), // CK Món
+      'totalBillDiscount': FieldValue.increment(-totalBillDiscountToReverse), // CK Tổng
+      'totalVoucherDiscount': FieldValue.increment(-bill.voucherDiscount),
+      'totalPointsValue': FieldValue.increment(-bill.customerPointsValue),
+      'totalSurcharges': FieldValue.increment(-totalSurchargesToReverse),
+
+      '$shiftKeyPrefix.billCount': FieldValue.increment(-1),
+      '$shiftKeyPrefix.totalRevenue': FieldValue.increment(-bill.totalPayable),
+      '$shiftKeyPrefix.totalProfit': FieldValue.increment(-bill.totalProfit),
+      '$shiftKeyPrefix.totalDebt': FieldValue.increment(-bill.debtAmount),
+      '$shiftKeyPrefix.totalTax': FieldValue.increment(-bill.taxAmount),
+      '$shiftKeyPrefix.totalDiscount': FieldValue.increment(-bill.discount), // CK Món
+      '$shiftKeyPrefix.totalBillDiscount': FieldValue.increment(-totalBillDiscountToReverse), // CK Tổng
+      '$shiftKeyPrefix.totalVoucherDiscount': FieldValue.increment(-bill.voucherDiscount),
+      '$shiftKeyPrefix.totalPointsValue': FieldValue.increment(-bill.customerPointsValue),
+      '$shiftKeyPrefix.totalSurcharges': FieldValue.increment(-totalSurchargesToReverse),
+    };
+
+    for (var item in bill.items) {
+      if (item is! Map<String, dynamic>) continue;
+      final productId = (item['product'] as Map<String, dynamic>?)?['id'] as String?;
+      if (productId == null) continue;
+
+      final quantity = (item['quantity'] as num?)?.toDouble() ?? 0.0;
+      final itemSubtotal = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
+      final itemDiscount = (item['totalDiscount'] as num?)?.toDouble() ?? 0.0;
+
+      dailyReportUpdates['products.$productId.quantitySold'] = FieldValue.increment(-quantity);
+      dailyReportUpdates['products.$productId.totalRevenue'] = FieldValue.increment(-itemSubtotal);
+      dailyReportUpdates['products.$productId.totalDiscount'] = FieldValue.increment(-itemDiscount);
+      dailyReportUpdates['$shiftKeyPrefix.products.$productId.quantitySold'] = FieldValue.increment(-quantity);
+      dailyReportUpdates['$shiftKeyPrefix.products.$productId.totalRevenue'] = FieldValue.increment(-itemSubtotal);
+      dailyReportUpdates['$shiftKeyPrefix.products.$productId.totalDiscount'] = FieldValue.increment(-itemDiscount);
+    }
+
+    if (cashPaymentToReverse > 0) {
+      dailyReportUpdates['totalCash'] = FieldValue.increment(-cashPaymentToReverse);
+      dailyReportUpdates['$shiftKeyPrefix.totalCash'] = FieldValue.increment(-cashPaymentToReverse);
+    }
+    if (otherPaymentsToReverse > 0) {
+      dailyReportUpdates['totalOtherPayments'] = FieldValue.increment(-otherPaymentsToReverse);
+      dailyReportUpdates['$shiftKeyPrefix.totalOtherPayments'] = FieldValue.increment(-otherPaymentsToReverse);
+    }
+
+    writeBatch.update(dailyReportRef, dailyReportUpdates);
+
+    await writeBatch.commit();
+
+    await _performRecursiveStockRefund(bill, storeId);
+  }
+
+  Future<void> deleteBillPermanently(String billId) async {
+    if (billId.isEmpty) {
+      throw ArgumentError('Bill ID không được rỗng.');
+    }
+    try {
+      final billRef = _db.collection('bills').doc(billId);
+      final doc = await billRef.get();
+      if (doc.exists && doc.data()?['status'] == 'cancelled') {
+        await billRef.delete();
+        debugPrint('Đã xóa vĩnh viễn hóa đơn ID: $billId');
+      } else if (doc.exists) {
+        throw Exception('Chỉ có thể xóa hóa đơn đã bị hủy.');
+      } else {
+        debugPrint('Hóa đơn ID $billId không tồn tại để xóa.');
+      }
+    } catch (e) {
+      debugPrint('Lỗi khi xóa vĩnh viễn hóa đơn $billId: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _getStockUpdatesForProduct(
+      String productId,
+      double quantityToReverse,
+      Map<String, double> stockToUpdate,
+      ) async {
+    if (quantityToReverse <= 0) return;
+
+    final doc = await _db.collection('products').doc(productId).get();
+    if (!doc.exists) {
+      debugPrint(">>> HOÀN KHO: Không tìm thấy sản phẩm $productId, bỏ qua.");
+      return;
+    }
+
+    final data = doc.data() as Map<String, dynamic>;
+    final productType = data['productType'] as String?;
+
+    if (productType == 'Thành phẩm/Combo' || productType == 'Topping/Bán kèm') {
+
+      final compiledMaterials = List<Map<String, dynamic>>.from(data['compiledMaterials'] ?? []);
+
+      if (compiledMaterials.isNotEmpty) {
+        for (final material in compiledMaterials) {
+          final materialId = material['productId'] as String?;
+          final materialQty = (material['quantity'] as num?)?.toDouble() ?? 0.0;
+          if (materialId == null || materialQty <= 0) continue;
+
+          final double totalMaterialToRefund = materialQty * quantityToReverse;
+
+          stockToUpdate[materialId] = (stockToUpdate[materialId] ?? 0) + totalMaterialToRefund;
+        }
+      } else {
+
+      }
+    } else {
+      stockToUpdate[productId] = (stockToUpdate[productId] ?? 0) + quantityToReverse;
+    }
+  }
+
+  Future<void> _performRecursiveStockRefund(
+      BillModel bill, String storeId) async {
+
+    final Map<String, double> stockToUpdate = {};
+
+    try {
+      for (final item in bill.items) {
+        if (item is! Map<String, dynamic>) continue;
+
+        final productMap = (item['product'] as Map<String, dynamic>?);
+        if (productMap == null) continue;
+
+        final productId = productMap['id'] as String?;
+        final quantity = (item['quantity'] as num?)?.toDouble() ?? 0.0;
+        if (productId == null || quantity <= 0) continue;
+
+        await _getStockUpdatesForProduct(productId, quantity, stockToUpdate);
+
+        final toppings = (item['toppings'] as List<dynamic>?) ?? [];
+        for (final topping in toppings) {
+          if (topping is! Map<String, dynamic>) continue;
+
+          final toppingProductMap = (topping['product'] as Map<String, dynamic>?);
+          if (toppingProductMap == null) continue;
+
+          final toppingProductId = toppingProductMap['id'] as String?;
+          final toppingQuantity = (topping['quantity'] as num?)?.toDouble() ?? 0.0;
+
+          if (toppingProductId != null && toppingQuantity > 0) {
+            final double totalToppingQuantity = toppingQuantity * quantity;
+            await _getStockUpdatesForProduct(
+              toppingProductId,
+              totalToppingQuantity,
+              stockToUpdate,
+            );
+          }
+        }
+      }
+
+      if (stockToUpdate.isEmpty) {
+        debugPrint(">>> HOÀN KHO: Không có 'Hàng hóa' nào để hoàn.");
+        return;
+      }
+
+      final stockBatch = _db.batch();
+      stockToUpdate.forEach((productId, quantity) {
+        if (quantity > 0) {
+          final productRef = _db.collection('products').doc(productId);
+          stockBatch.update(productRef, {'stock': FieldValue.increment(quantity)});
+        }
+      });
+
+      await stockBatch.commit();
+      debugPrint(">>> HOÀN KHO: Đã hoàn ${stockToUpdate.length} mã hàng hóa.");
+
+    } catch (e) {
+      debugPrint("LỖI NGHIÊM TRỌNG KHI HOÀN KHO: $e");
+    }
+  }
+}
+
+class BillHistoryScreen extends StatefulWidget {
+  final UserModel currentUser;
+  const BillHistoryScreen({super.key, required this.currentUser});
+
+  @override
+  State<BillHistoryScreen> createState() => _BillHistoryScreenState();
+}
+
+class _BillHistoryScreenState extends State<BillHistoryScreen> {
+  late Future<Map<String, String>?> _storeInfoFuture;
+  final BillService _billService = BillService();
+
+  DateTime? _selectedStartDate;
+  DateTime? _selectedEndDate;
+  String? _selectedTable;
+  String? _selectedEmployee;
+  String? _selectedCustomer;
+  String? _selectedStatus;
+  String? _selectedDebtStatus;
+
+  bool _isLoadingFilters = true;
+  List<String> _tableOptions = [];
+  List<String> _userOptions = [];
+  List<String> _customerOptions = [];
+  final List<String> _statusOptions = ['Tất cả', 'Hoàn thành', 'Đã hủy'];
+  final List<String> _debtOptions = ['Tất cả', 'Có', 'Không'];
+
+
+  @override
+  void initState() {
+    super.initState();
+    _storeInfoFuture = FirestoreService().getStoreDetails(widget.currentUser.storeId);
+    _loadFilterData();
+  }
+
+  Future<void> _loadFilterData() async {
+    try {
+      final filterData = await _billService.getDistinctFilterValues(widget.currentUser.storeId);
+      if (mounted) {
+        setState(() {
+          _tableOptions = ['Tất cả', ...filterData['tables']!];
+          _userOptions = ['Tất cả', ...filterData['users']!];
+          _customerOptions = ['Tất cả', ...filterData['customers']!];
+          _isLoadingFilters = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Lỗi khi tải dữ liệu bộ lọc: $e");
+      if (mounted) {
+        setState(() => _isLoadingFilters = false);
+        ToastService().show(message: 'Không thể tải các tùy chọn bộ lọc.', type: ToastType.error);
+      }
+    }
+  }
+  
+  void _showFilterModal() {
+    // Lưu trạng thái tạm thời của bộ lọc
+    DateTime? tempStartDate = _selectedStartDate;
+    DateTime? tempEndDate = _selectedEndDate;
+    String? tempTable = _selectedTable;
+    String? tempEmployee = _selectedEmployee;
+    String? tempCustomer = _selectedCustomer;
+    String? tempStatus = _selectedStatus;
+    String? tempDebtStatus = _selectedDebtStatus;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            final dateFormat = DateFormat('HH:mm dd/MM/yyyy');
+
+            // Hàm gọi Omni Picker mới
+            Future<void> pickDateRange() async {
+              if (!mounted) return;
+              List<DateTime>? pickedRange = await showOmniDateTimeRangePicker(
+                context: context,
+                startInitialDate: tempStartDate ?? DateTime.now(),
+                endInitialDate: tempEndDate,
+                startFirstDate: DateTime(2020),
+                startLastDate: DateTime.now().add(const Duration(days: 365)),
+                endFirstDate: tempStartDate ?? DateTime(2020),
+                endLastDate: DateTime.now().add(const Duration(days: 365)),
+                is24HourMode: true,
+                isShowSeconds: false,
+                type: OmniDateTimePickerType.dateAndTime,
+              );
+
+              if (pickedRange != null && pickedRange.length == 2) {
+                setModalState(() {
+                  tempStartDate = pickedRange[0];
+                  tempEndDate = pickedRange[1];
+                });
+              }
+            }
+
+            // Tạo Subtitle cho ListTile
+            String subtitleText;
+            if (tempStartDate == null && tempEndDate == null) {
+              subtitleText = 'Chưa chọn';
+            } else {
+              final start = tempStartDate != null ? dateFormat.format(tempStartDate!) : '...';
+              final end = tempEndDate != null ? dateFormat.format(tempEndDate!) : '...';
+              subtitleText = '$start - $end';
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+              child: Wrap(
+                runSpacing: 16,
+                children: [
+                  Text('Lọc Hóa Đơn', style: Theme.of(context).textTheme.headlineMedium),
+                  const Divider(),
+
+                  // === GIAO DIỆN CHỌN NGÀY MỚI ===
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    leading: const Icon(Icons.calendar_month, color: AppTheme.primaryColor),
+                    title: Text('Khoảng thời gian', style: AppTheme.regularGreyTextStyle),
+                    subtitle: Text(
+                      subtitleText,
+                      style: AppTheme.boldTextStyle.copyWith(fontSize: 16),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: pickDateRange,
+                    trailing: (tempStartDate != null || tempEndDate != null)
+                        ? IconButton(
+                      icon: const Icon(Icons.clear, size: 20),
+                      onPressed: () => setModalState(() {
+                        tempStartDate = null;
+                        tempEndDate = null;
+                      }),
+                    )
+                        : null,
+                  ),
+
+                  // Các dropdown không thay đổi
+                  Row(children: [
+                    Expanded(child: AppDropdown<String>(
+                      labelText: 'Trạng thái', value: tempStatus,
+                      items: _statusOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+                      onChanged: (value) => setModalState(() => tempStatus = (value == 'Tất cả') ? null : value),
+                    )),
+                    const SizedBox(width: 16),
+                    Expanded(child: AppDropdown<String>(
+                      labelText: 'Dư nợ', value: tempDebtStatus,
+                      items: _debtOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+                      onChanged: (value) => setModalState(() => tempDebtStatus = (value == 'Tất cả') ? null : value),
+                    )),
+                  ]),
+                  AppDropdown<String>(
+                    labelText: 'Tên bàn', value: tempTable,
+                    items: _tableOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+                    onChanged: (value) => setModalState(() => tempTable = (value == 'Tất cả') ? null : value),
+                  ),
+                  AppDropdown<String>(
+                    labelText: 'Nhân viên', value: tempEmployee,
+                    items: _userOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+                    onChanged: (value) => setModalState(() => tempEmployee = (value == 'Tất cả') ? null : value),
+                  ),
+                  AppDropdown<String>(
+                    labelText: 'Khách hàng', value: tempCustomer,
+                    items: _customerOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+                    onChanged: (value) => setModalState(() => tempCustomer = (value == 'Tất cả') ? null : value),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _selectedStartDate = null; _selectedEndDate = null; _selectedTable = null;
+                            _selectedEmployee = null; _selectedCustomer = null; _selectedStatus = null;
+                            _selectedDebtStatus = null;
+                          });
+                          Navigator.of(ctx).pop();
+                        },
+                        child: const Text('Xóa bộ lọc'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _selectedStartDate = tempStartDate; _selectedEndDate = tempEndDate;
+                            _selectedTable = tempTable; _selectedEmployee = tempEmployee;
+                            _selectedCustomer = tempCustomer; _selectedStatus = tempStatus;
+                            _selectedDebtStatus = tempDebtStatus;
+                          });
+                          Navigator.of(ctx).pop();
+                        },
+                        child: const Text('Áp dụng'),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Danh sách đơn hàng"),
+        actions: [
+          IconButton(
+            icon: _isLoadingFilters
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.filter_list, color: AppTheme.primaryColor, size: 30),
+            tooltip: 'Lọc',
+            onPressed: _isLoadingFilters ? null : _showFilterModal,
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: FutureBuilder<Map<String, String>?>(
+        future: _storeInfoFuture,
+        builder: (context, storeSnapshot) {
+          if (storeSnapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (storeSnapshot.hasError || storeSnapshot.data == null) {
+            return const Center(child: Text("Lỗi: Không thể tải thông tin cửa hàng."));
+          }
+          final storeInfo = storeSnapshot.data!;
+
+          return StreamBuilder<List<BillModel>>(
+            stream: _billService.getBillsStream(
+              storeId: widget.currentUser.storeId,
+              startDate: _selectedStartDate,
+              endDate: _selectedEndDate,
+              tableName: _selectedTable,
+              employeeName: _selectedEmployee,
+              customerName: _selectedCustomer,
+              status: _selectedStatus,
+              debtStatus: _selectedDebtStatus,
+            ),
+            builder: (context, billSnapshot) {
+              if (billSnapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (billSnapshot.hasError) {
+                debugPrint("LỖI FIRESTORE CẦN TẠO INDEX: ${billSnapshot.error}");
+                return Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Lỗi truy vấn Firestore:",
+                          style: AppTheme.boldTextStyle.copyWith(fontSize: 18, color: Colors.red),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Lỗi này thường xảy ra khi thiếu chỉ mục (Index) cho bộ lọc bạn đang chọn. Hãy làm theo các bước sau:",
+                        ),
+                        const SizedBox(height: 12),
+                        const Text("1. Kiểm tra cửa sổ Debug Console trong VS Code / Android Studio, bạn sẽ thấy một đường link."),
+                        const Text("2. Click vào đường link đó để Firebase tự động tạo index."),
+                        const SizedBox(height: 12),
+                        const Text(
+                          "Nếu không thấy link, bạn có thể sao chép toàn bộ nội dung dưới đây và dán vào trình duyệt:",
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          color: Colors.grey.shade200,
+                          child: SelectableText(
+                            billSnapshot.error.toString(),
+                            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              if (!billSnapshot.hasData || billSnapshot.data!.isEmpty) {
+                return const Center(
+                  child: Text('Không tìm thấy hóa đơn nào khớp với bộ lọc.', textAlign: TextAlign.center),
+                );
+              }
+              final bills = billSnapshot.data!;
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                itemCount: bills.length,
+                itemBuilder: (context, index) {
+                  return _BillCard(
+                    bill: bills[index],
+                    currentUser: widget.currentUser,
+                    storeInfo: storeInfo,
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _BillCard extends StatelessWidget {
+  final BillModel bill;
+  final UserModel currentUser;
+  final Map<String, String> storeInfo;
+
+  const _BillCard({required this.bill, required this.currentUser, required this.storeInfo});
+
+  void _showDetail(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => BillReceiptDialog(bill: bill, currentUser: currentUser, storeInfo: storeInfo),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isCancelled = bill.status != 'completed';
+    final hasDebt = bill.debtAmount > 0;
+    final bool hasEInvoice = bill.hasEInvoice;
+    final Color statusColor = isCancelled ? Colors.red : (hasDebt ? Colors.orange : AppTheme.primaryColor);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 6, color: statusColor.withAlpha(180)),
+              Expanded(
+                child: InkWell(
+                  onTap: () => _showDetail(context),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${bill.tableName} - ${bill.billCode}',
+                                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${bill.customerName ?? 'Khách lẻ'} • ${DateFormat('HH:mm dd/MM/yyyy').format(bill.createdAt)}',
+                                    style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8.0),
+                              child: Text(
+                                '${formatNumber(bill.totalPayable)} đ',
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontSize: 17, color: statusColor, fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8.0,
+                          runSpacing: 4.0,
+                          children: [
+                            Chip(
+                              label: Text(
+                                isCancelled ? "ĐÃ HỦY" : "HOÀN THÀNH",
+                                style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                              ),
+                              backgroundColor: statusColor.withAlpha(30),
+                              padding: EdgeInsets.zero,
+                              visualDensity: VisualDensity.compact,
+                              side: BorderSide.none,
+                            ),
+                            if (hasDebt)
+                              Chip(
+                                label: Text(
+                                  "DƯ NỢ: ${formatNumber(bill.debtAmount)} đ",
+                                  style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                                ),
+                                backgroundColor: statusColor.withAlpha(30),
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                                side: BorderSide.none,
+                              ),
+                            if (hasEInvoice)
+                              Chip(
+                                label: Text(
+                                  "ĐÃ XUẤT HĐĐT",
+                                  style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                                ),
+                                backgroundColor: statusColor.withAlpha(30),
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                                side: BorderSide.none,
+                              ),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class BillReceiptDialog extends StatefulWidget {
+  final BillModel bill;
+  final UserModel currentUser;
+  final Map<String, String> storeInfo;
+
+  const BillReceiptDialog({
+    super.key,
+    required this.bill,
+    required this.currentUser,
+    required this.storeInfo,
+  });
+
+  @override
+  State<BillReceiptDialog> createState() => _BillReceiptDialogState();
+}
+
+class _BillReceiptDialogState extends State<BillReceiptDialog> {
+  ImageProvider? _imageProvider;
+  Uint8List? _pdfBytes;
+  bool _isLoading = true;
+
+  bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      final pdfBytes = await _generatePdfBytes();
+      final raster = await Printing.raster(pdfBytes, pages: [0], dpi: 203).first;
+      final image = await raster.toImage();
+      final pngBytes = await image.toByteData(format: ui.ImageByteFormat.png);
+
+      if (mounted) {
+        setState(() {
+          _pdfBytes = pdfBytes;
+          if (pngBytes != null) {
+            _imageProvider = MemoryImage(pngBytes.buffer.asUint8List());
+          }
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        debugPrint("Lỗi khi tạo ảnh bill: $e");
+      }
+    }
+  }
+
+  Map<String, dynamic> _buildSummaryMap() {
+    final eInvoiceInfo = widget.bill.eInvoiceInfo;
+
+    return {
+      'billCode': widget.bill.billCode,
+      'subtotal': widget.bill.subtotal,
+      'discount': widget.bill.discount,
+      'discountType': widget.bill.discountType,
+      'discountInput': widget.bill.discountInput,
+      'surcharges': widget.bill.surcharges,
+      'taxPercent': widget.bill.taxPercent,
+      'taxAmount': widget.bill.taxAmount,
+      'totalPayable': widget.bill.totalPayable,
+      'startTime': Timestamp.fromDate(widget.bill.startTime),
+      'createdAt': Timestamp.fromDate(widget.bill.createdAt),
+      'customer': {
+        'name': widget.bill.customerName,
+        'phone': widget.bill.customerPhone,
+        'guestAddress': widget.bill.guestAddress,
+      },
+      'customerPointsUsed': widget.bill.customerPointsUsed,
+      'voucherCode': widget.bill.voucherCode,
+      'voucherDiscount': widget.bill.voucherDiscount,
+      'payments': widget.bill.payments,
+      'changeAmount': widget.bill.changeAmount,
+      'bankDetails': widget.bill.bankDetails,
+      'eInvoiceCode': eInvoiceInfo?['reservationCode'],
+      'eInvoiceUrl': (eInvoiceInfo != null) ? 'vinvoice.viettel.vn' : null,
+      'eInvoiceFullUrl': eInvoiceInfo?['lookupUrl'],
+      'eInvoiceMst': eInvoiceInfo?['mst'],
+    };
+  }
+
+  Future<Uint8List> _generatePdfBytes() async {
+    final printingService = PrintingService(
+        tableName: widget.bill.tableName, userName: widget.bill.createdByName ?? 'N/A');
+    return printingService.generateReceiptPdf(
+      title: 'HÓA ĐƠN', storeInfo: widget.storeInfo,
+      items: widget.bill.items.whereType<Map<String, dynamic>>()
+          .map((itemData) => OrderItem.fromMap(itemData)).toList(),
+      summary: _buildSummaryMap(),
+    );
+  }
+
+  Future<void> _handleCancel(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Xác nhận Hủy'),
+          content: const Text('Bạn có chắc chắn muốn hủy hóa đơn này? Hành động này sẽ hoàn tác lại toàn bộ giao dịch và không thể khôi phục.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Không'),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+            ),
+            TextButton(
+              child: const Text('HỦY HÓA ĐƠN', style: TextStyle(color: Colors.red)),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await BillService().cancelBillAndReverseTransactions(widget.bill, widget.currentUser.storeId);
+
+      ToastService().show(message: "Hóa đơn đã được hủy và hoàn tác", type: ToastType.success);
+      if (context.mounted) Navigator.of(context).pop();
+    } catch (e) {
+      debugPrint("LỖI KHI HỦY BILL: $e");
+      ToastService().show(message: "Lỗi khi hủy hóa đơn: $e", type: ToastType.error);
+    }
+  }
+
+  Future<void> _confirmAndDeleteBill(BuildContext context) async {
+    // Chỉ thực hiện nếu hóa đơn đã bị hủy
+    if (widget.bill.status != 'cancelled') return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Xóa Hóa đơn vĩnh viễn'),
+          content: const Text(
+              'Bạn có chắc chắn muốn XÓA VĨNH VIỄN hóa đơn này? Hành động này không thể khôi phục.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Không'),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+            ),
+            TextButton(
+              child: const Text('XÓA VĨNH VIỄN', style: TextStyle(color: Colors.red)),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed == true) {
+      if (context.mounted) {
+        await _performDeleteBill(context);
+      }
+    }
+  }
+
+  Future<void> _performDeleteBill(BuildContext context) async {
+    if (widget.bill.status != 'cancelled') return;
+    setState(() => _isLoading = true); // Dùng biến _isLoading để hiển thị loading
+
+    try {
+      await BillService().deleteBillPermanently(widget.bill.id);
+
+      if (context.mounted) {
+        ToastService().show(message: 'Đã xóa vĩnh viễn hóa đơn!', type: ToastType.success);
+        Navigator.of(context).pop(); // Thoát khỏi dialog sau khi xóa
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ToastService().show(message: 'Lỗi khi xóa hóa đơn: $e', type: ToastType.error);
+      }
+    } finally {
+      // Đảm bảo tắt loading kể cả khi có lỗi
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _reprintReceipt() async {
+    final jobData = {
+      'storeId': widget.currentUser.storeId, 'tableName': widget.bill.tableName,
+      'userName': widget.bill.createdByName ?? 'N/A', 'storeInfo': widget.storeInfo,
+      'items': widget.bill.items, 'summary': _buildSummaryMap(),
+    };
+    await PrintQueueService().addJob(PrintJobType.receipt, jobData);
+    ToastService().show(message: "Đã gửi lại lệnh in hóa đơn", type: ToastType.success);
+  }
+
+  Future<void> _shareReceipt() async {
+    if (_pdfBytes == null) return;
+    await Printing.sharePdf(bytes: _pdfBytes!, filename: 'HoaDon_${widget.bill.billCode}.pdf');
+  }
+
+  Future<void> _savePdf() async {
+    if (_pdfBytes == null) return;
+    try {
+      final String? filePath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Lưu hóa đơn PDF', fileName: 'HoaDon_${widget.bill.billCode}.pdf',
+        type: FileType.custom, allowedExtensions: ['pdf'],
+      );
+      if (filePath != null) {
+        final file = File(filePath);
+        await file.writeAsBytes(_pdfBytes!);
+        ToastService().show(message: "Đã lưu hóa đơn thành công!", type: ToastType.success);
+      }
+    } catch (e) {
+      ToastService().show(message: "Lỗi khi lưu file: $e", type: ToastType.error);
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final bool isCancelled = widget.bill.status == 'cancelled';
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 380,
+          maxHeight: screenHeight * 0.9,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // === PHẦN NỘI DUNG CÓ THỂ CUỘN ===
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12.0)),
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _imageProvider == null
+                    ? const Center(child: Text("Lỗi tạo ảnh hóa đơn."))
+                // SingleChildScrollView chỉ bao bọc hình ảnh
+                    : SingleChildScrollView(
+                  child: Padding(
+                    padding:
+                    const EdgeInsets.symmetric(vertical: 20),
+                    child: Image(image: _imageProvider!),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // === PHẦN NÚT BẤM CỐ ĐỊNH ===
+            Container(
+              width: 380,
+              decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12.0)),
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  if (isCancelled)
+                    TextButton(
+                      onPressed: () => _confirmAndDeleteBill(context),
+                      child: const Text("Xóa bill", style: TextStyle(color: Colors.red)),
+                    )
+                  else
+                    TextButton(
+                      onPressed: () => _handleCancel(context),
+                      child: const Text("Hủy bill", style: TextStyle(color: Colors.red)),
+                    ),
+                  TextButton(
+                    onPressed: _reprintReceipt,
+                    child: const Text("In lại"),
+                  ),
+                  TextButton(
+                    onPressed: _pdfBytes == null ? null : (_isDesktop ? _savePdf : _shareReceipt),
+                    child: Text(_isDesktop ? "Lưu PDF" : "Chia sẻ"),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text("Đóng"),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

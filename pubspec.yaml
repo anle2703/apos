@@ -1,0 +1,84 @@
+name: app_4cash
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  firebase_core: ^4.2.0
+  firebase_auth: ^6.0.2
+  cloud_firestore: ^6.0.3
+  firebase_storage: ^13.0.1
+  google_sign_in: ^5.4.4
+  image_picker: ^1.1.2
+  mobile_scanner: ^7.0.1
+  intl: ^0.20.2
+  cupertino_icons: ^1.0.8
+  font_awesome_flutter: ^10.7.0
+  flutter_screenutil: ^5.9.0
+  audioplayers: ^6.0.0
+  dropdown_button2: ^2.3.9
+  collection: ^1.18.0
+  uuid: ^4.5.2
+  rxdart: ^0.27.7
+  image: ^4.3.0
+  shared_preferences: ^2.2.3
+  flutter_pos_printer_platform_image_3_sdt: ^1.2.15
+  esc_pos_utils_plus: ^2.0.4
+  charset_converter: ^2.3.0
+  http: ^1.5.0
+  screenshot: ^3.0.0
+  network_info_plus: ^6.1.4
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+  equatable: ^2.0.7
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  platform: ^3.1.6
+  permission_handler: ^12.0.1
+  cached_network_image: ^3.4.1
+  sunmi_printer_plus: ^4.1.1
+  device_info_plus: ^11.5.0
+  file_picker: ^10.3.3
+  crypto: ^3.0.6
+  fl_chart: ^1.1.1
+  firebase_app_check: ^0.4.1
+  omni_datetime_picker: ^2.0.4
+  excel: ^4.0.6
+  path_provider: ^2.1.5
+  dio: ^5.9.0
+  qr_flutter: ^4.1.0
+  convert: ^3.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/beep.mp3
+    - assets/tiengchuong.wav
+    - assets/fonts/
+  fonts:
+    - family: Quicksand
+      fonts:
+        - asset: assets/fonts/Quicksand-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Quicksand-Bold.ttf
+          weight: 700
+    - family: RobotoMono
+      fonts:
+        - asset: assets/fonts/RobotoMono-Regular.ttf
+        - asset: assets/fonts/RobotoMono-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/RobotoMono-Italic.ttf
+          style: italic
