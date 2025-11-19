@@ -286,14 +286,24 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   Future<void> _loadInitialData() async {
     _taxThresholds = await _firestoreService.getTaxThresholds();
+
+    // 1. Tải cài đặt điểm và thuế TRƯỚC
     await Future.wait([
       _loadPointsSettings(),
-      _loadPaymentMethods(),
       _loadStoreTaxSettings(),
     ]);
 
+    // 2. Tính toán tổng tiền (để có _totalPayable bao gồm thuế/phụ phí)
+    // Truyền true để chỉ tính tổng, chưa tính tiền thừa/nợ
+    _calculateTotal(initialLoad: true);
+
+    // 3. Sau đó mới tải PTTT và gán tiền
+    await _loadPaymentMethods();
+
     if (mounted) {
+      // 4. Tính toán lại lần cuối để cập nhật UI đầy đủ
       _calculateTotal();
+
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
       final configStatus = await _eInvoiceService.getConfigStatus(ownerUid);
       if (configStatus.isConfigured) {
@@ -495,8 +505,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     return (totalTax.roundToDouble(), 0.0);
   }
 
-  void _calculateTotal() {
-    if (!_settingsLoaded || !_methodsLoaded || _storeTaxSettings == null) return;
+  void _calculateTotal({bool initialLoad = false}) {
+    // Nếu chưa load xong settings mà không phải initialLoad thì return
+    if (!initialLoad && (!_settingsLoaded || !_methodsLoaded || _storeTaxSettings == null)) return;
 
     final (newVatAmount, newTncnAmount) = _getCalculatedTaxes();
 
@@ -505,46 +516,54 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
     int pointsUsed = parseVN(_pointsController.text).toInt();
     final int maxPoints = widget.customer?.points ?? 0;
+
+    // Logic kiểm tra điểm
     if (pointsUsed > maxPoints) {
       pointsUsed = maxPoints;
-      _pointsController.text = formatNumber(pointsUsed.toDouble());
+      if (!initialLoad) {
+        _pointsController.text = formatNumber(pointsUsed.toDouble());
+      }
     }
 
     final double pointsValue = pointsUsed * _redeemRate;
     final totalSurcharge = _calculateTotalSurcharge();
 
-    final double finalTotal;
-
-    // Thuế luôn được cộng vào, vì không còn tùy chọn "đã bao gồm"
-    double taxToAdd = newVatAmount + newTncnAmount; // newTncnAmount sẽ luôn là 0
-
-    finalTotal = (subtotal - discountAmount - pointsValue - _voucherDiscountValue + totalSurcharge + taxToAdd);
+    // --- TÍNH TỔNG PHẢI TRẢ (Đã bao gồm thuế) ---
+    // Thuế luôn được cộng vào
+    double taxToAdd = newVatAmount + newTncnAmount;
+    final double finalTotal = (subtotal - discountAmount - pointsValue - _voucherDiscountValue + totalSurcharge + taxToAdd);
 
     final newTotalPayable = finalTotal > 0 ? finalTotal.roundToDouble() : 0.0;
 
-    final double totalPaid = _paymentAmounts.values.fold(0.0, (a, b) => a + b);
-    final double cashPaid = _paymentAmounts[_cashMethod!.id] ?? 0.0;
-    final double otherPayments = totalPaid - cashPaid;
+    // --- TÍNH TIỀN THỪA/NỢ ---
     double newChange = 0;
-    double newDebt = 0;
+    double newDebt = newTotalPayable; // Mặc định nợ bằng tổng tiền
 
-    if (totalPaid >= newTotalPayable) {
-      final cashOverpayment = cashPaid - (newTotalPayable - otherPayments);
-      newChange = cashOverpayment > 0 ? cashOverpayment.roundToDouble() : 0.0;
-      newDebt = 0;
-    } else {
-      newChange = 0;
-      newDebt = (newTotalPayable - totalPaid).roundToDouble();
+    if (!initialLoad) {
+      final double totalPaid = _paymentAmounts.values.fold(0.0, (a, b) => a + b);
+      final double cashPaid = _paymentAmounts[_cashMethod!.id] ?? 0.0;
+      final double otherPayments = totalPaid - cashPaid;
+
+      if (totalPaid >= newTotalPayable) {
+        final cashOverpayment = cashPaid - (newTotalPayable - otherPayments);
+        newChange = cashOverpayment > 0 ? cashOverpayment.roundToDouble() : 0.0;
+        newDebt = 0;
+      } else {
+        newChange = 0;
+        newDebt = (newTotalPayable - totalPaid).roundToDouble();
+      }
     }
 
     if (mounted) {
       setState(() {
         _calculatedVatAmount = newVatAmount;
-        _calculatedTncnAmount = newTncnAmount; // Sẽ là 0
+        _calculatedTncnAmount = newTncnAmount;
         _pointsMonetaryValue = pointsValue;
-        _totalPayable = newTotalPayable;
-        _changeAmount = newChange;
-        _debtAmount = newDebt;
+        _totalPayable = newTotalPayable; // Cập nhật biến tổng tiền
+        if (!initialLoad) {
+          _changeAmount = newChange;
+          _debtAmount = newDebt;
+        }
       });
     }
   }
@@ -1127,6 +1146,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'eInvoiceCode': eInvoiceResult?.reservationCode,
         'eInvoiceFullUrl': eInvoiceResult?.lookupUrl,
         'eInvoiceMst': eInvoiceResult?.mst,
+        'billCode': newBillId.split('_').last,
       },
       'billCode': newBillId.split('_').last,
     };
@@ -1945,46 +1965,41 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _cashMethod = cashMethod;
           _availableMethods = [cashMethod, ...firestoreMethods];
 
-          // 1. Xác định ID PTTT mặc định
+          // 1. Xác định ID PTTT mặc định chính xác
           String idToSelect = _defaultPaymentMethodId ?? cashMethod.id;
-          final defaultMethodExists =
-          _availableMethods.any((m) => m.id == idToSelect);
+
+          // Kiểm tra xem ID mặc định có tồn tại trong danh sách không
+          final defaultMethodExists = _availableMethods.any((m) => m.id == idToSelect);
           if (!defaultMethodExists) {
             idToSelect = cashMethod.id;
           }
 
-          // 2. Thêm PTTT vào danh sách
+          // 2. Thêm vào danh sách đã chọn
           _selectedMethodIds.add(idToSelect);
           _methodsLoaded = true;
 
-          // 3. LOGIC GÁN TIỀN BAN ĐẦU (ĐÃ SỬA LỖI)
-          // Lỗi cũ: _calculateTotal() chưa kịp cập nhật _totalPayable thì dòng dưới đã đọc giá trị 0.
-          // Sửa: Dùng widget.subtotal - discount để tính số tiền tạm tính ban đầu.
-          double estimatedTotal = widget.subtotal - _calculateDiscount();
-          // Nếu số âm thì gán bằng 0
-          if (estimatedTotal < 0) estimatedTotal = 0;
-
+          // 3. LOGIC GÁN TIỀN BAN ĐẦU (SỬ DỤNG _totalPayable ĐÃ TÍNH Ở BƯỚC TRƯỚC)
           double amountToSet = 0;
           final bool isDefaultCash = (idToSelect == cashMethod.id);
 
           if (isDefaultCash) {
-            // PTTT mặc định là Tiền Mặt -> Áp dụng logic promptForCash
+            // Nếu là Tiền mặt: kiểm tra promptForCash
             if (!widget.promptForCash) {
-              // promptForCash = false -> Tự động điền tiền
-              amountToSet = estimatedTotal;
+              // Nếu KHÔNG hỏi tiền mặt -> Tự động điền full tổng tiền
+              amountToSet = _totalPayable;
             } else {
-              // promptForCash = true -> Gán 0 (để hỏi)
+              // Nếu CÓ hỏi -> Để 0
               amountToSet = 0.0;
             }
           } else {
-            // PTTT mặc định là Bank/Card/Khác -> LUÔN tự động điền tiền
-            amountToSet = estimatedTotal;
+            // Nếu là Bank/Thẻ/Khác -> Luôn tự động điền full tổng tiền
+            amountToSet = _totalPayable;
           }
 
-          // 4. Gán số tiền vào Map
+          // 4. Gán vào map
           _paymentAmounts[idToSelect] = amountToSet;
 
-          // 5. Cập nhật controller nếu là tiền mặt
+          // 5. Cập nhật controller hiển thị nếu là tiền mặt
           if (isDefaultCash) {
             _cashInputController.text = formatNumber(amountToSet);
           }

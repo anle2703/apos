@@ -10,8 +10,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/configured_printer_model.dart';
 import '../models/order_item_model.dart';
-import '../services/permission_service.dart';
-import 'dart:io';
 import 'package:image/image.dart' as img;
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -34,26 +32,23 @@ class PrintingService {
 
   static Future<pw.Font> loadFont({
     bool isBold = false,
-    bool isItalic = false, // Thêm tham số isItalic
+    bool isItalic = false,
   }) async {
-
-    // 1. Kiểm tra cache
     if (isItalic) {
       if (_italicFont != null) return _italicFont!;
-      final fontData = await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf'); //
+      final fontData = await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
       _italicFont = pw.Font.ttf(fontData);
       return _italicFont!;
     }
     if (isBold) {
       if (_boldFont != null) return _boldFont!;
-      final fontData = await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf'); //
+      final fontData = await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
       _boldFont = pw.Font.ttf(fontData);
       return _boldFont!;
     }
 
-    // Mặc định là font thường
     if (_font != null) return _font!;
-    final fontData = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf'); //
+    final fontData = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
     _font = pw.Font.ttf(fontData);
     return _font!;
   }
@@ -69,12 +64,9 @@ class PrintingService {
 
   Future<void> _ensureFontsLoaded() async {
     if (_font != null && _boldFont != null && _italicFont != null) return;
-    final fontData =
-    await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
-    final boldFontData =
-    await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
-    final italicFontData =
-    await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
+    final fontData = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
+    final boldFontData = await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
+    final italicFontData = await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
     _font = pw.Font.ttf(fontData);
     _boldFont = pw.Font.ttf(boldFontData);
     _italicFont = pw.Font.ttf(italicFontData);
@@ -88,9 +80,6 @@ class PrintingService {
     required DateTime timestamp,
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
     try {
       final cashierPrinter = configuredPrinters.firstWhere(
             (p) => p.logicalName == 'cashier_printer',
@@ -143,7 +132,7 @@ class PrintingService {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Center(
-                  child: pw.Text(actionTitle, // "CHUYỂN BÀN", "GỘP BÀN", ...
+                  child: pw.Text(actionTitle,
                       style: pw.TextStyle(font: boldFont, fontSize: 16))),
               pw.SizedBox(height: 15),
               pw.Text(
@@ -157,7 +146,7 @@ class PrintingService {
               ),
               pw.Divider(height: 20, thickness: 1.5),
               pw.Text(
-                message, // Nội dung chính: "Từ: Bàn 1 -> Đến: Bàn 2"
+                message,
                 style: pw.TextStyle(font: boldFont, fontSize: 12),
               ),
               pw.Divider(height: 20, thickness: 1.5),
@@ -176,9 +165,7 @@ class PrintingService {
     String? customerName,
   }) async {
     if (itemsToPrint.isEmpty) return true;
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
+    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
 
     try {
       final targetPrinter = configuredPrinters.firstWhere(
@@ -211,9 +198,7 @@ class PrintingService {
     required List<ConfiguredPrinter> configuredPrinters,
     bool useDetailedLayout = false,
   }) async {
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
+    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
     try {
       final cashierPrinter = configuredPrinters.firstWhere(
             (p) => p.logicalName == 'cashier_printer',
@@ -255,9 +240,7 @@ class PrintingService {
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
     if (itemsToCancel.isEmpty) return true;
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
+    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
 
     try {
       final targetPrinter = configuredPrinters.firstWhere(
@@ -280,6 +263,7 @@ class PrintingService {
     }
   }
 
+  // ... (Giữ nguyên hàm _generateKitchenPdf)
   Future<Uint8List> _generateKitchenPdf({
     required String title,
     required List<OrderItem> items,
@@ -434,15 +418,14 @@ class PrintingService {
     return pdf.save();
   }
 
+
   Future<bool> printReceiptBill({
     required Map<String, String> storeInfo,
     required List<OrderItem> items,
     required Map<String, dynamic> summary,
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
+    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
     try {
       final cashierPrinter = configuredPrinters.firstWhere(
             (p) => p.logicalName == 'cashier_printer',
@@ -467,6 +450,7 @@ class PrintingService {
     }
   }
 
+  // ... (Giữ nguyên hàm _generateBillPdf và generateReceiptPdf)
   Future<Uint8List> _generateBillPdf({
     required String title,
     required List<OrderItem> items,
@@ -576,7 +560,7 @@ class PrintingService {
                 final bool isLastItem = i == items.length - 1;
                 final bool isTimeBased = item.product.serviceSetup?['isTimeBased'] == true && item.priceBreakdown.isNotEmpty;
 
-                final bool priceHasChanged = item.price != item.product.sellPrice;
+                final bool priceHasChanged = (item.price != item.product.sellPrice) && !isTimeBased;
                 String discountText = '';
                 if (item.discountValue != null && item.discountValue! > 0) {
                   if (item.discountUnit == '%') {
@@ -885,7 +869,7 @@ class PrintingService {
               if (!isShipOrder) ...[
                 if (startTime != null)
                   pw.Text('Giờ vào: ${DateFormat('HH:mm dd/MM/yyyy').format(startTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
-                  pw.Text('Giờ ra: ${DateFormat('HH:mm dd/MM/yyyy').format(checkoutTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
+                pw.Text('Giờ ra: ${DateFormat('HH:mm dd/MM/yyyy').format(checkoutTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
               ] else ...[
                 pw.Text('Giờ in: ${DateFormat('HH:mm dd/MM/yyyy').format(checkoutTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
               ],
@@ -906,7 +890,7 @@ class PrintingService {
                 final bool isLastItem = i == items.length - 1;
                 final bool isTimeBased = it.product.serviceSetup?['isTimeBased'] == true && it.priceBreakdown.isNotEmpty;
 
-                final bool priceHasChanged = it.price != it.product.sellPrice;
+                final bool priceHasChanged = (it.price != it.product.sellPrice) && !isTimeBased;
                 String discountText = '';
                 if (it.discountValue != null && it.discountValue! > 0) {
                   if (it.discountUnit == '%') {
@@ -1161,9 +1145,7 @@ class PrintingService {
     required double? closingDebt,
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
+    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
     try {
       final cashierPrinter = configuredPrinters.firstWhere(
             (p) => p.logicalName == 'cashier_printer',
@@ -1195,9 +1177,7 @@ class PrintingService {
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
     await _ensureFontsLoaded();
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      await PermissionService.ensurePermissions();
-    }
+    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
     try {
       final cashierPrinter = configuredPrinters.firstWhere(
             (p) => p.logicalName == 'cashier_printer',

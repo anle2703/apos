@@ -103,6 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _serverIpController.text = '192.168.1.';
     _settingsService = SettingsService();
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     _settingsSub = _settingsService.watchStoreSettings(settingsId).listen((s) {
@@ -180,8 +181,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     _clientPrintMode = prefs.getString('client_print_mode') ?? 'direct';
     _isThisDeviceTheServer = prefs.getBool('is_print_server') ?? false;
-    _serverIpController.text = prefs.getString('print_server_ip') ?? '';
-
+    String? savedIp = prefs.getString('print_server_ip');
+    if (savedIp != null && savedIp.isNotEmpty) {
+      _serverIpController.text = savedIp;
+    } else {
+      _serverIpController.text = '192.168.1.';
+    }
     final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     final userDoc = await _firestoreService.getUserProfile(ownerUid);
 
@@ -336,7 +341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _addManualPrinter() async {
-    final ipController = TextEditingController();
+    final ipController = TextEditingController(text: '192.168.1.');
     final ip = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -347,7 +352,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           decoration: const InputDecoration(
               labelText: 'Địa chỉ IP của máy in',
               hintText: 'Ví dụ: 192.168.1.101'),
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
         ),
         actions: [
           TextButton(
@@ -390,7 +395,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cài đặt'), actions: [
-        IconButton(icon: const Icon(Icons.save), onPressed: _saveSettings)
+        IconButton(icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 30), onPressed: _saveSettings)
       ]),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
@@ -540,6 +545,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     CustomTextFormField(
                       controller: _serverIpController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
                         labelText: 'Địa chỉ IP của Máy chủ Nội bộ',
                       ),
