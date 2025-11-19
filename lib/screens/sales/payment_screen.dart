@@ -1945,20 +1945,25 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _cashMethod = cashMethod;
           _availableMethods = [cashMethod, ...firestoreMethods];
 
-          // 1. Xác định ID PTTT mặc định (giữ nguyên)
+          // 1. Xác định ID PTTT mặc định
           String idToSelect = _defaultPaymentMethodId ?? cashMethod.id;
           final defaultMethodExists =
-              _availableMethods.any((m) => m.id == idToSelect);
+          _availableMethods.any((m) => m.id == idToSelect);
           if (!defaultMethodExists) {
             idToSelect = cashMethod.id;
           }
 
-          // 2. Thêm PTTT vào danh sách (giữ nguyên)
+          // 2. Thêm PTTT vào danh sách
           _selectedMethodIds.add(idToSelect);
           _methodsLoaded = true;
-          _calculateTotal(); // Tính toán trước để có _totalPayable
 
-          // 3. LOGIC GÁN TIỀN BAN ĐẦU (ĐÃ SỬA)
+          // 3. LOGIC GÁN TIỀN BAN ĐẦU (ĐÃ SỬA LỖI)
+          // Lỗi cũ: _calculateTotal() chưa kịp cập nhật _totalPayable thì dòng dưới đã đọc giá trị 0.
+          // Sửa: Dùng widget.subtotal - discount để tính số tiền tạm tính ban đầu.
+          double estimatedTotal = widget.subtotal - _calculateDiscount();
+          // Nếu số âm thì gán bằng 0
+          if (estimatedTotal < 0) estimatedTotal = 0;
+
           double amountToSet = 0;
           final bool isDefaultCash = (idToSelect == cashMethod.id);
 
@@ -1966,23 +1971,26 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             // PTTT mặc định là Tiền Mặt -> Áp dụng logic promptForCash
             if (!widget.promptForCash) {
               // promptForCash = false -> Tự động điền tiền
-              amountToSet = _totalPayable > 0 ? _totalPayable : 0.0;
+              amountToSet = estimatedTotal;
             } else {
               // promptForCash = true -> Gán 0 (để hỏi)
               amountToSet = 0.0;
             }
           } else {
             // PTTT mặc định là Bank/Card/Khác -> LUÔN tự động điền tiền
-            amountToSet = _totalPayable > 0 ? _totalPayable : 0.0;
+            amountToSet = estimatedTotal;
           }
 
-          // 4. Gán số tiền
+          // 4. Gán số tiền vào Map
           _paymentAmounts[idToSelect] = amountToSet;
 
-          // 5. Cập nhật controller nếu là tiền mặt (giữ nguyên)
+          // 5. Cập nhật controller nếu là tiền mặt
           if (isDefaultCash) {
             _cashInputController.text = formatNumber(amountToSet);
           }
+
+          // 6. Gọi tính toán lại để cập nhật thuế và các thông số khác
+          _calculateTotal();
         });
       }
     } catch (e) {
@@ -1990,7 +1998,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         setState(() {
           _cashMethod = cashMethod;
           _availableMethods = [cashMethod];
-          _selectedMethodIds.add(cashMethod.id); // Lỗi: quay về tiền mặt
+          _selectedMethodIds.add(cashMethod.id);
           _paymentAmounts[cashMethod.id] = 0;
           _methodsLoaded = true;
         });

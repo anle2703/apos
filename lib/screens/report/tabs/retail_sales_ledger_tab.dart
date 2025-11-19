@@ -8,7 +8,6 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
-
 import '../../../models/user_model.dart';
 import '../../../models/bill_model.dart';
 import '../../../theme/number_utils.dart';
@@ -18,23 +17,23 @@ import '../../../services/toast_service.dart';
 import '../../../services/settings_service.dart';
 import '../../../models/store_settings_model.dart';
 import '../../../services/firestore_service.dart';
-
-// Import hằng số thuế từ màn hình cài đặt
+import '../../../bills/bill_history_screen.dart';
 import '../../tax_management_screen.dart' show kHkdGopRates, kVatRates;
 
-/// Model dữ liệu cho một dòng trong bảng kê
 class LedgerItemRow {
+  final String billId;
   final DateTime date;
   final String billCode;
   final String productName;
   final String unit;
   final double quantity;
   final double price;
-  final double subtotal; // Thành tiền (Doanh thu)
-  final String taxGroupName; // Nhóm thuế suất
+  final double subtotal;
+  final String taxGroupName;
   final String? note;
 
   LedgerItemRow({
+    required this.billId,
     required this.date,
     required this.billCode,
     required this.productName,
@@ -47,7 +46,6 @@ class LedgerItemRow {
   });
 }
 
-// Enum TimeRange (sao chép từ các file báo cáo khác)
 enum TimeRange {
   today,
   yesterday,
@@ -72,8 +70,8 @@ class RetailSalesLedgerTab extends StatefulWidget {
   State<RetailSalesLedgerTab> createState() => RetailSalesLedgerTabState();
 }
 
-class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with AutomaticKeepAliveClientMixin {
-
+class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
+    with AutomaticKeepAliveClientMixin {
   TimeRange _selectedRange = TimeRange.today;
   DateTime? _startDate;
   DateTime? _endDate;
@@ -85,6 +83,8 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
   // Dữ liệu báo cáo
   final List<LedgerItemRow> _allLedgerItems = [];
   List<LedgerItemRow> _filteredLedgerItems = [];
+  List<String> _taxGroupOptions = ['Tất cả'];
+  String? _filterTaxGroup;
 
   // Dữ liệu cài đặt thuế
   final Map<String, String> _productTaxRateMap = {};
@@ -109,36 +109,58 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
     super.dispose();
   }
 
-  /// Public method cho nút Export của parent widget
   void exportReport() {
     if (_filteredLedgerItems.isEmpty) {
-      ToastService().show(message: "Không có dữ liệu để xuất.", type: ToastType.warning);
+      ToastService()
+          .show(message: "Không có dữ liệu để xuất.", type: ToastType.warning);
       return;
     }
     _exportToExcel();
   }
 
-  /// Public method cho nút Filter của parent widget
   void showFilterModal() {
     TimeRange tempSelectedRange = _selectedRange;
     DateTime? tempStartDate = _startDate;
     DateTime? tempEndDate = _endDate;
+    String? tempFilterTaxGroup = _filterTaxGroup;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
             return Padding(
-              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+              padding: EdgeInsets.fromLTRB(
+                  20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
               child: Wrap(
                 runSpacing: 16,
                 children: [
-                  Text('Lọc Bảng Kê Bán Lẻ', style: Theme.of(context).textTheme.headlineMedium),
-
+                  Text('Lọc Bảng Kê Bán Lẻ',
+                      style: Theme.of(context).textTheme.headlineMedium),
+                  TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      labelText: 'Tìm theo tên hàng hóa, mã HĐ',
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                setModalState(() {});
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (value) => setModalState(() {}),
+                  ),
                   // Lọc thời gian
                   AppDropdown<TimeRange>(
                     labelText: 'Khoảng thời gian',
@@ -169,38 +191,37 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
                     },
                     selectedItemBuilder: (context) {
                       return TimeRange.values.map((range) {
-                        if (range == TimeRange.custom && tempSelectedRange == TimeRange.custom && tempStartDate != null && tempEndDate != null) {
-                          final start = DateFormat('dd/MM/yy').format(tempStartDate!);
-                          final end = DateFormat('dd/MM/yy').format(tempEndDate!);
-                          return Text('$start - $end', overflow: TextOverflow.ellipsis);
+                        if (range == TimeRange.custom &&
+                            tempSelectedRange == TimeRange.custom &&
+                            tempStartDate != null &&
+                            tempEndDate != null) {
+                          final start =
+                              DateFormat('dd/MM/yy').format(tempStartDate!);
+                          final end =
+                              DateFormat('dd/MM/yy').format(tempEndDate!);
+                          return Text('$start - $end',
+                              overflow: TextOverflow.ellipsis);
                         }
                         return Text(_getTimeRangeText(range));
                       }).toList();
                     },
                   ),
-
-                  // Lọc tìm kiếm
-                  TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      labelText: 'Tìm theo tên hàng hóa, mã HĐ',
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          setModalState(() {});
-                        },
-                      )
-                          : null,
-                    ),
-                    onChanged: (value) => setModalState(() {}),
+                  AppDropdown<String>(
+                    labelText: 'Nhóm Thuế',
+                    prefixIcon: Icons.percent,
+                    value: tempFilterTaxGroup ?? 'Tất cả',
+                    items: _taxGroupOptions.map((group) {
+                      return DropdownMenuItem<String>(
+                        value: group,
+                        child: Text(group),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      setModalState(() {
+                        tempFilterTaxGroup = val;
+                      });
+                    },
                   ),
-
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -209,6 +230,8 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
                           setState(() {
                             _selectedRange = TimeRange.today;
                             _searchController.clear();
+                            // Reset thuế
+                            _filterTaxGroup = null;
                             _updateDateRangeAndFetch();
                           });
                           Navigator.of(ctx).pop();
@@ -218,19 +241,24 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: () {
-                          bool dateChanged = (_selectedRange != tempSelectedRange) ||
-                              (_selectedRange == TimeRange.custom && (_startDate != tempStartDate || _endDate != tempEndDate));
+                          bool dateChanged =
+                              (_selectedRange != tempSelectedRange) ||
+                                  (_selectedRange == TimeRange.custom &&
+                                      (_startDate != tempStartDate ||
+                                          _endDate != tempEndDate));
 
                           setState(() {
                             _selectedRange = tempSelectedRange;
                             _startDate = tempStartDate;
                             _endDate = tempEndDate;
+                            // Cập nhật biến lọc thuế
+                            _filterTaxGroup = tempFilterTaxGroup;
                           });
 
                           if (dateChanged) {
                             _updateDateRangeAndFetch();
                           } else {
-                            _applyFilters(); // Chỉ lọc tìm kiếm
+                            _applyFilters();
                           }
                           Navigator.of(ctx).pop();
                         },
@@ -256,7 +284,6 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
   }
 
   Future<void> _loadSettingsAndFetchData() async {
-
     final settingsService = SettingsService();
     final firestoreService = FirestoreService();
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -264,9 +291,11 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
 
     try {
       // Tải cài đặt thuế (chỉ 1 lần)
-      final settings = await firestoreService.getStoreTaxSettings(widget.currentUser.storeId);
+      final settings = await firestoreService
+          .getStoreTaxSettings(widget.currentUser.storeId);
       if (settings != null) {
-        final rawMap = settings['taxRateProductMap'] as Map<String, dynamic>? ?? {};
+        final rawMap =
+            settings['taxRateProductMap'] as Map<String, dynamic>? ?? {};
         _productTaxRateMap.clear();
         rawMap.forEach((taxKey, productIds) {
           if (productIds is List) {
@@ -286,7 +315,8 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
       }
 
       // Theo dõi giờ chốt sổ
-      _settingsSub = settingsService.watchStoreSettings(settingsId).listen((settings) {
+      _settingsSub =
+          settingsService.watchStoreSettings(settingsId).listen((settings) {
         if (!mounted) return;
 
         final newCutoff = TimeOfDay(
@@ -309,14 +339,16 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
         debugPrint("Lỗi watchStoreSettings: $e");
         if (mounted) {
           _setLoading(false);
-          ToastService().show(message: "Lỗi tải cài đặt: $e", type: ToastType.error);
+          ToastService()
+              .show(message: "Lỗi tải cài đặt: $e", type: ToastType.error);
         }
       });
     } catch (e) {
       debugPrint("Lỗi tải cài đặt thuế: $e");
       if (mounted) {
         _setLoading(false);
-        ToastService().show(message: "Lỗi tải cài đặt thuế: $e", type: ToastType.error);
+        ToastService()
+            .show(message: "Lỗi tải cài đặt thuế: $e", type: ToastType.error);
       }
     }
   }
@@ -332,11 +364,16 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
       final now = DateTime.now();
       final cutoff = _reportCutoffTime;
       DateTime startOfReportDay(DateTime date) {
-        return DateTime(date.year, date.month, date.day, cutoff.hour, cutoff.minute);
+        return DateTime(
+            date.year, date.month, date.day, cutoff.hour, cutoff.minute);
       }
+
       DateTime endOfReportDay(DateTime date) {
-        return startOfReportDay(date).add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+        return startOfReportDay(date)
+            .add(const Duration(days: 1))
+            .subtract(const Duration(milliseconds: 1));
       }
+
       DateTime todayCutoffTime = startOfReportDay(now);
       DateTime effectiveDate = now;
       if (now.isBefore(todayCutoffTime)) {
@@ -354,31 +391,39 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
           _endDate = endOfReportDay(yesterday);
           break;
         case TimeRange.thisWeek:
-          final startOfWeek = effectiveDate.subtract(Duration(days: effectiveDate.weekday - DateTime.monday));
-          final endOfWeek = effectiveDate.add(Duration(days: DateTime.daysPerWeek - effectiveDate.weekday));
+          final startOfWeek = effectiveDate.subtract(
+              Duration(days: effectiveDate.weekday - DateTime.monday));
+          final endOfWeek = effectiveDate.add(
+              Duration(days: DateTime.daysPerWeek - effectiveDate.weekday));
           _startDate = startOfReportDay(startOfWeek);
           _endDate = endOfReportDay(endOfWeek);
           break;
         case TimeRange.lastWeek:
-          final endOfLastWeekDay = effectiveDate.subtract(Duration(days: effectiveDate.weekday));
-          final startOfLastWeekDay = endOfLastWeekDay.subtract(const Duration(days: 6));
+          final endOfLastWeekDay =
+              effectiveDate.subtract(Duration(days: effectiveDate.weekday));
+          final startOfLastWeekDay =
+              endOfLastWeekDay.subtract(const Duration(days: 6));
           _startDate = startOfReportDay(startOfLastWeekDay);
           _endDate = endOfReportDay(endOfLastWeekDay);
           break;
         case TimeRange.thisMonth:
-          final startOfMonth = DateTime(effectiveDate.year, effectiveDate.month, 1);
-          final endOfMonth = DateTime(effectiveDate.year, effectiveDate.month + 1, 0);
+          final startOfMonth =
+              DateTime(effectiveDate.year, effectiveDate.month, 1);
+          final endOfMonth =
+              DateTime(effectiveDate.year, effectiveDate.month + 1, 0);
           _startDate = startOfReportDay(startOfMonth);
           _endDate = endOfReportDay(endOfMonth);
           break;
         case TimeRange.lastMonth:
-          final endOfLastMonth = DateTime(effectiveDate.year, effectiveDate.month, 0);
-          final startOfLastMonth = DateTime(endOfLastMonth.year, endOfLastMonth.month, 1);
+          final endOfLastMonth =
+              DateTime(effectiveDate.year, effectiveDate.month, 0);
+          final startOfLastMonth =
+              DateTime(endOfLastMonth.year, endOfLastMonth.month, 1);
           _startDate = startOfReportDay(startOfLastMonth);
           _endDate = endOfReportDay(endOfLastMonth);
           break;
         case TimeRange.custom:
-        // Đã được xử lý ở trên
+          // Đã được xử lý ở trên
           break;
       }
     }
@@ -395,7 +440,11 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
     _allLedgerItems.clear();
     final db = FirebaseFirestore.instance;
     final storeId = widget.currentUser.storeId;
-    final String defaultTaxKey = kVatRates.keys.firstWhere((k) => k.contains('0'), orElse: () => 'VAT_0');
+    final String defaultTaxKey = kVatRates.keys
+        .firstWhere((k) => k.contains('0'), orElse: () => 'VAT_0');
+
+    // Dùng Set để lọc trùng nhóm thuế
+    final Set<String> uniqueTaxGroups = {};
 
     try {
       final billsSnapshot = await db
@@ -415,28 +464,49 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
           final productData = item['product'] as Map<String, dynamic>? ?? {};
           final productId = productData['id'] as String?;
 
+          final String productName = (item['productName'] as String?) ??
+              (productData['productName'] as String?) ??
+              'N/A';
+
+          final String unit = (item['selectedUnit'] as String?) ??
+              (item['unit'] as String?) ??
+              (productData['unit'] as String?) ??
+              'Đơn vị';
+
           final String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
-          final String taxGroupName = _taxKeyToNameMap[taxKey] ?? '0%';
+          final String fullTaxName = _taxKeyToNameMap[taxKey] ?? '0%';
+          final String shortTaxName = fullTaxName.split('(').first.trim();
+
+          // Thêm vào danh sách nhóm thuế để lọc
+          uniqueTaxGroups.add(shortTaxName);
 
           final row = LedgerItemRow(
+            billId: doc.id,
+            // <-- LẤY ID ĐỂ MỞ PDF
             date: bill.createdAt,
             billCode: bill.billCode,
-            productName: (item['productName'] as String?) ?? 'N/A',
-            unit: (item['selectedUnit'] as String?) ?? 'N/A',
+            productName: productName,
+            unit: unit,
             quantity: (item['quantity'] as num?)?.toDouble() ?? 0.0,
             price: (item['price'] as num?)?.toDouble() ?? 0.0,
             subtotal: (item['subtotal'] as num?)?.toDouble() ?? 0.0,
-            taxGroupName: taxGroupName,
+            taxGroupName: shortTaxName,
             note: (item['note'] as String?) ?? '',
           );
           _allLedgerItems.add(row);
         }
       }
+
+      // Cập nhật danh sách tùy chọn lọc
+      final sortedGroups = uniqueTaxGroups.toList()..sort();
+      _taxGroupOptions = ['Tất cả', ...sortedGroups];
+
       _applyFilters();
     } catch (e) {
       debugPrint("Lỗi tải Bảng Kê Bán Lẻ: $e");
       if (mounted) {
-        ToastService().show(message: "Lỗi tải báo cáo: $e", type: ToastType.error);
+        ToastService()
+            .show(message: "Lỗi tải báo cáo: $e", type: ToastType.error);
       }
     } finally {
       _setLoading(false);
@@ -447,14 +517,48 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
     final query = _searchController.text.toLowerCase();
 
     _filteredLedgerItems = _allLedgerItems.where((item) {
-      if (query.isEmpty) return true;
-
-      return item.productName.toLowerCase().contains(query) ||
+      // Lọc tìm kiếm
+      final bool matchesQuery = query.isEmpty ||
+          item.productName.toLowerCase().contains(query) ||
           item.billCode.toLowerCase().contains(query);
 
+      // Lọc nhóm thuế
+      final bool matchesTax = _filterTaxGroup == null ||
+          _filterTaxGroup == 'Tất cả' ||
+          item.taxGroupName == _filterTaxGroup;
+
+      return matchesQuery && matchesTax;
     }).toList();
 
-    if(mounted) setState(() {});
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openBillDetail(String billId) async {
+    try {
+      final db = FirebaseFirestore.instance;
+      final billDoc = await db.collection('bills').doc(billId).get();
+      final storeInfo =
+          await FirestoreService().getStoreDetails(widget.currentUser.storeId);
+
+      if (billDoc.exists && storeInfo != null && mounted) {
+        final bill = BillModel.fromFirestore(billDoc);
+
+        // Mở dialog hóa đơn (có nút in/xem PDF)
+        showDialog(
+          context: context,
+          builder: (_) => BillReceiptDialog(
+            bill: bill,
+            currentUser: widget.currentUser,
+            storeInfo: storeInfo,
+          ),
+        );
+      } else {
+        ToastService().show(
+            message: "Không tìm thấy dữ liệu hóa đơn.", type: ToastType.error);
+      }
+    } catch (e) {
+      ToastService().show(message: "Lỗi mở hóa đơn: $e", type: ToastType.error);
+    }
   }
 
   Future<void> _exportToExcel() async {
@@ -462,8 +566,10 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
       final excel = Excel.createExcel();
       final Sheet sheet = excel[excel.getDefaultSheet()!];
 
-      final String reportDate = DateFormat('HH:mm dd/MM/yyyy').format(DateTime.now());
-      final String dateRange = 'Từ: ${DateFormat('dd/MM/yyyy HH:mm').format(_startDate!)} - Đến: ${DateFormat('dd/MM/yyyy HH:mm').format(_endDate!)}';
+      final String reportDate =
+          DateFormat('HH:mm dd/MM/yyyy').format(DateTime.now());
+      final String dateRange =
+          'Từ: ${DateFormat('dd/MM/yyyy HH:mm').format(_startDate!)} - Đến: ${DateFormat('dd/MM/yyyy HH:mm').format(_endDate!)}';
 
       final CellStyle titleStyle = CellStyle(
         bold: true,
@@ -510,7 +616,8 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
         ]);
       }
 
-      final String fileName = 'BangKeBanLe_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
+      final String fileName =
+          'BangKeBanLe_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
       final fileBytes = excel.save();
 
       if (fileBytes != null) {
@@ -522,25 +629,32 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
           allowedExtensions: ['xlsx'],
         );
         if (result != null) {
-          ToastService().show(message: "Đã lưu file thành công!", type: ToastType.success);
+          ToastService().show(
+              message: "Đã lưu file thành công!", type: ToastType.success);
         }
       }
     } catch (e) {
-      ToastService().show(message: "Lỗi khi xuất Excel: $e", type: ToastType.error);
+      ToastService()
+          .show(message: "Lỗi khi xuất Excel: $e", type: ToastType.error);
     }
   }
 
-  // --- Các hàm Helper cho Bộ lọc Thời gian ---
-
   String _getTimeRangeText(TimeRange range) {
     switch (range) {
-      case TimeRange.custom: return 'Tùy chọn...';
-      case TimeRange.today: return 'Hôm nay';
-      case TimeRange.yesterday: return 'Hôm qua';
-      case TimeRange.thisWeek: return 'Tuần này';
-      case TimeRange.lastWeek: return 'Tuần trước';
-      case TimeRange.thisMonth: return 'Tháng này';
-      case TimeRange.lastMonth: return 'Tháng trước';
+      case TimeRange.custom:
+        return 'Tùy chọn...';
+      case TimeRange.today:
+        return 'Hôm nay';
+      case TimeRange.yesterday:
+        return 'Hôm qua';
+      case TimeRange.thisWeek:
+        return 'Tuần này';
+      case TimeRange.lastWeek:
+        return 'Tuần trước';
+      case TimeRange.thisMonth:
+        return 'Tháng này';
+      case TimeRange.lastMonth:
+        return 'Tháng trước';
     }
   }
 
@@ -570,12 +684,11 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
     return null;
   }
 
-  // --- Giao diện (Build) ---
-
   @override
   Widget build(BuildContext context) {
-    // Phải gọi super.build(context) khi dùng AutomaticKeepAliveClientMixin
     super.build(context);
+
+    final bool isDesktop = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -583,17 +696,18 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
         slivers: [
-          // Header dính
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _SliverHeaderDelegate(
-              child: _buildHeaderRow(),
-              minHeight: 40.0,
-              maxHeight: 40.0,
+          // CHỈ HIỆN HEADER BẢNG TRÊN DESKTOP
+          if (isDesktop)
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _SliverHeaderDelegate(
+                child: _buildHeaderRow(),
+                minHeight: 55.0,
+                maxHeight: 55.0,
+              ),
             ),
-          ),
 
-          // Danh sách
+          // DANH SÁCH
           if (_filteredLedgerItems.isEmpty)
             const SliverFillRemaining(
               child: Center(
@@ -608,7 +722,8 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
               delegate: SliverChildBuilderDelegate(
                     (context, index) {
                   final item = _filteredLedgerItems[index];
-                  return _buildDataRow(item, index);
+                  // Truyền biến isDesktop vào hàm render
+                  return _buildDataRow(item, index, isDesktop);
                 },
                 childCount: _filteredLedgerItems.length,
               ),
@@ -621,120 +736,15 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
   Widget _buildHeaderRow() {
     return Container(
       color: AppTheme.scaffoldBackgroundColor,
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      child: Row(
-        children: [
-          _buildHeaderCell('Ngày / Mã HĐ', 3),
-          _buildHeaderCell('Hàng Hóa / ĐVT', 4),
-          _buildHeaderCell('SL / Đ.Giá', 2, align: TextAlign.right),
-          _buildHeaderCell('Thành Tiền', 3, align: TextAlign.right),
-          _buildHeaderCell('Nhóm Thuế', 3, align: TextAlign.right),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDataRow(LedgerItemRow item, int index) {
-    final bool isEven = index % 2 == 0;
-    final rowColor = isEven ? Colors.white : AppTheme.scaffoldBackgroundColor;
-
-    return Container(
-      color: rowColor,
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Ngày / Mã HĐ
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  DateFormat('dd/MM/yy HH:mm').format(item.date),
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  item.billCode,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
-                ),
-              ],
-            ),
-          ),
-
-          // Hàng Hóa / ĐVT
-          Expanded(
-            flex: 4,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.productName,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black),
-                  ),
-                  if (item.note != null && item.note!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2.0),
-                      child: Text(
-                        "(${item.note})",
-                        style: const TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: Colors.black54),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
-          // SL / Đ.Giá
-          Expanded(
-            flex: 2,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${formatNumber(item.quantity)} ${item.unit}',
-                    style: const TextStyle(fontSize: 14, color: Colors.black),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '@${formatNumber(item.price)}',
-                    style: const TextStyle(fontSize: 13, color: Colors.black54),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Thành Tiền
-          Expanded(
-            flex: 3,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Text(
-                formatNumber(item.subtotal),
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black),
-                textAlign: TextAlign.right,
-              ),
-            ),
-          ),
-
-          // Nhóm Thuế
-          Expanded(
-            flex: 3,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Text(
-                item.taxGroupName,
-                style: const TextStyle(fontSize: 14, color: Colors.black54),
-                textAlign: TextAlign.right,
-              ),
-            ),
-          ),
+          // Điều chỉnh lại Flex cho cân đối: 2 - 4 - 2 - 2 - 2
+          _buildHeaderCell('Thời gian', 2),
+          _buildHeaderCell('Sản phẩm', 4),
+          _buildHeaderCell('SL x Đ.Giá', 2, align: TextAlign.right),
+          _buildHeaderCell('Thành Tiền', 2, align: TextAlign.right),
+          _buildHeaderCell('Thuế', 1, align: TextAlign.right),
         ],
       ),
     );
@@ -745,14 +755,256 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab> with Automat
       flex: flex,
       child: Text(
         text,
-        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54, fontSize: 13),
+        style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.black87, // Màu đậm hơn chút cho dễ đọc
+            fontSize: 16), // <-- TĂNG SIZE 13 -> 15
         textAlign: align,
+      ),
+    );
+  }
+
+  // BẮT ĐẦU THAY THẾ HÀM _buildDataRow
+  Widget _buildDataRow(LedgerItemRow item, int index, bool isDesktop) {
+    final bool isEven = index % 2 == 0;
+    final rowColor = isEven ? Colors.white : AppTheme.scaffoldBackgroundColor;
+
+    // === GIAO DIỆN MOBILE (Dạng Card) ===
+    if (!isDesktop) {
+      return Card(
+        elevation: 2, // Tạo bóng đổ nhẹ
+        margin: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0), // Tách rời các sản phẩm
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // --- HÀNG 1: Tên (Trái) --- Thời gian & Mã Bill (Phải) ---
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Tên Hàng Hóa
+                  Expanded(
+                    flex: 6,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${item.productName} (${item.unit})',
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87),
+                        ),
+                        if (item.note != null && item.note!.isNotEmpty)
+                          Text(
+                            "(${item.note})",
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontStyle: FontStyle.italic,
+                                color: Colors.grey),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Thời gian & Mã Bill
+                  Expanded(
+                    flex: 4,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        // Thời gian: Có năm, chữ to hơn (13 -> 15)
+                        Text(
+                          DateFormat('HH:mm dd/MM/yyyy').format(item.date),
+                          style: const TextStyle(fontSize: 15, color: Colors.black54, fontWeight: FontWeight.w500),
+                          textAlign: TextAlign.right,
+                        ),
+                        const SizedBox(height: 4),
+                        InkWell(
+                          onTap: () => _openBillDetail(item.billId),
+                          child: Text(
+                            item.billCode,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryColor,
+                              decoration: TextDecoration.underline,
+                              decorationColor: AppTheme.primaryColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+              // Divider ngăn cách Tên và Số liệu
+              Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300),
+              const SizedBox(height: 8),
+
+              // --- HÀNG 2: SL x Giá | Thành tiền | Thuế (Cùng 1 dòng) ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // 1. SL x Đơn giá
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      '${formatNumber(item.quantity)} x ${formatNumber(item.price)}',
+                      style: const TextStyle(fontSize: 15, color: Colors.black87),
+                    ),
+                  ),
+
+                  // 2. Thành tiền (Màu bình thường)
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      formatNumber(item.subtotal),
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87), // Màu đen bình thường
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+
+                  // 3. Nhóm thuế
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      item.taxGroupName,
+                      style: const TextStyle(fontSize: 14, color: Colors.grey),
+                      textAlign: TextAlign.right,
+                    ),
+                  ),
+                ],
+              )
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: rowColor,
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1. Ngày / Mã HĐ (Flex 2)
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  DateFormat('dd/MM/yyyy HH:mm').format(item.date),
+                  style: const TextStyle(fontSize: 15, color: Colors.black54),
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: () => _openBillDetail(item.billId),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          item.billCode,
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryColor,
+                              decoration: TextDecoration.underline,
+                              decorationColor: AppTheme.primaryColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 2. Hàng Hóa / ĐVT (Flex 4)
+          Expanded(
+            flex: 4,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${item.productName} (${item.unit})',
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 3. SL x Đ.Giá (Flex 2)
+          Expanded(
+            flex: 2,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    formatNumber(item.quantity),
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'x ${formatNumber(item.price)}',
+                    style: const TextStyle(fontSize: 15, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 4. Thành Tiền (Flex 2)
+          Expanded(
+            flex: 2,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+              child: Text(
+                formatNumber(item.subtotal),
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ),
+
+          // 5. Nhóm Thuế (Flex 2)
+          Expanded(
+            flex: 1,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Text(
+                item.taxGroupName,
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
+                textAlign: TextAlign.right,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-// Helper class cho Header dính (Sticky Header)
 class _SliverHeaderDelegate extends SliverPersistentHeaderDelegate {
   final Widget child;
   final double minHeight;
@@ -765,7 +1017,8 @@ class _SliverHeaderDelegate extends SliverPersistentHeaderDelegate {
   });
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Column(
