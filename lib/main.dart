@@ -16,6 +16,7 @@ import 'firebase_options.dart';
 import 'screens/auth_gate.dart';
 import 'theme/app_theme.dart';
 import 'widgets/toast_manager.dart';
+import 'dart:io';
 
 final PrintingService globalPrintingService =
 PrintingService(tableName: '', userName: '');
@@ -24,10 +25,12 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  await FirebaseAppCheck.instance.activate(
-    androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
-    appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
-  );
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+      appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
+    );
+  }
 
   await initializeDateFormatting('vi_VN', null);
   runApp(const MyApp());

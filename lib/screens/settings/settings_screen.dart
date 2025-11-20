@@ -138,7 +138,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadAllSettings() async {
     await _loadDeviceIp();
     await _loadSavedSettings();
-    _discoverPrinters();
   }
 
   Future<void> _loadDeviceIp() async {
@@ -352,7 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           decoration: const InputDecoration(
               labelText: 'Địa chỉ IP của máy in',
               hintText: 'Ví dụ: 192.168.1.101'),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          keyboardType: TextInputType.text,
         ),
         actions: [
           TextButton(
@@ -464,7 +463,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 isThreeLine: true,
                 leading: const Icon(Icons.access_time),
                 title: const Text('Giờ chốt sổ báo cáo hàng ngày'),
-                subtitle: Text('Báo cáo "Hôm nay" sẽ tính từ ${_reportCutoffTime.format(context)} hôm nay đến ${_reportCutoffTime.format(context)} hôm sau. Báo cáo doanh thu chỉ áp dụng từ thời đểm thay đổi cài đặt giờ chốt sổ trở về sau.'),
+                subtitle: Text('Báo cáo hàng ngày chỉ áp dụng từ thời đểm thay đổi cài đặt giờ chốt sổ trở về sau.'),
                 trailing: Text(
                   _reportCutoffTime.format(context),
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -545,7 +544,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     CustomTextFormField(
                       controller: _serverIpController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: TextInputType.text,
                       decoration: const InputDecoration(
                         labelText: 'Địa chỉ IP của Máy chủ Nội bộ',
                       ),

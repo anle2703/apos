@@ -1,5 +1,5 @@
-// Tên file: vnpt_einvoice_settings_screen.dart
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/user_model.dart';
 import '../../services/vnpt_invoice_service.dart';
 import '../../services/toast_service.dart';
@@ -19,12 +19,17 @@ class _VnptEInvoiceSettingsScreenState
     extends State<VnptEInvoiceSettingsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _vnptService = VnptEInvoiceService();
+  final _db = FirebaseFirestore.instance;
+
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isTesting = false;
   bool _obscurePassword = true;
   bool _obscureAppKey = true;
   bool _autoIssueOnPayment = false;
+
+  // Biến logic ngầm
+  String _invoiceType = 'vat';
 
   late final TextEditingController _portalUrlController;
   late final TextEditingController _appIdController;
@@ -63,6 +68,24 @@ class _VnptEInvoiceSettingsScreenState
     setState(() => _isLoading = true);
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+
+      // 1. Logic ngầm: Đọc cấu hình thuế để xác định loại hóa đơn
+      final taxDoc = await _db.collection('store_tax_settings').doc(widget.currentUser.storeId).get();
+      if (taxDoc.exists) {
+        final taxData = taxDoc.data()!;
+        final String calcMethod = taxData['calcMethod'] ?? 'direct';
+        final String entityType = taxData['entityType'] ?? 'hkd';
+
+        if (entityType == 'dn' || calcMethod == 'deduction') {
+          _invoiceType = 'vat';
+        } else {
+          _invoiceType = 'sale';
+        }
+      } else {
+        _invoiceType = 'sale';
+      }
+
+      // 2. Đọc cấu hình VNPT
       final config = await _vnptService.getVnptConfig(ownerUid);
       if (config != null) {
         _portalUrlController.text = config.portalUrl;
@@ -78,16 +101,12 @@ class _VnptEInvoiceSettingsScreenState
       ToastService()
           .show(message: "Lỗi tải cấu hình: $e", type: ToastType.error);
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _saveSettings() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
     if (_isSaving) return;
 
     setState(() => _isSaving = true);
@@ -101,30 +120,24 @@ class _VnptEInvoiceSettingsScreenState
         templateCode: _templateCodeController.text.trim(),
         invoiceSeries: _invoiceSeriesController.text.trim(),
         autoIssueOnPayment: _autoIssueOnPayment,
+        invoiceType: _invoiceType, // Lưu giá trị ngầm
       );
+
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
       await _vnptService.saveVnptConfig(config, ownerUid);
-      ToastService()
-          .show(message: "Đã lưu cấu hình VNPT", type: ToastType.success);
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
+
+      ToastService().show(message: "Đã lưu cấu hình VNPT", type: ToastType.success);
+      if (mounted) Navigator.of(context).pop();
+
     } catch (e) {
-      ToastService()
-          .show(message: "Lỗi khi lưu: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi khi lưu: $e", type: ToastType.error);
     } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   Future<void> _testConnection() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-    if (_isTesting) return;
-
+    if (!_formKey.currentState!.validate()) return;
     setState(() => _isTesting = true);
     try {
       final token = await _vnptService.loginToVnpt(
@@ -136,34 +149,21 @@ class _VnptEInvoiceSettingsScreenState
       );
 
       if (token != null && token.isNotEmpty) {
-        ToastService().show(
-          message: "Kết nối thành công!",
-          type: ToastType.success,
-        );
+        ToastService().show(message: "Kết nối thành công!", type: ToastType.success);
       } else {
-        ToastService().show(
-          message: "Kết nối thất bại: Sai thông tin cấu hình.",
-          type: ToastType.error,
-        );
+        ToastService().show(message: "Kết nối thất bại: Sai thông tin.", type: ToastType.error);
       }
     } catch (e) {
-      ToastService().show(
-        message: "Kết nối thất bại: ${e.toString()}",
-        type: ToastType.error,
-      );
+      ToastService().show(message: "Lỗi: ${e.toString()}", type: ToastType.error);
     } finally {
-      if (mounted) {
-        setState(() => _isTesting = false);
-      }
+      if (mounted) setState(() => _isTesting = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Cấu hình VNPT e-Invoice'),
-      ),
+      appBar: AppBar(title: const Text('Cấu hình VNPT e-Invoice')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Form(
@@ -179,158 +179,117 @@ class _VnptEInvoiceSettingsScreenState
             CustomTextFormField(
               controller: _portalUrlController,
               decoration: const InputDecoration(
-                labelText: 'Portal URL (API Base URL)',
-                hintText: 'ví dụ: https://business-api.vnpt-invoice.com.vn',
+                labelText: 'Portal URL',
+                hintText: 'VD: https://congtya-invoice.vnpt-invoice.com.vn',
+                helperText: 'Link trang web bạn đăng nhập để xem hóa đơn',
                 prefixIcon: Icon(Icons.http_outlined),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 16),
             CustomTextFormField(
               controller: _appIdController,
               decoration: const InputDecoration(
-                labelText: 'App ID (Client ID)',
+                labelText: 'App ID',
+                hintText: 'Lấy từ trang quản trị VNPT',
                 prefixIcon: Icon(Icons.key_outlined),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 16),
             CustomTextFormField(
               controller: _appKeyController,
               obscureText: _obscureAppKey,
               decoration: InputDecoration(
-                labelText: 'App Key (Client Secret)',
+                labelText: 'App Key',
+                hintText: 'Lấy từ trang quản trị VNPT',
                 prefixIcon: const Icon(Icons.shield_outlined),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscureAppKey
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _obscureAppKey = !_obscureAppKey;
-                    });
-                  },
+                  icon: Icon(_obscureAppKey ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  onPressed: () => setState(() => _obscureAppKey = !_obscureAppKey),
                 ),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 16),
             CustomTextFormField(
               controller: _usernameController,
               decoration: const InputDecoration(
-                labelText: 'Tên đăng nhập (Username)',
+                labelText: 'Tên đăng nhập (Admin)',
                 prefixIcon: Icon(Icons.person_outline),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 16),
             CustomTextFormField(
               controller: _passwordController,
               obscureText: _obscurePassword,
               decoration: InputDecoration(
-                labelText: 'Mật khẩu (Password)',
+                labelText: 'Mật khẩu',
                 prefixIcon: const Icon(Icons.lock_outline),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscurePassword
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _obscurePassword = !_obscurePassword;
-                    });
-                  },
+                  icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                 ),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'Thông tin hóa đơn',
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.primaryColor),
-            ),
+            const SizedBox(height: 24),
+            const Text('Thông tin hóa đơn', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
             const SizedBox(height: 16),
             CustomTextFormField(
               controller: _templateCodeController,
               decoration: const InputDecoration(
-                labelText: 'Ký hiệu Mẫu hóa đơn',
-                hintText: 'ví dụ: 1C23TNB',
+                labelText: 'Ký hiệu Mẫu (Template Code)',
+                hintText: '1C23TNB',
                 prefixIcon: Icon(Icons.description_outlined),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 16),
             CustomTextFormField(
               controller: _invoiceSeriesController,
               decoration: const InputDecoration(
-                labelText: 'Ký hiệu Hóa đơn',
-                hintText: 'ví dụ: /001',
+                labelText: 'Ký hiệu Hóa đơn (Series)',
+                hintText: 'C23TAA',
                 prefixIcon: Icon(Icons.abc_outlined),
               ),
-              validator: (value) => (value == null || value.isEmpty)
-                  ? 'Không được để trống'
-                  : null,
+              validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 24),
             CheckboxListTile(
               title: const Text("Tự động xuất HĐĐT khi thanh toán"),
-              subtitle: const Text("Nếu bật, HĐĐT sẽ tự động được tạo khi bấm 'Xác Nhận Thanh Toán' tại quầy."),
               value: _autoIssueOnPayment,
-              onChanged: (bool? value) {
-                setState(() {
-                  _autoIssueOnPayment = value ?? false;
-                });
-              },
+              onChanged: (v) => setState(() => _autoIssueOnPayment = v ?? false),
               activeColor: AppTheme.primaryColor,
-              controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
             ),
             const SizedBox(height: 32),
-            OutlinedButton.icon(
-              icon: _isTesting
-                  ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.sync_outlined),
-              label: Text(_isTesting ? 'Đang thử...' : 'Kiểm tra kết nối'),
-              onPressed: _isTesting ? null : _testConnection,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              icon: _isSaving
-                  ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 3))
-                  : const Icon(Icons.save_outlined),
-              label: Text(_isSaving ? 'Đang lưu...' : 'Lưu cấu hình'),
-              onPressed: _isSaving ? null : _saveSettings,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: _isTesting
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.sync_outlined),
+                    label: Text(_isTesting ? 'Đang thử...' : 'Kiểm tra'),
+                    onPressed: _isTesting ? null : _testConnection,
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: _isSaving
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.save_outlined),
+                    label: const Text('Lưu cấu hình'),
+                    onPressed: _isSaving ? null : _saveSettings,
+                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

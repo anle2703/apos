@@ -808,7 +808,7 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(8.0),
         child: Column(
@@ -824,7 +824,7 @@ class _SummaryCard extends StatelessWidget {
                     style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Colors.grey.shade700,
-                        fontSize: 12),
+                        fontSize: 14),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),

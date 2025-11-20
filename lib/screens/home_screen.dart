@@ -330,25 +330,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.receipt_long_outlined),
-                title: const Text('Kết nối HĐĐT'),
-                onTap: () {
-                  if (_currentUser != null) {
-                    if (_currentUser!.role == 'owner') {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (context) =>
-                            EInvoiceSettingsScreen(currentUser: _currentUser!),
-                      ));
-                    } else {
-                      ToastService().show(
-                          message:
-                              'Chỉ chủ sở hữu mới có thể truy cập mục này.',
-                          type: ToastType.warning);
-                    }
-                  }
-                },
-              ),
-              ListTile(
                 leading: const Icon(Icons.qr_code_2_outlined),
                 title: const Text('Quản lý QR Order'),
                 onTap: () {
@@ -370,7 +351,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.calculate_outlined),
-                title: const Text('Thuế & Kê khai (HKD)'),
+                title: const Text('Thuế & Kê khai'),
                 onTap: () {
                   if (_currentUser != null) {
                     if (_currentUser!.role == 'owner') {
@@ -381,6 +362,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     } else {
                       ToastService().show(
                           message: 'Chỉ chủ sở hữu mới có thể truy cập mục này.',
+                          type: ToastType.warning);
+                    }
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Kết nối HĐĐT'),
+                onTap: () {
+                  if (_currentUser != null) {
+                    if (_currentUser!.role == 'owner') {
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (context) =>
+                            EInvoiceSettingsScreen(currentUser: _currentUser!),
+                      ));
+                    } else {
+                      ToastService().show(
+                          message:
+                          'Chỉ chủ sở hữu mới có thể truy cập mục này.',
                           type: ToastType.warning);
                     }
                   }

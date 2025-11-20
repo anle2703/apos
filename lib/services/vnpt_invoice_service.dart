@@ -1,4 +1,3 @@
-// Tên file: vnpt_invoice_service.dart
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,6 +14,7 @@ class VnptConfig {
   final String templateCode;
   final String invoiceSeries;
   final bool autoIssueOnPayment;
+  final String invoiceType; // 'vat' hoặc 'sale'
 
   VnptConfig({
     required this.portalUrl,
@@ -25,6 +25,7 @@ class VnptConfig {
     required this.templateCode,
     required this.invoiceSeries,
     this.autoIssueOnPayment = false,
+    this.invoiceType = 'vat',
   });
 }
 
@@ -48,6 +49,7 @@ class VnptEInvoiceService implements EInvoiceProvider {
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
+        'invoiceType': config.invoiceType,
       };
 
       await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
@@ -85,6 +87,7 @@ class VnptEInvoiceService implements EInvoiceProvider {
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
+        invoiceType: data['invoiceType'] ?? 'vat',
       );
     } catch (e) {
       debugPrint ("Lỗi khi tải cấu hình VNPT: $e");
@@ -163,8 +166,7 @@ class VnptEInvoiceService implements EInvoiceProvider {
             'Authorization': 'Bearer $token',
             'Content-Type': 'application/json',
           },
-          receiveTimeout: const Duration(seconds: 15),
-          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
         ),
       );
 
@@ -191,6 +193,7 @@ class VnptEInvoiceService implements EInvoiceProvider {
       throw Exception('Lỗi cục bộ khi tạo HĐĐT: ${e.toString()}');
     }
   }
+
 
   @override
   Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
@@ -226,14 +229,34 @@ class VnptEInvoiceService implements EInvoiceProvider {
   Map<String, dynamic> _buildVnptPayload(Map<String, dynamic> billData,
       CustomerModel? customer, VnptConfig config) {
 
+    // --- LOGIC THUẾ CHUẨN ---
+    final double taxPercent = (billData['taxPercent'] as num?)?.toDouble() ?? 0.0;
+    String taxRateString = "KCT";
+
+    if (config.invoiceType == 'vat') {
+      if (taxPercent == 0) {taxRateString = "0";}
+      else if (taxPercent == 5) {taxRateString = "5";}
+      else if (taxPercent == 8) {taxRateString = "8";}
+      else if (taxPercent == 10) {taxRateString = "10";}
+      else {taxRateString = "10";}
+    }
+
     final List<Map<String, dynamic>> dsHangHoa = [];
     final List<dynamic> billItems = billData['items'] ?? [];
+
+    double totalTaxAmount = 0;
+
     for (var item in billItems) {
       if (item['status'] == 'cancelled') continue;
 
       final quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
       final unitPrice = (item['price'] as num?)?.toDouble() ?? 0.0;
       final itemTotal = (quantity * unitPrice).roundToDouble();
+
+      // Tính thuế nếu là GTGT
+      if (config.invoiceType == 'vat' && taxRateString != "KCT") {
+        totalTaxAmount += (itemTotal * taxPercent / 100);
+      }
 
       dsHangHoa.add({
         "stt": dsHangHoa.length + 1,
@@ -242,14 +265,19 @@ class VnptEInvoiceService implements EInvoiceProvider {
         "soluong": quantity,
         "dongia": unitPrice,
         "thanhtien": itemTotal,
-        "thuesuat": "KCT",
+        "thuesuat": taxRateString, // Gửi chuỗi thuế đúng
       });
     }
 
     final double discount = (billData['discount'] as num?)?.toDouble() ?? 0.0;
-    final double totalPayable = (billData['totalPayable'] as num?)?.toDouble() ?? 0.0;
     final double subtotal = (billData['subtotal'] as num?)?.toDouble() ?? 0.0;
     final double taxableAmount = (subtotal - discount).roundToDouble();
+
+    // Nếu là GTGT -> Tổng thanh toán = Hàng + Thuế
+    // Nếu là Bán hàng -> Tổng thanh toán = Hàng (đã gồm thuế)
+    final double finalPayment = config.invoiceType == 'vat'
+        ? (taxableAmount + totalTaxAmount).roundToDouble()
+        : taxableAmount;
 
     return {
       "thongtinchung": {
@@ -273,9 +301,9 @@ class VnptEInvoiceService implements EInvoiceProvider {
       "tongtien": {
         "tongthanhtien": taxableAmount,
         "tienchietkhau": discount.roundToDouble(),
-        "tienthue": 0,
-        "tongtienthanhtoan": totalPayable.roundToDouble(),
-        "sotienbangchu": "Không đồng"
+        "tienthue": totalTaxAmount.roundToDouble(), // Tiền thuế
+        "tongtienthanhtoan": finalPayment,
+        "sotienbangchu": "" // Để trống, VNPT tự sinh
       }
     };
   }

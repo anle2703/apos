@@ -114,7 +114,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       return Card(
                         child: ListTile(
                           contentPadding:
-                              const EdgeInsets.only(left: 16.0, right: 8.0),
+                          const EdgeInsets.only(left: 16.0, right: 8.0),
                           title: Text('${group.stt}. ${group.name}',
                               style: Theme.of(context).textTheme.titleMedium),
                           trailing: SizedBox(
@@ -298,7 +298,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
         }
 
         final productGroups = snapshot.data ?? [];
-        final groupNames = ['Tất cả', ...productGroups.map((g) => g.name)];
+        // --- SỬA: THÊM NHÓM 'Khác' VÀO CUỐI ---
+        final groupNames = ['Tất cả', ...productGroups.map((g) => g.name), 'Khác'];
+        // --------------------------------------
 
         return DefaultTabController(
           length: groupNames.length,
@@ -326,9 +328,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       await Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (context) => AddEditProductScreen(
-                                  currentUser: widget.currentUser,
-                                  productGroups: productGroups,
-                                )),
+                              currentUser: widget.currentUser,
+                              productGroups: productGroups,
+                            )),
                       );
                       _refreshData();
                     },
@@ -360,8 +362,9 @@ class _ProductListScreenState extends State<ProductListScreen> {
             ),
             body: TabBarView(
               children: groupNames.map((name) {
-                final filterGroup = (name == 'Tất cả') ? null : name;
-                return _buildProductListForGroup(filterGroup, productGroups);
+                // --- SỬA: Truyền tên tab vào hàm build ---
+                return _buildProductListForGroup(name, productGroups);
+                // -----------------------------------------
               }).toList(),
             ),
           ),
@@ -370,11 +373,20 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
+  // --- SỬA: Logic lọc sản phẩm cho tab 'Khác' ---
   Widget _buildProductListForGroup(
-      String? group, List<ProductGroupModel> productGroups) {
+      String tabName, List<ProductGroupModel> productGroups) {
+
+    // Nếu là 'Tất cả' hoặc 'Khác' thì lấy toàn bộ danh sách về trước (queryGroup = null)
+    // Nếu là nhóm cụ thể thì query theo tên nhóm
+    String? queryGroup;
+    if (tabName != 'Tất cả' && tabName != 'Khác') {
+      queryGroup = tabName;
+    }
+
     return StreamBuilder<List<ProductModel>>(
       stream: _firestoreService.getProductsStream(widget.currentUser.storeId,
-          group: group),
+          group: queryGroup),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -382,12 +394,20 @@ class _ProductListScreenState extends State<ProductListScreen> {
         if (snapshot.hasError) {
           return Center(child: Text('Đã có lỗi xảy ra: ${snapshot.error}'));
         }
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+
+        // Lấy dữ liệu
+        var products = snapshot.data ?? [];
+
+        // Nếu là tab 'Khác', lọc Client-side các sản phẩm không có nhóm
+        if (tabName == 'Khác') {
+          products = products.where((p) => p.productGroup == null || p.productGroup!.trim().isEmpty).toList();
+        }
+
+        if (products.isEmpty) {
           return const Center(
               child: Text('Chưa có sản phẩm nào trong nhóm này.'));
         }
 
-        final products = snapshot.data!;
         return ListView.builder(
           padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 12.0),
           itemCount: products.length,
@@ -552,17 +572,17 @@ class _ProductListItem extends StatelessWidget {
         height: 90,
         child: (product.imageUrl != null && product.imageUrl!.isNotEmpty)
             ? CachedNetworkImage(
-                imageUrl: product.imageUrl!,
-                fit: BoxFit.cover,
-                placeholder: (context, url) =>
-                    Container(color: Colors.grey.shade200),
-                errorWidget: (context, url, error) => const Icon(
-                  Icons.image_not_supported_outlined,
-                  color: Colors.grey,
-                ),
-              )
+          imageUrl: product.imageUrl!,
+          fit: BoxFit.cover,
+          placeholder: (context, url) =>
+              Container(color: Colors.grey.shade200),
+          errorWidget: (context, url, error) => const Icon(
+            Icons.image_not_supported_outlined,
+            color: Colors.grey,
+          ),
+        )
             : const Icon(Icons.inventory_2_outlined,
-                color: Colors.grey, size: 40),
+            color: Colors.grey, size: 40),
       ),
     );
   }

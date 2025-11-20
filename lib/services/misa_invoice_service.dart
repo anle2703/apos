@@ -1,4 +1,3 @@
-// Tên file: misa_invoice_service.dart
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,22 +7,23 @@ import '../screens/invoice/e_invoice_provider.dart';
 import 'package:flutter/foundation.dart';
 
 class MisaConfig {
-  final String apiUrl;
+  // Đã xóa apiUrl
   final String taxCode;
   final String username;
   final String password;
   final String templateCode;
   final String invoiceSeries;
   final bool autoIssueOnPayment;
+  final String invoiceType; // 'vat' hoặc 'sale'
 
   MisaConfig({
-    required this.apiUrl,
     required this.taxCode,
     required this.username,
     required this.password,
     required this.templateCode,
     required this.invoiceSeries,
     this.autoIssueOnPayment = false,
+    this.invoiceType = "vat",
   });
 }
 
@@ -35,23 +35,24 @@ class MisaEInvoiceService implements EInvoiceProvider {
   final _dio = Dio();
   final _uuid = const Uuid();
 
-  // *** THAY ĐỔI QUAN TRỌNG: APP ID CỦA BẠN SẼ ĐỂ Ở ĐÂY ***
-  // Bạn cần liên hệ MISA để lấy App ID và thay vào đây
-  static const String _misaAppId = 'YOUR_APP_ID_FROM_MISA';
+  // --- CẤU HÌNH CỐ ĐỊNH ---
+  static const String _misaBaseUrl = 'https://api.meinvoice.vn'; // URL chuẩn
+  static const String _misaAppId = '4bfc97cc-80e6-41d9-9a9b-9bbe71069a3d';
 
   Future<void> saveMisaConfig(MisaConfig config, String ownerUid) async {
     try {
       final encodedPassword = base64Encode(utf8.encode(config.password));
       final dataToSave = {
         'provider': 'misa',
-        'apiUrl': config.apiUrl,
+        // Không cần lưu apiUrl nữa
         'taxCode': config.taxCode,
         'username': config.username,
         'password': encodedPassword,
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
-        'appId': _misaAppId, // Tự động lưu App ID của bạn
+        'invoiceType': config.invoiceType,
+        'appId': _misaAppId,
       };
 
       await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
@@ -81,13 +82,13 @@ class MisaEInvoiceService implements EInvoiceProvider {
       }
 
       return MisaConfig(
-        apiUrl: data['apiUrl'] ?? '',
         taxCode: data['taxCode'] ?? '',
         username: data['username'] ?? '',
         password: decodedPassword,
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
+        invoiceType: data['invoiceType'] ?? 'vat',
       );
     } catch (e) {
       debugPrint ("Lỗi khi tải cấu hình MISA: $e");
@@ -107,29 +108,33 @@ class MisaEInvoiceService implements EInvoiceProvider {
     );
   }
 
-  Future<String?> loginToMisa(
-      String apiUrl, String taxCode, String username, String password) async {
+  // Hàm login dùng URL cố định
+  Future<String?> loginToMisa(String taxCode, String username, String password) async {
     try {
-      final String authUrl = "$apiUrl/api/integration/auth/token";
+      final String authUrl = "$_misaBaseUrl/api/integration/auth/token";
       final response = await _dio.post(
         authUrl,
         data: {
           'tax_code': taxCode,
-          'app_id': _misaAppId, // Sử dụng App ID nội bộ
+          'app_id': _misaAppId,
           'username': username,
           'password': password,
         },
+        options: Options(sendTimeout: const Duration(seconds: 15)),
       );
       if (response.statusCode == 200 && response.data != null) {
         return response.data['access_token'] as String?;
       }
       return null;
     } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.connectionError) {
+        throw Exception('Không thể kết nối tới MISA ($_misaBaseUrl). Kiểm tra mạng.');
+      }
       if (e.response != null) {
         throw Exception(
-            'Lỗi MISA ${e.response?.statusCode}: ${e.response?.data?['Message'] ?? e.response?.data?['error_description'] ?? 'Sai thông tin'}');
+            'Lỗi MISA ${e.response?.statusCode}: ${e.response?.data?['Message'] ?? 'Sai thông tin đăng nhập'}');
       } else {
-        throw Exception('Lỗi mạng. Vui lòng kiểm tra lại.');
+        throw Exception('Lỗi mạng: ${e.message}');
       }
     }
   }
@@ -139,8 +144,7 @@ class MisaEInvoiceService implements EInvoiceProvider {
     if (config == null || config.username.isEmpty) {
       throw Exception('Chưa cấu hình MISA HĐĐT.');
     }
-    return await loginToMisa(
-        config.apiUrl, config.taxCode, config.username, config.password);
+    return await loginToMisa(config.taxCode, config.username, config.password);
   }
 
   @override
@@ -148,7 +152,6 @@ class MisaEInvoiceService implements EInvoiceProvider {
       Map<String, dynamic> billData,
       CustomerModel? customer,
       String ownerUid) async {
-    // ... (Không thay đổi hàm này) ...
     try {
       final token = await _getValidToken(ownerUid);
       if (token == null) {
@@ -158,7 +161,9 @@ class MisaEInvoiceService implements EInvoiceProvider {
       final config = (await getMisaConfig(ownerUid))!;
       final transactionId = _uuid.v4();
       final payload = _buildMisaPayload(billData, customer, config, transactionId);
-      final String apiUrl = "${config.apiUrl}/api/integration/invoice/publish";
+
+      // Dùng URL cố định
+      final String apiUrl = "$_misaBaseUrl/api/integration/invoice/publish";
 
       final response = await _dio.post(
         apiUrl,
@@ -168,17 +173,20 @@ class MisaEInvoiceService implements EInvoiceProvider {
             'Authorization': 'Bearer $token',
             'Content-Type': 'application/json',
           },
-          receiveTimeout: const Duration(seconds: 15),
-          sendTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 45),
         ),
       );
 
       if (response.statusCode == 200 && response.data != null) {
         final resultData = response.data as Map<String, dynamic>;
 
-        final String reservationCode = resultData['TransactionID'] as String;
-        final String invoiceNo = resultData['InvoiceNo'] as String;
-        final String lookupUrl = 'https://meinvoice.vn/tra-cuu'; // Link tra cứu chung của MISA
+        if (resultData.containsKey('Success') && resultData['Success'] == false) {
+          throw Exception(resultData['Data'] ?? resultData['Message'] ?? 'Lỗi tạo hóa đơn MISA');
+        }
+
+        final String reservationCode = resultData['TransactionID'] as String? ?? transactionId;
+        final String invoiceNo = resultData['InvoiceNo'] as String? ?? 'Chưa cấp số';
+        final String lookupUrl = 'https://meinvoice.vn/tra-cuu';
 
         return EInvoiceResult(
           providerName: 'MISA',
@@ -204,23 +212,19 @@ class MisaEInvoiceService implements EInvoiceProvider {
 
   @override
   Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
-    // ... (Không thay đổi hàm này) ...
     final String? transactionId = rawResponse['TransactionID'] as String?;
-    if (transactionId == null) {
-      debugPrint("Không tìm thấy TransactionID (MISA) để gửi email.");
-      return;
-    }
+    if (transactionId == null) return;
 
     final token = await _getValidToken(ownerUid);
     final config = (await getMisaConfig(ownerUid))!;
 
     try {
-      final String apiUrl = "${config.apiUrl}/api/integration/invoice/send-email";
+      final String apiUrl = "$_misaBaseUrl/api/integration/invoice/send-email";
 
       await _dio.post(
         apiUrl,
         queryParameters: { 'tax_code': config.taxCode },
-        data: jsonEncode([transactionId]), // MISA yêu cầu body là một list [transactionId]
+        data: jsonEncode([transactionId]),
         options: Options(
           headers: {
             'Authorization': 'Bearer $token',
@@ -228,7 +232,6 @@ class MisaEInvoiceService implements EInvoiceProvider {
           },
         ),
       );
-      debugPrint("Đã gửi yêu cầu email HĐĐT MISA cho $transactionId");
     } on DioException catch (e) {
       debugPrint("Lỗi API MISA (gửi email): $e");
     }
@@ -236,9 +239,25 @@ class MisaEInvoiceService implements EInvoiceProvider {
 
   Map<String, dynamic> _buildMisaPayload(Map<String, dynamic> billData,
       CustomerModel? customer, MisaConfig config, String transactionId) {
-    // ... (Không thay đổi hàm này) ...
+
+    final double taxPercent = (billData['taxPercent'] as num?)?.toDouble() ?? 0.0;
+    int misaTaxRate;
+
+    // Logic thuế chuẩn: Dựa vào loại hóa đơn từ config (tự động từ Tax Manager)
+    if (config.invoiceType == 'vat') {
+      // Hóa đơn GTGT (Khấu trừ)
+      if (taxPercent == 10) {misaTaxRate = 10;}
+      else if (taxPercent == 8) {misaTaxRate = 8;}
+      else if (taxPercent == 5) {misaTaxRate = 5;}
+      else if (taxPercent == 0) {misaTaxRate = 0;}
+      else {misaTaxRate = 10;}
+    } else {
+      misaTaxRate = -2;
+    }
+
     final List<Map<String, dynamic>> items = [];
     final List<dynamic> billItems = billData['items'] ?? [];
+
     for (var item in billItems) {
       if (item['status'] == 'cancelled') continue;
 
@@ -246,13 +265,19 @@ class MisaEInvoiceService implements EInvoiceProvider {
       final unitPrice = (item['price'] as num?)?.toDouble() ?? 0.0;
       final itemTotal = (quantity * unitPrice).roundToDouble();
 
+      double itemVatAmount = 0;
+      if (config.invoiceType == 'vat' && misaTaxRate >= 0) {
+        itemVatAmount = (itemTotal * taxPercent / 100).roundToDouble();
+      }
+
       items.add({
         "ItemName": item['productName'] ?? 'Sản phẩm',
         "UnitName": item['unitName'] ?? 'cái',
         "Quantity": quantity,
         "UnitPrice": unitPrice,
         "Amount": itemTotal,
-        "TaxRate": -2, // -2 = Không chịu thuế
+        "TaxRate": misaTaxRate,
+        "VATAmount": itemVatAmount,
       });
     }
 
@@ -261,11 +286,17 @@ class MisaEInvoiceService implements EInvoiceProvider {
     final double subtotal = (billData['subtotal'] as num?)?.toDouble() ?? 0.0;
     final double totalPayable = (billData['totalPayable'] as num?)?.toDouble() ?? 0.0;
 
-    // Lấy PTTT đầu tiên
     final Map<String, dynamic> billPayments = billData['payments'] ?? {};
     String paymentMethod = "Tiền mặt";
     if (billPayments.isNotEmpty) {
-      paymentMethod = billPayments.keys.first;
+      String rawMethod = billPayments.keys.first;
+      if (rawMethod.toLowerCase().contains("chuyển khoản")) {
+        paymentMethod = "Chuyển khoản";
+      } else if (rawMethod.toLowerCase().contains("tiền mặt")) {
+        paymentMethod = "Tiền mặt";
+      } else {
+        paymentMethod = "Tiền mặt/Chuyển khoản";
+      }
     }
 
     return {
@@ -290,7 +321,8 @@ class MisaEInvoiceService implements EInvoiceProvider {
       "DiscountAmount": discount.roundToDouble(),
       "TotalTaxAmount": taxAmount.roundToDouble(),
       "TotalAmount": totalPayable.roundToDouble(),
-      "AutoRenderTotalAmountInWords": true, // Tự động render thành chữ
+      "AutoRenderTotalAmountInWords": true,
+      "IsGetFromLocalData": false,
     };
   }
 }

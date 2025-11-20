@@ -742,6 +742,7 @@ class PrintingService {
     final qtyFmt = NumberFormat('#,##0.##', 'vi_VN');
     final currencyFormat = NumberFormat('#,##0');
     final timeOnlyFormat = DateFormat('HH:mm');
+    final percentFormat = NumberFormat('#,##0.##', 'vi_VN');
 
     String formatTotalMinutes(int totalMinutes) {
       if (totalMinutes <= 0) return "0'";
@@ -759,7 +760,6 @@ class PrintingService {
     final double discountInput = (summary['discountInput'] as num?)?.toDouble() ?? 0.0;
     final double pointsUsed = (summary['customerPointsUsed'] as num?)?.toDouble() ?? 0.0;
     final double pointsValue = pointsUsed * 1000.0;
-    final double taxPercent = (summary['taxPercent'] as num?)?.toDouble() ?? 0.0;
     final double taxAmount = (summary['taxAmount'] as num?)?.toDouble() ?? 0.0;
     final double totalPayable = (summary['totalPayable'] as num?)?.toDouble() ?? 0.0;
     final double changeAmount = (summary['changeAmount'] as num?)?.toDouble() ?? 0.0;
@@ -770,6 +770,25 @@ class PrintingService {
     final rawPayments = summary['payments'];
     final Map<String, dynamic> payments = (rawPayments is Map) ? Map<String, dynamic>.from(rawPayments) : {};
     final Map<String, dynamic> customer = (summary['customer'] is Map) ? Map<String, dynamic>.from(summary['customer']) : {};
+
+    String taxLabel = 'Thuế:';
+    if (taxAmount > 0 && summary['items'] is List) {
+      final summaryItems = summary['items'] as List;
+      // Quét item đầu tiên có thuế để xác định loại
+      for (var item in summaryItems) {
+        if (item is Map && item.containsKey('taxKey')) {
+          final String key = item['taxKey'].toString();
+          if (key.startsWith('HKD_')) {
+            taxLabel = 'Thuế gộp:'; // Nhóm 2 HKD (Trực tiếp)
+            break;
+          } else if (key.startsWith('VAT_')) {
+            taxLabel = 'VAT:'; // Nhóm 3 HKD hoặc Doanh nghiệp (Khấu trừ)
+            break;
+          }
+        }
+      }
+    }
+
     final dynamic rawStart = summary['startTime'] ?? summary['startTimeIso'];
     DateTime? startTime;
     if (rawStart is Timestamp) {
@@ -808,8 +827,6 @@ class PrintingService {
       final bin = bankDetails['bankBin'] ?? '';
       final acc = bankDetails['bankAccount'] ?? '';
       if (bin.isNotEmpty && acc.isNotEmpty) {
-
-        // 1. Tra cứu bank shortName
         final bankInfo = vietnameseBanks.firstWhere(
               (b) => b.bin == bin,
           orElse: () => BankInfo(name: '', shortName: '', bin: ''),
@@ -817,19 +834,13 @@ class PrintingService {
 
         if (bankInfo.shortName.isNotEmpty) {
           final amount = totalPayable.toInt().toString();
-          final addInfo = Uri.encodeComponent(tableName); // Dùng tên bàn
-
-          // 2. Dùng API "compact" (sạch logo thừa)
+          final addInfo = Uri.encodeComponent(tableName);
           final compactUrl = 'https://img.vietqr.io/image/${bankInfo.shortName}-$acc-compact.png?amount=$amount&addInfo=$addInfo';
-
-          debugPrint("PrintingService: Đang tải QR từ $compactUrl");
-
           try {
-            // 3. Dùng pw.NetworkImage (từ package 'printing') để tải ảnh
             qrImage = await networkImage(compactUrl);
           } catch (e) {
             debugPrint("PrintingService: Lỗi tải ảnh QR để in: $e");
-            qrImage = null; // Bỏ qua nếu lỗi
+            qrImage = null;
           }
         }
       }
@@ -875,7 +886,7 @@ class PrintingService {
 
               pw.Row(children: [
                 pw.Container(width: 20, child: pw.Text('STT', style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                pw.Expanded(flex: 5, child: pw.Text('Tên Món', style: pw.TextStyle(font: boldFont, fontSize: 10), textAlign: pw.TextAlign.center)),
+                pw.Expanded(flex: 5, child: pw.Text('Tên Món (Thuế)', style: pw.TextStyle(font: boldFont, fontSize: 10), textAlign: pw.TextAlign.center)),
                 pw.Expanded(flex: 4, child: pw.Text('T.Tiền', style: pw.TextStyle(font: boldFont, fontSize: 10), textAlign: pw.TextAlign.right)),
               ]),
               pw.Divider(height: 2, thickness: 0.5),
@@ -891,13 +902,28 @@ class PrintingService {
                 String discountText = '';
                 if (it.discountValue != null && it.discountValue! > 0) {
                   if (it.discountUnit == '%') {
-                    discountText = "(-${formatNumber(it.discountValue!)}%)";
+                    discountText = "[-${formatNumber(it.discountValue!)}%]";
                   } else {
-                    discountText = "(-${formatNumber(it.discountValue!)}đ)";
+                    discountText = "[-${formatNumber(it.discountValue!)}đ]";
                   }
                 }
 
                 String itemName = it.product.productName;
+
+                double itemTaxRate = 0;
+                if (summary['items'] is List) {
+                  final summaryItem = (summary['items'] as List)[i];
+                  if (summaryItem is Map) {
+                    itemTaxRate = (summaryItem['taxRate'] as num?)?.toDouble() ?? 0.0;
+                  }
+                }
+
+                String taxRateStr = '';
+                if (itemTaxRate > 0) {
+                  double percentValue = itemTaxRate * 100;
+                  taxRateStr = " (${percentFormat.format(percentValue)}%)";
+                }
+
                 if (isTimeBased) {
                   final totalMinutes = it.priceBreakdown.fold<int>(0, (tong, block) => tong + block.minutes);
                   itemName += ' (${formatTotalMinutes(totalMinutes)})';
@@ -909,19 +935,26 @@ class PrintingService {
                     pw.Expanded(
                         child: pw.RichText(
                           text: pw.TextSpan(
-                            style: pw.TextStyle(font: boldFont, fontSize: 10), // Style chung
+                            style: pw.TextStyle(font: boldFont, fontSize: 10),
                             children: [
-                              // 1. Tên SP (dùng 'it')
+                              // 1. Tên SP
                               pw.TextSpan(text: itemName),
 
-                              // 2. Đơn vị tính (dùng 'it')
+                              // 2. Đơn vị tính (Đưa lên trước thuế)
                               if (it.selectedUnit.isNotEmpty)
                                 pw.TextSpan(
-                                    text: ' (${it.selectedUnit})',
+                                    text: ' - ${it.selectedUnit}',
                                     style: pw.TextStyle(fontSize: 9)
                                 ),
 
-                              // 3. Giá gốc gạch ngang (dùng 'it' và 'priceHasChanged')
+                              // 3. % Thuế (Nằm sau ĐVT)
+                              if (taxRateStr.isNotEmpty)
+                                pw.TextSpan(
+                                  text: taxRateStr,
+                                  style: pw.TextStyle(fontSize: 9),
+                                ),
+
+                              // 4. Giá gốc gạch ngang
                               if (priceHasChanged)
                                 pw.TextSpan(
                                   text: ' ${currencyFormat.format(it.product.sellPrice)}',
@@ -932,7 +965,7 @@ class PrintingService {
                                   ),
                                 ),
 
-                              // 4. Chiết khấu (dùng 'discountText')
+                              // 5. Chiết khấu
                               if (discountText.isNotEmpty)
                                 pw.TextSpan(
                                   text: ' $discountText',
@@ -1012,14 +1045,20 @@ class PrintingService {
               pw.SizedBox(height: 8),
 
               _kvRow('Tổng cộng:', '${formatNumber(subtotal)} đ'),
+
+              if (taxAmount > 0)
+                _kvRow(
+                    taxLabel,
+                    '+ ${currencyFormat.format(taxAmount)} đ'
+                ),
+
               if (discount > 0)
                 _kvRow('Chiết khấu: ${discountType == '%' ? ' (${formatNumber(discountInput)}%)' : ''}', '- ${formatNumber(discount)} đ'),
               if (voucherDiscount > 0)
                 _kvRow('Voucher (${voucherCode ?? ''}):', '- ${formatNumber(voucherDiscount)} đ'),
               if (pointsValue > 0)
                 _kvRow('Điểm thưởng:', '- ${formatNumber(pointsValue)} đ'),
-              if (taxPercent > 0)
-                _kvRow('Thuế VAT (${formatNumber(taxPercent)}%):', '+ ${formatNumber(taxAmount)} đ'),
+
               if (surcharges.isNotEmpty) ...[
                 ...surcharges.map((s) {
                   final name = s['name']?.toString() ?? 'Phụ thu';
@@ -1034,7 +1073,6 @@ class PrintingService {
               _kvRow('Thành tiền:', '${formatNumber(totalPayable)} đ'),
               if (title == 'HÓA ĐƠN') ...[
                 if (payments.isNotEmpty) ...[
-                  // Thêm tiêu đề phụ
                   pw.Padding(
                     padding: const pw.EdgeInsets.only(top: 0),
                     child: pw.Text(
@@ -1066,7 +1104,6 @@ class PrintingService {
                 ),
                 pw.SizedBox(height: 4),
                 pw.Center(
-                  // Dùng pw.Image để hiển thị ảnh đã tải về
                   child: pw.Image(
                     qrImage,
                     width: 100,
@@ -1241,61 +1278,36 @@ class PrintingService {
     final generator = Generator(PaperSize.mm80, profile);
 
     List<int> totalBytes = [];
+    final model = _getPrinterModel(printer, type);
 
-    // 1. Ngắt kết nối cũ an toàn
+    // --- CHIẾN LƯỢC "GIAO DỊCH IN AN TOÀN" ---
+
+    // 1. Luôn ngắt kết nối cũ (phòng hờ)
     try {
       await printerManager.disconnect(type: type);
-    } catch (e) { /* Bỏ qua lỗi ngắt kết nối */ }
+      debugPrint("Đã ngắt kết nối cũ (phòng hờ).");
+    } catch (e) {
+      debugPrint("Lỗi khi ngắt kết nối phòng hờ (bỏ qua): $e");
+    }
 
+    // 2. Thêm độ trễ để HĐH (Windows) "thả" cổng USB
     if (type == PrinterType.usb) {
       await Future.delayed(const Duration(milliseconds: 200));
     }
+    // --- KẾT THÚC SỬA ---
 
     debugPrint("Đang kết nối tới máy in: ${printer.name} (${printer.address})");
-
-    bool result = false;
-
-    // --- SỬA LỖI: GỌI CONNECT TRỰC TIẾP TỪNG LOẠI ---
-    try {
-      if (type == PrinterType.network) {
-        final String cleanIp = (printer.address ?? '192.168.1.100').trim();
-        // Gọi trực tiếp TcpPrinterInput tại đây, không qua biến trung gian
-        result = await printerManager.connect(
-            type: type,
-            model: TcpPrinterInput(ipAddress: cleanIp, port: 9100)
-        );
-      } else if (type == PrinterType.usb) {
-        result = await printerManager.connect(
-            type: type,
-            model: UsbPrinterInput(
-                name: printer.name,
-                vendorId: printer.vendorId,
-                productId: printer.productId)
-        );
-      } else {
-        result = await printerManager.connect(
-            type: type,
-            model: BluetoothPrinterInput(
-                name: printer.name,
-                address: printer.address!,
-                isBle: false,
-                autoConnect: true)
-        );
-      }
-    } catch (e) {
-      debugPrint("Lỗi khi gọi connect: $e");
-      return false;
-    }
-    // ------------------------------------------------
-
+    final result = await printerManager.connect(type: type, model: model);
     debugPrint("Kết quả connect: $result");
 
     if (result == true) {
       try {
+        // 3. Thêm độ trễ SAU KHI connect
         if (type == PrinterType.network || type == PrinterType.usb) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
 
+        // --- Logic gom byte (Gộp lại 1 lần) ---
         await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
           final ui.Image uiImage = await page.toImage();
           final byteData =
@@ -1312,24 +1324,31 @@ class PrintingService {
         }
         totalBytes += generator.feed(1);
         totalBytes += generator.cut();
+        // --- Hết logic gom byte ---
 
-        debugPrint("Đang gửi ${totalBytes.length} bytes...");
+        // 4. Gửi TOÀN BỘ list TỔNG trong MỘT LẦN
+        debugPrint("Đang gửi ${totalBytes.length} bytes (ảnh + cắt) tới máy in...");
         await printerManager.send(
             type: type, bytes: Uint8List.fromList(totalBytes));
 
-        // Đợi in xong rồi ngắt kết nối
-        await Future.delayed(const Duration(milliseconds: 500));
+        debugPrint("Đã gửi xong.");
+
+        // 5. Ngắt kết nối NGAY SAU KHI in thành công
         await printerManager.disconnect(type: type);
+        debugPrint("Đã ngắt kết nối (sau khi thành công).");
 
         return true;
 
       } catch (e) {
         debugPrint("Lỗi khi gửi dữ liệu: $e");
-        await printerManager.disconnect(type: type).catchError((_) => false);
+        await printerManager.disconnect(type: type).catchError((_) {
+          debugPrint("Lỗi khi ngắt kết nối (trong catch).");
+          return false;
+        });
         return false;
       }
     } else {
-      throw Exception('Không thể kết nối đến máy in (Connect return false).');
+      throw Exception('Không thể kết nối đến máy in.');
     }
   }
 
@@ -1337,6 +1356,24 @@ class PrintingService {
     final printerManager = PrinterManager.instance;
     await printerManager.disconnect(type: type);
     debugPrint("Đã disconnect máy in khi thoát app.");
+  }
+
+  BasePrinterInput _getPrinterModel(PrinterDevice printer, PrinterType type) {
+    switch (type) {
+      case PrinterType.network:
+        return TcpPrinterInput(ipAddress: printer.address!, port: 9100);
+      case PrinterType.bluetooth:
+        return BluetoothPrinterInput(
+            name: printer.name,
+            address: printer.address!,
+            isBle: false,
+            autoConnect: true);
+      case PrinterType.usb:
+        return UsbPrinterInput(
+            name: printer.name,
+            vendorId: printer.vendorId,
+            productId: printer.productId);
+    }
   }
 
   pw.Widget _buildTimeBasedItemDetails(

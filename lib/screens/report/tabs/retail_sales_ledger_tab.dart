@@ -18,7 +18,7 @@ import '../../../services/settings_service.dart';
 import '../../../models/store_settings_model.dart';
 import '../../../services/firestore_service.dart';
 import '../../../bills/bill_history_screen.dart';
-import '../../tax_management_screen.dart' show kHkdGopRates, kVatRates;
+import '../../tax_management_screen.dart' show kAllTaxRates;
 
 class LedgerItemRow {
   final String billId;
@@ -31,6 +31,7 @@ class LedgerItemRow {
   final double subtotal;
   final String taxGroupName;
   final String? note;
+  final double taxAmount;
 
   LedgerItemRow({
     required this.billId,
@@ -43,6 +44,7 @@ class LedgerItemRow {
     required this.subtotal,
     required this.taxGroupName,
     this.note,
+    required this.taxAmount,
   });
 }
 
@@ -92,6 +94,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
 
   // Bộ lọc
   final TextEditingController _searchController = TextEditingController();
+  String _calcMethod = 'direct';
 
   @override
   bool get wantKeepAlive => true;
@@ -290,12 +293,13 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
     bool isFirstLoad = true;
 
     try {
-      // Tải cài đặt thuế (chỉ 1 lần)
-      final settings = await firestoreService
-          .getStoreTaxSettings(widget.currentUser.storeId);
+      final settings = await firestoreService.getStoreTaxSettings(widget.currentUser.storeId);
       if (settings != null) {
-        final rawMap =
-            settings['taxRateProductMap'] as Map<String, dynamic>? ?? {};
+        // 1. Lấy phương pháp tính
+        _calcMethod = settings['calcMethod'] ?? 'direct';
+
+        // 2. Load Map sản phẩm (Key đúng là taxAssignmentMap)
+        final rawMap = settings['taxAssignmentMap'] as Map<String, dynamic>? ?? {};
         _productTaxRateMap.clear();
         rawMap.forEach((taxKey, productIds) {
           if (productIds is List) {
@@ -305,16 +309,14 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
           }
         });
 
+        // 3. Tạo Map tên hiển thị
         _taxKeyToNameMap.clear();
-        kHkdGopRates.forEach((key, value) {
-          _taxKeyToNameMap[key] = value['name'] as String;
-        });
-        kVatRates.forEach((key, value) {
+        // Load cả 2 bảng để đảm bảo hiển thị đúng dù lịch sử có lẫn lộn
+        kAllTaxRates.forEach((key, value) {
           _taxKeyToNameMap[key] = value['name'] as String;
         });
       }
 
-      // Theo dõi giờ chốt sổ
       _settingsSub =
           settingsService.watchStoreSettings(settingsId).listen((settings) {
         if (!mounted) return;
@@ -440,12 +442,9 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
     _allLedgerItems.clear();
     final db = FirebaseFirestore.instance;
     final storeId = widget.currentUser.storeId;
-    final String defaultTaxKey = kVatRates.keys
-        .firstWhere((k) => k.contains('0'), orElse: () => 'VAT_0');
 
-    // Dùng Set để lọc trùng nhóm thuế
     final Set<String> uniqueTaxGroups = {};
-
+    final String defaultTaxKey = (_calcMethod == 'deduction') ? 'VAT_0' : 'HKD_0';
     try {
       final billsSnapshot = await db
           .collection('bills')
@@ -474,23 +473,39 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
               'Đơn vị';
 
           final String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
-          final String fullTaxName = _taxKeyToNameMap[taxKey] ?? '0%';
-          final String shortTaxName = fullTaxName.split('(').first.trim();
 
-          // Thêm vào danh sách nhóm thuế để lọc
+          // Lấy tên hiển thị (VD: 10% hoặc 1.5%)
+          String fullTaxName = _taxKeyToNameMap[taxKey] ?? '0%';
+          final String shortTaxName = fullTaxName.split('(').first.trim();
           uniqueTaxGroups.add(shortTaxName);
+
+          // --- BẮT ĐẦU SỬA ĐOẠN NÀY ---
+          final double quantity = (item['quantity'] as num?)?.toDouble() ?? 0.0;
+          final double price = (item['price'] as num?)?.toDouble() ?? 0.0;
+          final double itemSubtotal = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
+
+          // 1. Lấy tiền thuế đã lưu
+          double itemTaxVal = (item['taxAmount'] as num?)?.toDouble() ?? 0.0;
+
+          // 2. Fallback: Nếu bill cũ chưa lưu taxAmount (=0) thì tự tính lại để báo cáo không bị số 0
+          if (itemTaxVal == 0 && itemSubtotal > 0) {
+            final double rate = kAllTaxRates[taxKey]?['rate'] ?? 0.0;
+            if (rate > 0) {
+              itemTaxVal = itemSubtotal * rate;
+            }
+          }
 
           final row = LedgerItemRow(
             billId: doc.id,
-            // <-- LẤY ID ĐỂ MỞ PDF
             date: bill.createdAt,
             billCode: bill.billCode,
             productName: productName,
             unit: unit,
-            quantity: (item['quantity'] as num?)?.toDouble() ?? 0.0,
-            price: (item['price'] as num?)?.toDouble() ?? 0.0,
-            subtotal: (item['subtotal'] as num?)?.toDouble() ?? 0.0,
-            taxGroupName: shortTaxName,
+            quantity: quantity,
+            price: price,
+            subtotal: itemSubtotal, // Cột Doanh thu (chưa thuế)
+            taxAmount: itemTaxVal,  // Cột Tiền thuế
+            taxGroupName: shortTaxName, // % Thuế
             note: (item['note'] as String?) ?? '',
           );
           _allLedgerItems.add(row);
@@ -688,7 +703,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
   Widget build(BuildContext context) {
     super.build(context);
 
-    final bool isDesktop = MediaQuery.of(context).size.width > 800;
+    final bool isDesktop = MediaQuery.of(context).size.width > 850;
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -739,12 +754,13 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
       child: Row(
         children: [
-          // Điều chỉnh lại Flex cho cân đối: 2 - 4 - 2 - 2 - 2
+          // Tổng Flex = 13 (2+3+2+2+2+2)
           _buildHeaderCell('Thời gian', 2),
-          _buildHeaderCell('Sản phẩm', 4),
-          _buildHeaderCell('SL x Đ.Giá', 2, align: TextAlign.right),
-          _buildHeaderCell('Thành Tiền', 2, align: TextAlign.right),
-          _buildHeaderCell('Thuế', 1, align: TextAlign.right),
+          _buildHeaderCell('Sản phẩm', 3), // Giảm flex xuống 3 để nhường chỗ
+          _buildHeaderCell('SL x Giá', 2, align: TextAlign.right), // Thêm cột này
+          _buildHeaderCell('Doanh thu', 2, align: TextAlign.right),
+          _buildHeaderCell('Tiền thuế', 2, align: TextAlign.right),
+          _buildHeaderCell('Tổng cộng', 2, align: TextAlign.right),
         ],
       ),
     );
@@ -764,12 +780,10 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
     );
   }
 
-  // BẮT ĐẦU THAY THẾ HÀM _buildDataRow
   Widget _buildDataRow(LedgerItemRow item, int index, bool isDesktop) {
     final bool isEven = index % 2 == 0;
     final rowColor = isEven ? Colors.white : AppTheme.scaffoldBackgroundColor;
 
-    // === GIAO DIỆN MOBILE (Dạng Card) ===
     if (!isDesktop) {
       return Card(
         elevation: 2, // Tạo bóng đổ nhẹ
@@ -831,7 +845,6 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
                               color: AppTheme.primaryColor,
-                              decoration: TextDecoration.underline,
                               decorationColor: AppTheme.primaryColor,
                             ),
                           ),
@@ -896,107 +909,99 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Ngày / Mã HĐ (Flex 2)
+          // 1. Thời gian (Flex 2)
           Expanded(
             flex: 2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  DateFormat('dd/MM/yyyy HH:mm').format(item.date),
-                  style: const TextStyle(fontSize: 15, color: Colors.black54),
-                ),
+                Text(DateFormat('dd/MM/yy HH:mm').format(item.date), style: const TextStyle(fontSize: 15, color: Colors.black54)),
                 const SizedBox(height: 4),
                 InkWell(
                   onTap: () => _openBillDetail(item.billId),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          item.billCode,
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primaryColor,
-                              decoration: TextDecoration.underline,
-                              decorationColor: AppTheme.primaryColor),
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: Text(item.billCode, style: const TextStyle(fontSize: 15, color: AppTheme.primaryColor, decorationColor: AppTheme.primaryColor)),
                 ),
               ],
             ),
           ),
 
-          // 2. Hàng Hóa / ĐVT (Flex 4)
+          // 2. Sản phẩm (Flex 3)
           Expanded(
-            flex: 4,
+            flex: 3,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${item.productName} (${item.unit})',
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87),
-                  ),
-                ],
+              child: Text(
+                // --- SỬA LỖI: Không hiện ĐVT nếu trống ---
+                  item.unit.isNotEmpty && item.unit != 'null'
+                      ? '${item.productName} (${item.unit})'
+                      : item.productName,
+                  // -----------------------------------------
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)
               ),
             ),
           ),
 
-          // 3. SL x Đ.Giá (Flex 2)
+          // 3. SL x Giá (Flex 2)
           Expanded(
             flex: 2,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    formatNumber(item.quantity),
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'x ${formatNumber(item.price)}',
-                    style: const TextStyle(fontSize: 15, color: Colors.black54),
-                  ),
-                ],
-              ),
+            child: Text(
+              '${formatNumber(item.quantity)} x ${formatNumber(item.price)}',
+              style: const TextStyle(fontSize: 15, color: Colors.black87),
+              textAlign: TextAlign.right,
             ),
           ),
 
-          // 4. Thành Tiền (Flex 2)
+          // 4. Doanh thu (Flex 2) - BỎ IN ĐẬM
           Expanded(
             flex: 2,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4.0),
-              child: Text(
-                formatNumber(item.subtotal),
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
-                textAlign: TextAlign.right,
-              ),
+            child: Text(
+              formatNumber(item.subtotal),
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.normal, // <-- Sửa thành normal
+                  color: Colors.black87),
+              textAlign: TextAlign.right,
             ),
           ),
 
-          // 5. Nhóm Thuế (Flex 2)
+          // 5. Tiền thuế (Flex 2) - BỎ IN ĐẬM, SỬA FORMAT %
           Expanded(
-            flex: 1,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 8.0),
-              child: Text(
-                item.taxGroupName,
-                style: const TextStyle(fontSize: 16, color: Colors.black87),
-                textAlign: TextAlign.right,
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  formatNumber(item.taxAmount),
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.normal, // <-- Sửa thành normal
+                      color: Colors.black87), // <-- Đổi màu đen (hoặc giữ đỏ nếu muốn nhấn mạnh)
+                  textAlign: TextAlign.right,
+                ),
+                  Text(
+                      item.taxGroupName.replaceAll('.', ','),
+                      // ------------------------------------------------
+                      style: const TextStyle(
+                          fontSize: 15, // <-- Tăng size bằng với SL/Giá (15)
+                          color: Colors.black54
+                      ),
+                      textAlign: TextAlign.right
+                  ),
+              ],
+            ),
+          ),
+
+          // 6. Tổng cộng (Flex 2) - ĐỔI MÀU ĐEN
+          Expanded(
+            flex: 2,
+            child: Text(
+              formatNumber(item.subtotal + item.taxAmount),
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87 // <-- Đổi từ PrimaryColor sang Đen
               ),
+              textAlign: TextAlign.right,
             ),
           ),
         ],

@@ -1511,70 +1511,140 @@ class InventoryReportTabState extends State<InventoryReportTab> {
 
   Widget _buildTransactionRow(InventoryTransaction tx) {
     final timeStyle = const TextStyle(fontSize: 14, color: Colors.black);
-    final dateStyle = const TextStyle(fontSize: 14, color: Colors.black);
-    final codeStyle =
-        const TextStyle(fontSize: 14, color: AppTheme.primaryColor);
+    final codeStyle = const TextStyle(fontSize: 14, color: AppTheme.primaryColor, fontWeight: FontWeight.bold);
     final refStyle = const TextStyle(fontSize: 14, color: Colors.black);
+
+    // Style cho số lượng
+    final qtyStyle = TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.bold,
+      color: tx.type == 'NH' ? Colors.blue : Colors.red,
+    );
+    final qtyString = '${tx.type == 'NH' ? '+' : '-'}${formatNumber(tx.quantity)}';
+
+    // Kiểm tra màn hình
+    final bool isDesktop = MediaQuery.of(context).size.width > 750;
 
     return InkWell(
       onTap: () => _navigateToTransaction(tx),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
+        child: isDesktop
+            ? _buildDesktopRow(tx, timeStyle, codeStyle, refStyle, qtyString, qtyStyle)
+            : _buildMobileRow(tx, timeStyle, codeStyle, refStyle, qtyString, qtyStyle),
+      ),
+    );
+  }
+
+  // Helper widget cho Desktop Layout
+  Widget _buildDesktopRow(
+      InventoryTransaction tx,
+      TextStyle timeStyle,
+      TextStyle codeStyle,
+      TextStyle refStyle,
+      String qtyString,
+      TextStyle qtyStyle) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(
+            DateFormat('HH:mm dd/MM/yyyy').format(tx.date), // Thời gian 1 dòng
+            style: timeStyle,
+            textAlign: TextAlign.left,
+          ),
+        ),
+        Expanded(
+          flex: 4,
+          child: Text(
+            tx.code,
+            style: codeStyle,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+        ),
+        Expanded(
+          flex: 4,
+          child: Text(
+            tx.reference,
+            style: refStyle,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        Expanded(
+          flex: 3,
+          child: Text(
+            qtyString,
+            style: qtyStyle,
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Helper widget cho Mobile Layout
+  Widget _buildMobileRow(
+      InventoryTransaction tx,
+      TextStyle timeStyle,
+      TextStyle codeStyle,
+      TextStyle refStyle,
+      String qtyString,
+      TextStyle qtyStyle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Hàng 1: Thời gian (4) - Mã phiếu (6)
+        Row(
           children: [
             Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(DateFormat('HH:mm').format(tx.date), style: timeStyle),
-                  Text(DateFormat('dd/MM/yy').format(tx.date),
-                      style: dateStyle),
-                ],
-              ),
-            ),
-            Expanded(
               flex: 4,
-              child: Center(
-                child: Text(
-                  tx.code,
-                  style: codeStyle,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                ),
+              child: Text(
+                DateFormat('HH:mm dd/MM/yyyy').format(tx.date),
+                style: timeStyle.copyWith(color: Colors.grey[700], fontSize: 13),
+                textAlign: TextAlign.left,
               ),
             ),
             Expanded(
-              flex: 4,
-              child: Center(
-                child: Text(
-                  tx.reference,
-                  style: refStyle,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  '${tx.type == 'NH' ? '+' : '-'}${formatNumber(tx.quantity)}',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: tx.type == 'NH'
-                        ? Colors.blue
-                        : Colors.red,
-                  ),
-                ),
+              flex: 6,
+              child: Text(
+                tx.code,
+                style: codeStyle,
+                textAlign: TextAlign.right,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 4),
+        // Hàng 2: Tham chiếu (7) - Số lượng (3)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start, // Căn trên để tham chiếu dài không làm lệch số
+          children: [
+            Expanded(
+              flex: 8,
+              child: Text(
+                tx.reference,
+                style: refStyle,
+                textAlign: TextAlign.left,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                qtyString,
+                style: qtyStyle,
+                textAlign: TextAlign.right
+              ),
+            ),
+          ],
+        ),
+        const Divider(height: 2, thickness: 0.5, color: Colors.grey),
+      ],
     );
   }
 
@@ -1630,11 +1700,6 @@ class InventoryReportTabState extends State<InventoryReportTab> {
                     : Column(
                         children: [
                           _buildDetailHeader(),
-                          const Divider(
-                            height: 8,
-                            thickness: 0.5,
-                            color: Colors.grey,
-                          ),
                           ..._transactions
                               .map((tx) => _buildTransactionRow(tx)),
                         ],
@@ -1683,6 +1748,15 @@ class InventoryReportTabState extends State<InventoryReportTab> {
   }
 
   Widget _buildDetailHeader() {
+    // 1. Kiểm tra màn hình
+    final bool isDesktop = MediaQuery.of(context).size.width > 750;
+
+    // 2. Nếu là mobile -> Ẩn tiêu đề
+    if (!isDesktop) {
+      return const SizedBox.shrink();
+    }
+
+    // 3. Nếu là Desktop -> Giữ nguyên layout cũ
     return Padding(
       padding: const EdgeInsets.only(bottom: 4.0),
       child: IntrinsicHeight(
@@ -1692,7 +1766,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
             Expanded(
               flex: 3,
               child:
-                  _buildWrappedHeaderCell('THỜI GIAN', align: TextAlign.left),
+              _buildWrappedHeaderCell('THỜI GIAN', align: TextAlign.left),
             ),
             Expanded(
               flex: 4,
@@ -1705,7 +1779,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
             Expanded(
               flex: 3,
               child:
-                  _buildWrappedHeaderCell('SỐ LƯỢNG', align: TextAlign.right),
+              _buildWrappedHeaderCell('SỐ LƯỢNG', align: TextAlign.right),
             ),
           ],
         ),

@@ -74,7 +74,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   }
   bool _isCumulativeCostPrice = false;
   bool _isLoading = false;
-
   bool _canEditIsVisible = false;
   bool _canEditCost = false;
 
@@ -656,6 +655,45 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     }).toList();
   }
 
+  Future<void> _confirmDelete() async {
+    if (widget.productToEdit == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Xác nhận xóa'),
+        content: Text(
+            'Bạn có chắc chắn muốn xóa sản phẩm "${widget.productToEdit!.productName}" không?\nHành động này không thể hoàn tác.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Hủy'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Xóa', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _isLoading = true);
+      try {
+        await _firestoreService.deleteProduct(widget.productToEdit!.id);
+        ToastService().show(message: 'Đã xóa sản phẩm.', type: ToastType.success);
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      } catch (e) {
+        ToastService().show(message: 'Lỗi khi xóa: $e', type: ToastType.error);
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -697,6 +735,15 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                       },
                     ),
                   ),
+                  if (_isEditMode)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4.0, right: 4.0),
+                      child: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        tooltip: 'Xóa sản phẩm',
+                        onPressed: _confirmDelete,
+                      ),
+                    ),
                   const SizedBox(width: 2),
                 ],
               );

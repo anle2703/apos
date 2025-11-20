@@ -2843,18 +2843,16 @@ class _OrderScreenState extends State<OrderScreen> {
                           TextSpan(
                             text: currencyFormat.format(basePriceForUnit),
                             style: textTheme.bodyMedium?.copyWith(
-                              color: Colors.red.shade700,
-                              fontStyle: FontStyle.italic,
+                              color: Colors.red,
                               decoration: TextDecoration.lineThrough,
-                              decorationColor: Colors.red.shade700,
+                              decorationColor: Colors.red,
                             ),
                           ),
                         if (discountText.isNotEmpty)
                           TextSpan(
                             text: ' $discountText',
                             style: textTheme.bodyMedium?.copyWith(
-                                color: Colors.red.shade700,
-                                fontStyle: FontStyle.italic
+                                color: Colors.red,
                             ),
                           ),
                       ]),

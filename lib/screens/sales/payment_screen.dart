@@ -20,9 +20,7 @@ import 'vietqr_popup.dart';
 import '../../services/settings_service.dart';
 import '../../services/e_invoice_service.dart';
 import '../invoice/e_invoice_provider.dart';
-import '../../screens/tax_management_screen.dart';
-
-enum VatMethod { none, percentage, deduction }
+import '../../screens/tax_management_screen.dart' show kDirectRates, kDeductionRates;
 
 class PaymentState {
   final double discountAmount;
@@ -223,7 +221,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   double _calculatedVatAmount = 0.0;
   double _calculatedTncnAmount = 0.0;
-  VatMethod _vatMethod = VatMethod.none;
+  String _calcMethod = 'direct';
   bool _isDiscountPercent = false;
   final bool _printReceipt = true;
   final FirestoreService _firestoreService = FirestoreService();
@@ -234,7 +232,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   final Map<String, double> _paymentAmounts = {};
   final EInvoiceService _eInvoiceService = EInvoiceService();
   bool _autoIssueEInvoice = false;
-  bool _isEInvoiceConfigured = false;
 
   double _totalPayable = 0;
   double _changeAmount = 0;
@@ -251,7 +248,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   bool _settingsLoaded = false;
   bool _methodsLoaded = false;
   String? _defaultPaymentMethodId;
-  Map<String, dynamic> _taxThresholds = {};
   Timer? _debounce;
   Timer? _voucherDebounce;
   final Set<String> _confirmedBankMethods = {};
@@ -285,8 +281,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   Future<void> _loadInitialData() async {
-    _taxThresholds = await _firestoreService.getTaxThresholds();
-
     // 1. Tải cài đặt điểm và thuế TRƯỚC
     await Future.wait([
       _loadPointsSettings(),
@@ -294,7 +288,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     ]);
 
     // 2. Tính toán tổng tiền (để có _totalPayable bao gồm thuế/phụ phí)
-    // Truyền true để chỉ tính tổng, chưa tính tiền thừa/nợ
     _calculateTotal(initialLoad: true);
 
     // 3. Sau đó mới tải PTTT và gán tiền
@@ -308,7 +301,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final configStatus = await _eInvoiceService.getConfigStatus(ownerUid);
       if (configStatus.isConfigured) {
         setState(() {
-          _isEInvoiceConfigured = true;
           _autoIssueEInvoice = configStatus.autoIssueOnPayment;
         });
       }
@@ -319,9 +311,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     try {
       _storeTaxSettings = await _firestoreService.getStoreTaxSettings(widget.currentUser.storeId);
       if (_storeTaxSettings != null) {
-
-        // Tạo Map tra cứu ngược
-        final rawMap = _storeTaxSettings!['taxRateProductMap'] as Map<String, dynamic>? ?? {};
+        // 1. Load Map sản phẩm
+        final rawMap = _storeTaxSettings!['taxAssignmentMap'] as Map<String, dynamic>? ?? {}; // Đổi tên key cho đúng với TaxManager mới
         _productTaxRateMap.clear();
         rawMap.forEach((taxKey, productIds) {
           if (productIds is List) {
@@ -331,22 +322,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           }
         });
 
-        final String businessTypeStr = _storeTaxSettings!['businessType'] ?? 'hkd';
-        final double annualRevenue = (_storeTaxSettings!['annualRevenue'] as num?)?.toDouble() ?? 0;
-
-        final double m1 = (_taxThresholds['hkd_revenue_threshold_group1'] as num?)?.toDouble() ?? 200000000;
-        final double m2 = (_taxThresholds['hkd_revenue_threshold_group2'] as num?)?.toDouble() ?? 3000000000;
-
-        if (businessTypeStr == 'hkd') {
-          if (annualRevenue <= m1) {
-            _vatMethod = VatMethod.none;
-          } else if (annualRevenue < m2) {
-            _vatMethod = VatMethod.percentage;
-          } else {
-            _vatMethod = VatMethod.deduction;
-          }
-        } else { // 'dn'
-          _vatMethod = VatMethod.deduction;
+        // 2. Load Phương pháp tính thuế (Quan trọng)
+        // Ưu tiên lấy từ calcMethod, nếu không có thì fallback về logic cũ
+        if (_storeTaxSettings!.containsKey('calcMethod')) {
+          _calcMethod = _storeTaxSettings!['calcMethod'];
+        } else {
+          // Logic fallback cho dữ liệu cũ (nếu cần)
+          final entityType = _storeTaxSettings!['entityType'] ?? 'hkd';
+          _calcMethod = (entityType == 'dn') ? 'deduction' : 'direct';
         }
       }
     } catch (e) {
@@ -473,51 +456,44 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   (double, double) _getCalculatedTaxes() {
-    if (_storeTaxSettings == null || _productTaxRateMap.isEmpty || _vatMethod == VatMethod.none) {
+    if (_storeTaxSettings == null) {
       return (0.0, 0.0);
     }
 
     double totalTax = 0.0;
-    final String defaultTaxKey = kHkdGopRates.keys.first; // "HKD_GOP_0"
+
+    final bool isDeduction = _calcMethod == 'deduction';
+    final rateMap = isDeduction ? kDeductionRates : kDirectRates;
+    final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
 
     for (final item in widget.order.items) {
       final productMap = (item['product'] as Map<String, dynamic>?) ?? {};
       final productId = productMap['id'] as String?;
 
-      final String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
+      String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
+
+      if (!rateMap.containsKey(taxKey)) {
+        taxKey = defaultTaxKey;
+      }
+
       final double itemSubtotal = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
-
-      double rate = 0.0;
-
-      if (_vatMethod == VatMethod.percentage) {
-        // HKD Nhóm 2 dùng kHkdGopRates
-        rate = kHkdGopRates[taxKey]?['rate'] ?? 0.0;
-      }
-      else if (_vatMethod == VatMethod.deduction) {
-        // HKD Nhóm 3 và DN dùng kVatRates
-        rate = kVatRates[taxKey]?['rate'] ?? 0.0;
-      }
-
+      final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
       totalTax += (itemSubtotal * rate);
     }
 
-    // Trả về toàn bộ thuế trong _calculatedVatAmount, _calculatedTncnAmount luôn là 0
     return (totalTax.roundToDouble(), 0.0);
   }
 
   void _calculateTotal({bool initialLoad = false}) {
-    // Nếu chưa load xong settings mà không phải initialLoad thì return
     if (!initialLoad && (!_settingsLoaded || !_methodsLoaded || _storeTaxSettings == null)) return;
 
     final (newVatAmount, newTncnAmount) = _getCalculatedTaxes();
-
     final subtotal = widget.subtotal;
     final discountAmount = _calculateDiscount();
-
-    int pointsUsed = parseVN(_pointsController.text).toInt();
     final int maxPoints = widget.customer?.points ?? 0;
 
-    // Logic kiểm tra điểm
+    int pointsUsed = parseVN(_pointsController.text).toInt();
+
     if (pointsUsed > maxPoints) {
       pointsUsed = maxPoints;
       if (!initialLoad) {
@@ -528,16 +504,12 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     final double pointsValue = pointsUsed * _redeemRate;
     final totalSurcharge = _calculateTotalSurcharge();
 
-    // --- TÍNH TỔNG PHẢI TRẢ (Đã bao gồm thuế) ---
-    // Thuế luôn được cộng vào
     double taxToAdd = newVatAmount + newTncnAmount;
     final double finalTotal = (subtotal - discountAmount - pointsValue - _voucherDiscountValue + totalSurcharge + taxToAdd);
-
     final newTotalPayable = finalTotal > 0 ? finalTotal.roundToDouble() : 0.0;
 
-    // --- TÍNH TIỀN THỪA/NỢ ---
     double newChange = 0;
-    double newDebt = newTotalPayable; // Mặc định nợ bằng tổng tiền
+    double newDebt = newTotalPayable;
 
     if (!initialLoad) {
       final double totalPaid = _paymentAmounts.values.fold(0.0, (a, b) => a + b);
@@ -868,16 +840,19 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         bankDetailsForPrinting: bankDetails,
       );
 
-      final List<Map<String, dynamic>> billItems =
-          widget.order.items.map((item) {
+      final bool isDeduction = _calcMethod == 'deduction';
+      final rateMap = isDeduction ? kDeductionRates : kDirectRates;
+      final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
+
+      final List<Map<String, dynamic>> billItems = widget.order.items.map((item) {
         final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
+
+        // 1. Logic xử lý sản phẩm tính giờ (Giữ nguyên logic cũ)
         final productData = item['product'] as Map<String, dynamic>? ?? {};
-        final serviceSetup =
-            productData['serviceSetup'] as Map<String, dynamic>?;
+        final serviceSetup = productData['serviceSetup'] as Map<String, dynamic>?;
         final isTimeBased = serviceSetup?['isTimeBased'] == true;
         if (isTimeBased) {
-          final priceBreakdown =
-              List<Map<String, dynamic>>.from(item['priceBreakdown'] ?? []);
+          final priceBreakdown = List<Map<String, dynamic>>.from(item['priceBreakdown'] ?? []);
           int totalMinutes = 0;
           for (var block in priceBreakdown) {
             totalMinutes += (block['minutes'] as num?)?.toInt() ?? 0;
@@ -886,6 +861,20 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             newItem['quantity'] = totalMinutes / 60.0;
           }
         }
+
+        // 2. LOGIC MỚI: Lưu chi tiết thuế vào từng dòng
+        final productId = productData['id'] as String?;
+        String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
+        if (!rateMap.containsKey(taxKey)) taxKey = defaultTaxKey;
+
+        final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
+        final double subtotal = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
+        final double taxAmt = subtotal * rate; // Tiền thuế của dòng này
+
+        newItem['taxAmount'] = taxAmt; // Lưu tiền thuế
+        newItem['taxRate'] = rate;     // Lưu tỷ lệ %
+        newItem['taxKey'] = taxKey;    // Lưu mã thuế (HKD_RETAIL, VAT_10...)
+
         return newItem;
       }).toList();
 
@@ -1147,6 +1136,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'eInvoiceFullUrl': eInvoiceResult?.lookupUrl,
         'eInvoiceMst': eInvoiceResult?.mst,
         'billCode': newBillId.split('_').last,
+
+        // --- THÊM DÒNG NÀY ---
+        // Để PrintingService xác định được loại thuế (HKD hay VAT) và hiển thị % từng món
+        'items': billItems,
+        // ---------------------
       },
       'billCode': newBillId.split('_').last,
     };
@@ -1302,7 +1296,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     try {
       final firestore = FirestoreService();
       final storeInfo =
-          await firestore.getStoreDetails(widget.currentUser.storeId);
+      await firestore.getStoreDetails(widget.currentUser.storeId);
       if (storeInfo == null) {
         throw Exception("Không tìm thấy thông tin cửa hàng.");
       }
@@ -1325,7 +1319,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _defaultPaymentMethodId != _cashMethod?.id) {
         try {
           final defaultMethod = _availableMethods.firstWhere(
-            (m) => m.id == _defaultPaymentMethodId,
+                (m) => m.id == _defaultPaymentMethodId,
           );
 
           if (defaultMethod.qrDisplayOnProvisionalBill) {
@@ -1339,6 +1333,37 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         }
       }
 
+      // --- BẮT ĐẦU SỬA: Tính toán chi tiết thuế cho từng món ---
+      // Lấy cấu hình thuế hiện tại
+      final bool isDeduction = _calcMethod == 'deduction';
+      final rateMap = isDeduction ? kDeductionRates : kDirectRates;
+      final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
+
+      // Map lại items để thêm taxRate và taxKey
+      final List<Map<String, dynamic>> detailedItems = widget.order.items.map((item) {
+        final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
+
+        final productData = item['product'] as Map<String, dynamic>? ?? {};
+        final productId = productData['id'] as String?;
+
+        // Tìm mã thuế của sản phẩm
+        String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
+
+        // Fallback nếu key không tồn tại trong bảng thuế hiện tại
+        if (!rateMap.containsKey(taxKey)) {
+          taxKey = defaultTaxKey;
+        }
+
+        final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
+
+        // Gán thông tin thuế vào item để PrintingService đọc được
+        newItem['taxRate'] = rate;
+        newItem['taxKey'] = taxKey;
+
+        return newItem;
+      }).toList();
+      // --- KẾT THÚC SỬA ---
+
       final summaryData = {
         'subtotal': widget.subtotal,
         'discount': _calculateDiscount(),
@@ -1350,7 +1375,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'taxPercent': 0.0,
         'surcharges': _surcharges
             .map((s) =>
-                {'name': s.name, 'amount': s.amount, 'isPercent': s.isPercent})
+        {'name': s.name, 'amount': s.amount, 'isPercent': s.isPercent})
             .toList(),
         'totalPayable': _totalPayable,
         'startTime': widget.order.startTime,
@@ -1363,15 +1388,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'changeAmount': 0.0,
         'useDetailedLayout': true,
         'bankDetails': bankDetailsForProvisional,
+        // QUAN TRỌNG: Truyền danh sách items đã có thuế vào summary
+        'items': detailedItems,
       };
 
       final printData = {
         'storeId': widget.currentUser.storeId,
         'tableName': widget.order.tableName,
         'userName': widget.currentUser.name ?? 'Unknown',
-        'items': widget.order.items
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList(),
+        'items': detailedItems, // Sử dụng detailedItems thay vì widget.order.items gốc
         'storeInfo': storeInfo,
         'showPrices': true,
         'summary': summaryData,
@@ -1499,7 +1524,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                           child: CustomTextFormField(
                             controller: _voucherController,
                             keyboardType: TextInputType.text,
-                            // Cho phép nhập chữ
                             textCapitalization: TextCapitalization.characters,
                             decoration: const InputDecoration(
                                 labelText: 'Voucher',
@@ -1615,29 +1639,19 @@ class _PaymentPanelState extends State<_PaymentPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Chỉ hiển thị 1 dòng thuế (VAT hoặc Gộp)
-                  if (_vatMethod != VatMethod.none && _calculatedVatAmount > 0)
+                  if (_calculatedVatAmount > 0)
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
                       leading: Icon(Icons.request_quote_outlined, color: Colors.grey.shade600),
-                      title: Text(_vatMethod == VatMethod.percentage
-                          ? 'Thuế gộp'
-                          : 'Thuế VAT'),
+
+                      title: Text(_calcMethod == 'deduction' ? 'Thuế VAT' : 'Thuế Gộp'),
+
                       trailing: Text(
                         '${formatNumber(_calculatedVatAmount)} đ',
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
-                      subtitle: const Text(
-                        '(Cộng vào tổng đơn)',
-                        style: TextStyle(fontStyle: FontStyle.italic),
-                      ),
                     ),
-
-                  // Dấu gạch
-                  if (_vatMethod != VatMethod.none && _calculatedVatAmount > 0)
-                    const Divider(),
-
                   _buildSurchargeInputs(),
                 ],
               ),
