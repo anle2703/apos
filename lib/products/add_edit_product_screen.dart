@@ -702,69 +702,77 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
           widget.productToEdit == null ? 'Thêm mới' : 'Chỉnh sửa',
         ),
         actions: [
-          if (_canEditIsVisible)
-            Builder(
-            builder: (context) {
-              final bool isDesktop = Theme.of(context).platform == TargetPlatform.windows ||
-                  Theme.of(context).platform == TargetPlatform.linux ||
-                  Theme.of(context).platform == TargetPlatform.macOS;
-              final bool isPosAndroid = false;
-              final showText = isDesktop || isPosAndroid;
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 1. Cụm Switch "Cho phép bán"
+              if (_canEditIsVisible)
+                Builder(
+                  builder: (context) {
+                    final bool isDesktop = Theme.of(context).platform == TargetPlatform.windows ||
+                        Theme.of(context).platform == TargetPlatform.linux ||
+                        Theme.of(context).platform == TargetPlatform.macOS;
+                    final bool isPosAndroid = false;
+                    final showText = isDesktop || isPosAndroid;
 
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showText)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Text(
-                        'Cho phép bán',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black),
-                      ),
-                    ),
-                  Transform.scale(
-                    scale: 0.8,
-                    child: Switch.adaptive(
-                      value: _isVisibleInMenu,
-                      onChanged: (v) {
-                        setState(() => _isVisibleInMenu = v);
-                        ToastService().show(
-                          message: v ? "Đã bật Cho phép bán" : "Không cho phép bán",
-                          type: v ? ToastType.success : ToastType.warning,
-                        );
-                      },
-                    ),
-                  ),
-                  if (_isEditMode)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4.0, right: 4.0),
-                      child: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        tooltip: 'Xóa sản phẩm',
-                        onPressed: _confirmDelete,
-                      ),
-                    ),
-                  const SizedBox(width: 2),
-                ],
-              );
-            },
-          ),
-          _isLoading
-              ? const Padding(
-            padding: EdgeInsets.only(top: 16.0, bottom: 16.0, left: 16.0, right: 8.0),
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(),
-            ),
-          )
-              : Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: IconButton(
-              icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 25),
-              onPressed: _saveProduct,
-              tooltip: 'Lưu Hàng hóa',
-            ),
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (showText)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Text(
+                              'Cho phép bán',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Colors.grey.shade600,
+                                fontWeight: FontWeight.bold, fontSize: 15
+                              ),
+                            ),
+                          ),
+                        Transform.scale(
+                          scale: 0.8,
+                          child: Switch.adaptive(
+                            value: _isVisibleInMenu,
+                            onChanged: (v) {
+                              setState(() => _isVisibleInMenu = v);
+                              ToastService().show(
+                                message: v ? "Đã bật Cho phép bán" : "Không cho phép bán",
+                                type: v ? ToastType.success : ToastType.warning,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+
+              // 2. Nút Xóa (Chỉ hiện khi đang sửa)
+              if (_isEditMode)
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  tooltip: 'Xóa sản phẩm',
+                  onPressed: _confirmDelete,
+                ),
+
+              // 3. Nút Lưu (Hoặc Loading)
+              _isLoading
+                  ? const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12.0),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+                  : IconButton(
+                icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 28),
+                onPressed: _saveProduct,
+                tooltip: 'Lưu Hàng hóa',
+              ),
+
+              const SizedBox(width: 8), // Khoảng cách lề phải
+            ],
           ),
         ],
       ),
