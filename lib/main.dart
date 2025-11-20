@@ -4,6 +4,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:flutter/foundation.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -15,13 +17,18 @@ import 'screens/auth_gate.dart';
 import 'theme/app_theme.dart';
 import 'widgets/toast_manager.dart';
 
-
 final PrintingService globalPrintingService =
 PrintingService(tableName: '', userName: '');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+    appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
+  );
+
   await initializeDateFormatting('vi_VN', null);
   runApp(const MyApp());
 }
@@ -32,7 +39,6 @@ Future<void> startPrintServerForUser(UserModel user) async {
     final bool isServerMode = prefs.getBool('is_print_server') ?? false;
 
     if (!isServerMode) {
-      // Không ở chế độ server, không làm gì cả
       return;
     }
 
@@ -53,7 +59,6 @@ Future<void> stopPrintServer() async {
   await CloudPrintService().stopListener();
 }
 
-
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
   @override
@@ -73,7 +78,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     globalPrintingService.disconnectPrinter(PrinterType.network);
     globalPrintingService.disconnectPrinter(PrinterType.bluetooth);
     globalPrintingService.disconnectPrinter(PrinterType.usb);
-    stopPrintServer(); // Gọi hàm dừng chung
+    stopPrintServer();
     super.dispose();
   }
 
@@ -83,18 +88,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       title: '4Cash App',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      // === THÊM CẤU HÌNH TIẾNG VIỆT TỪ ĐÂY ===
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [
-        Locale('vi', ''), // Thêm tiếng Việt
-        Locale('en', ''), // Ngôn ngữ dự phòng (tùy chọn)
+        Locale('vi', ''),
+        Locale('en', ''),
       ],
-      locale: const Locale('vi'), // Đặt tiếng Việt làm mặc định
-      // === ĐẾN ĐÂY ===
+      locale: const Locale('vi'),
       builder: (context, child) =>
           ToastManager(child: child ?? const SizedBox.shrink()),
       home: const AuthGate(),

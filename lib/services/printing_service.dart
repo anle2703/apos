@@ -263,7 +263,6 @@ class PrintingService {
     }
   }
 
-  // ... (Giữ nguyên hàm _generateKitchenPdf)
   Future<Uint8List> _generateKitchenPdf({
     required String title,
     required List<OrderItem> items,
@@ -418,7 +417,6 @@ class PrintingService {
     return pdf.save();
   }
 
-
   Future<bool> printReceiptBill({
     required Map<String, String> storeInfo,
     required List<OrderItem> items,
@@ -450,7 +448,6 @@ class PrintingService {
     }
   }
 
-  // ... (Giữ nguyên hàm _generateBillPdf và generateReceiptPdf)
   Future<Uint8List> _generateBillPdf({
     required String title,
     required List<OrderItem> items,
@@ -1244,36 +1241,61 @@ class PrintingService {
     final generator = Generator(PaperSize.mm80, profile);
 
     List<int> totalBytes = [];
-    final model = _getPrinterModel(printer, type);
 
-    // --- CHIẾN LƯỢC "GIAO DỊCH IN AN TOÀN" ---
-
-    // 1. Luôn ngắt kết nối cũ (phòng hờ)
+    // 1. Ngắt kết nối cũ an toàn
     try {
       await printerManager.disconnect(type: type);
-      debugPrint("Đã ngắt kết nối cũ (phòng hờ).");
-    } catch (e) {
-      debugPrint("Lỗi khi ngắt kết nối phòng hờ (bỏ qua): $e");
-    }
+    } catch (e) { /* Bỏ qua lỗi ngắt kết nối */ }
 
-    // 2. Thêm độ trễ để HĐH (Windows) "thả" cổng USB
     if (type == PrinterType.usb) {
       await Future.delayed(const Duration(milliseconds: 200));
     }
-    // --- KẾT THÚC SỬA ---
 
     debugPrint("Đang kết nối tới máy in: ${printer.name} (${printer.address})");
-    final result = await printerManager.connect(type: type, model: model);
+
+    bool result = false;
+
+    // --- SỬA LỖI: GỌI CONNECT TRỰC TIẾP TỪNG LOẠI ---
+    try {
+      if (type == PrinterType.network) {
+        final String cleanIp = (printer.address ?? '192.168.1.100').trim();
+        // Gọi trực tiếp TcpPrinterInput tại đây, không qua biến trung gian
+        result = await printerManager.connect(
+            type: type,
+            model: TcpPrinterInput(ipAddress: cleanIp, port: 9100)
+        );
+      } else if (type == PrinterType.usb) {
+        result = await printerManager.connect(
+            type: type,
+            model: UsbPrinterInput(
+                name: printer.name,
+                vendorId: printer.vendorId,
+                productId: printer.productId)
+        );
+      } else {
+        result = await printerManager.connect(
+            type: type,
+            model: BluetoothPrinterInput(
+                name: printer.name,
+                address: printer.address!,
+                isBle: false,
+                autoConnect: true)
+        );
+      }
+    } catch (e) {
+      debugPrint("Lỗi khi gọi connect: $e");
+      return false;
+    }
+    // ------------------------------------------------
+
     debugPrint("Kết quả connect: $result");
 
     if (result == true) {
       try {
-        // 3. Thêm độ trễ SAU KHI connect
         if (type == PrinterType.network || type == PrinterType.usb) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
 
-        // --- Logic gom byte (Gộp lại 1 lần) ---
         await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
           final ui.Image uiImage = await page.toImage();
           final byteData =
@@ -1290,31 +1312,24 @@ class PrintingService {
         }
         totalBytes += generator.feed(1);
         totalBytes += generator.cut();
-        // --- Hết logic gom byte ---
 
-        // 4. Gửi TOÀN BỘ list TỔNG trong MỘT LẦN
-        debugPrint("Đang gửi ${totalBytes.length} bytes (ảnh + cắt) tới máy in...");
+        debugPrint("Đang gửi ${totalBytes.length} bytes...");
         await printerManager.send(
             type: type, bytes: Uint8List.fromList(totalBytes));
 
-        debugPrint("Đã gửi xong.");
-
-        // 5. Ngắt kết nối NGAY SAU KHI in thành công
+        // Đợi in xong rồi ngắt kết nối
+        await Future.delayed(const Duration(milliseconds: 500));
         await printerManager.disconnect(type: type);
-        debugPrint("Đã ngắt kết nối (sau khi thành công).");
 
         return true;
 
       } catch (e) {
         debugPrint("Lỗi khi gửi dữ liệu: $e");
-        await printerManager.disconnect(type: type).catchError((_) {
-          debugPrint("Lỗi khi ngắt kết nối (trong catch).");
-          return false;
-        });
+        await printerManager.disconnect(type: type).catchError((_) => false);
         return false;
       }
     } else {
-      throw Exception('Không thể kết nối đến máy in.');
+      throw Exception('Không thể kết nối đến máy in (Connect return false).');
     }
   }
 
@@ -1322,24 +1337,6 @@ class PrintingService {
     final printerManager = PrinterManager.instance;
     await printerManager.disconnect(type: type);
     debugPrint("Đã disconnect máy in khi thoát app.");
-  }
-
-  BasePrinterInput _getPrinterModel(PrinterDevice printer, PrinterType type) {
-    switch (type) {
-      case PrinterType.network:
-        return TcpPrinterInput(ipAddress: printer.address!, port: 9100);
-      case PrinterType.bluetooth:
-        return BluetoothPrinterInput(
-            name: printer.name,
-            address: printer.address!,
-            isBle: false,
-            autoConnect: true);
-      case PrinterType.usb:
-        return UsbPrinterInput(
-            name: printer.name,
-            vendorId: printer.vendorId,
-            productId: printer.productId);
-    }
   }
 
   pw.Widget _buildTimeBasedItemDetails(

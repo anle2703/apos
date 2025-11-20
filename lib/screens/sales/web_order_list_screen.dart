@@ -77,13 +77,12 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     super.initState();
     _productsFuture = _firestoreService
         .getAllProductsStream(widget.currentUser.storeId)
-        .first;
+        .first
+        .timeout(const Duration(seconds: 5), onTimeout: () => []);
 
-    _ordersStreamController =
-        StreamController<List<Map<String, dynamic>>>.broadcast();
+    _ordersStreamController = StreamController<List<Map<String, dynamic>>>();
     _ordersStream = _ordersStreamController.stream;
 
-    // Tải Cài đặt, Cài đặt sẽ kích hoạt tải Stream
     _loadSettingsAndFetchData();
   }
 
@@ -406,21 +405,22 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   Future<void> _loadDependentStream() async {
     await _orderSubscription?.cancel();
 
-    // Đảm bảo ngày đã được tính
     if (_startDate == null || _endDate == null) {
-      _ordersStreamController.add([]); // Gửi danh sách rỗng
+      if (!_ordersStreamController.isClosed) {
+        _ordersStreamController.add([]);
+      }
       return;
     }
 
     try {
       final allProducts = await _productsFuture;
+
       if (!mounted) return;
 
       Query query = FirebaseFirestore.instance
           .collection('web_orders')
           .where('storeId', isEqualTo: widget.currentUser.storeId);
 
-      // Lọc theo Trạng thái
       if (_selectedStatus != WebOrderStatusFilter.all) {
         String statusString;
         switch (_selectedStatus) {
@@ -443,7 +443,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         query = query.where('status', isEqualTo: statusString);
       }
 
-      // Lọc theo Loại đơn
       if (_selectedType != WebOrderTypeFilter.all) {
         String typeString;
         switch (_selectedType) {
@@ -463,34 +462,39 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         query = query.where('type', isEqualTo: typeString);
       }
 
-      query = query.where('createdAt', isGreaterThanOrEqualTo: _startDate);
-      query = query.where('createdAt', isLessThanOrEqualTo: _endDate);
+      final startTimestamp = Timestamp.fromDate(_startDate!);
+      final endTimestamp = Timestamp.fromDate(_endDate!);
 
+      query = query.where('createdAt', isGreaterThanOrEqualTo: startTimestamp);
+      query = query.where('createdAt', isLessThanOrEqualTo: endTimestamp);
       query = query.orderBy('createdAt', descending: true);
 
-      _orderSubscription = query
-          .snapshots()
-          .map((snapshot) => snapshot.docs.map((doc) {
-        final model = WebOrderModel.fromFirestore(doc, allProducts);
-        final data = doc.data() as Map<String, dynamic>;
-        final confirmedBy = data['confirmedBy'] as String?;
-        final note = data['note'] as String?;
-        final confirmedAt = data['confirmedAt'] as Timestamp?;
-        final numberOfCustomers = data['customerInfo']?['numberOfCustomers'] as int?;
-        return {'model': model, 'confirmedBy': confirmedBy, 'note': note, 'confirmedAt': confirmedAt, 'numberOfCustomers': numberOfCustomers};
-      }).toList())
-          .listen((data) {
-        if (mounted) {
+      _orderSubscription = query.snapshots().map((snapshot) {
+        return snapshot.docs.map((doc) {
+          final model = WebOrderModel.fromFirestore(doc, allProducts);
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'model': model,
+            'confirmedBy': data['confirmedBy'] as String?,
+            'note': data['note'] as String?,
+            'confirmedAt': data['confirmedAt'] as Timestamp?,
+            'numberOfCustomers': data['customerInfo']?['numberOfCustomers'] as int?,
+          };
+        }).toList();
+      }).listen((data) {
+        if (mounted && !_ordersStreamController.isClosed) {
           _ordersStreamController.add(data);
         }
       }, onError: (e) {
-        if (mounted) {
-          _ordersStreamController.addError(e);
+        debugPrint("Lỗi Stream WebOrder: $e");
+        if (mounted && !_ordersStreamController.isClosed) {
+          _ordersStreamController.add([]);
         }
       });
     } catch (e) {
-      if (mounted) {
-        _ordersStreamController.addError(e);
+      debugPrint("Lỗi _loadDependentStream: $e");
+      if (mounted && !_ordersStreamController.isClosed) {
+        _ordersStreamController.add([]);
       }
     }
   }
@@ -1589,7 +1593,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     }
   }
 
-  // --- HÀM MỚI ---
   Future<void> _updateOrderNote(String orderId, String newNote) async {
     try {
       await FirebaseFirestore.instance
@@ -1606,7 +1609,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     }
   }
 
-  // --- HÀM MỚI ---
   Future<void> _showEditNoteDialog(String orderId, String? currentNote) async {
     final controller = TextEditingController(text: currentNote);
     final navigator = Navigator.of(context);
