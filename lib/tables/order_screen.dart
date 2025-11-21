@@ -97,6 +97,7 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _notifyKitchenAfterPayment = false;
   bool _showPricesOnProvisional = true;
   bool _showPricesOnReceipt = true;
+  bool _skipKitchenPrint = false;
   String? _lastCustomerIdFromOrder;
   String _searchQuery = '';
   Stream<DocumentSnapshot>? _orderStream;
@@ -112,6 +113,9 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _promptForCash = true;
   List<QuickNoteModel> _quickNotes = [];
   String? _customerNoteFromOrder;
+  bool _printLabelOnKitchen = false;
+  double _labelWidth = 50.0;
+  double _labelHeight = 30.0;
 
   @override
   void initState() {
@@ -127,6 +131,10 @@ class _OrderScreenState extends State<OrderScreen> {
         _showPricesOnProvisional = s.showPricesOnProvisional;
         _showPricesOnReceipt = s.showPricesOnReceipt;
         _promptForCash = s.promptForCash ?? true;
+        _skipKitchenPrint = s.skipKitchenPrint ?? false;
+        _printLabelOnKitchen = s.printLabelOnKitchen ?? false;
+        _labelWidth = s.labelWidth ?? 50.0;
+        _labelHeight = s.labelHeight ?? 30.0;
       });
     }, onError: (e, st) {
       debugPrint('watchStoreSettings error: $e');
@@ -689,26 +697,48 @@ class _OrderScreenState extends State<OrderScreen> {
     if (performPrint) {
       final bool isOnlineOrder = widget.table.id.startsWith('ship_') || widget.table.id.startsWith('schedule_');
 
-      if (addItems.isNotEmpty) {
-        final Map<String, dynamic> payload = {
-          'storeId': widget.currentUser.storeId,
-          'tableName': _currentOrder!.tableName,
-          'userName': widget.currentUser.name ?? 'Unknown',
-          'items': addItems,
-          'printType': 'add'
-        };
-        if (isOnlineOrder && _customerNameFromOrder != null && _customerNameFromOrder!.isNotEmpty) {
-          payload['customerName'] = _customerNameFromOrder;
+      // --- LOGIC 1: IN PHIẾU BẾP (A, B, C...) ---
+      if (!_skipKitchenPrint) {
+        if (addItems.isNotEmpty) {
+          final Map<String, dynamic> payload = {
+            'storeId': widget.currentUser.storeId,
+            'tableName': _currentOrder!.tableName,
+            'userName': widget.currentUser.name ?? 'Unknown',
+            'items': addItems,
+            'printType': 'add'
+          };
+          if (isOnlineOrder && _customerNameFromOrder != null && _customerNameFromOrder!.isNotEmpty) {
+            payload['customerName'] = _customerNameFromOrder;
+          }
+          PrintQueueService().addJob(PrintJobType.kitchen, payload);
         }
-        PrintQueueService().addJob(PrintJobType.kitchen, payload);
+
+        if (cancelItems.isNotEmpty) {
+          PrintQueueService().addJob(PrintJobType.cancel, {
+            'storeId': widget.currentUser.storeId,
+            'tableName': _currentOrder!.tableName,
+            'userName': widget.currentUser.name ?? 'Unknown',
+            'items': cancelItems,
+            'printType': 'cancel'
+          });
+        }
       }
 
-      if (cancelItems.isNotEmpty) {
-        PrintQueueService().addJob(PrintJobType.cancel, {
-          'storeId': widget.currentUser.storeId,
-          'tableName': _currentOrder!.tableName,
-          'userName': widget.currentUser.name ?? 'Unknown',
-          'items': cancelItems, 'printType': 'cancel'});
+      // --- LOGIC 2: IN TEM (LABEL) ---
+      // Dùng biến trực tiếp thay vì SharedPreferences để đảm bảo đồng bộ
+      if (addItems.isNotEmpty) {
+        debugPrint(">>> [DEBUG] Checking Label Print: Setting=$_printLabelOnKitchen");
+
+        if (_printLabelOnKitchen) {
+          debugPrint(">>> [DEBUG] Tạo lệnh in Tem...");
+          PrintQueueService().addJob(PrintJobType.label, {
+            'storeId': widget.currentUser.storeId,
+            'tableName': _currentOrder!.tableName,
+            'items': addItems,
+            'labelWidth': _labelWidth,
+            'labelHeight': _labelHeight,
+          });
+        }
       }
 
       if (addItems.isEmpty && cancelItems.isEmpty) {
@@ -716,8 +746,9 @@ class _OrderScreenState extends State<OrderScreen> {
             message: "Không có thay đổi số lượng để báo bếp.",
             type: ToastType.warning);
       } else {
-        ToastService().show(
-            message: "Đã gửi lệnh in báo chế biến.", type: ToastType.success);
+        String msg = "Đã gửi báo chế biến.";
+        if (_skipKitchenPrint) msg += " (Không in phiếu bếp)";
+        ToastService().show(message: msg, type: ToastType.success);
       }
     }
 

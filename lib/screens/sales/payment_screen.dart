@@ -1063,37 +1063,89 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     required EInvoiceResult? eInvoiceResult,
     required String newBillId,
   }) async {
-    if (!widget.printBillAfterPayment || !_printReceipt) {
-      return;
-    }
-    try {
-      final storeInfo =
-          await firestore.getStoreDetails(widget.currentUser.storeId);
+    debugPrint(">>> [DEBUG PAYMENT] Bắt đầu quy trình In sau thanh toán...");
 
-      if (storeInfo == null) {
-        ToastService().show(
-            message: 'Lỗi khi in: Không thể tải thông tin cửa hàng.',
-            type: ToastType.error);
-        return;
+    // 1. LOGIC IN HÓA ĐƠN (RECEIPT)
+    if (widget.printBillAfterPayment && _printReceipt) {
+      debugPrint(">>> [DEBUG PAYMENT] Điều kiện in Hóa đơn: THỎA MÃN. Đang tạo lệnh...");
+      try {
+        final storeInfo = await firestore.getStoreDetails(widget.currentUser.storeId);
+
+        if (storeInfo == null) {
+          debugPrint(">>> [DEBUG PAYMENT] Lỗi: Không lấy được storeInfo.");
+        } else {
+          final receiptPayload = _buildReceiptPayload(
+            storeInfo: storeInfo,
+            billItems: billItems,
+            result: result,
+            billData: billData,
+            eInvoiceResult: eInvoiceResult,
+            newBillId: newBillId,
+          );
+
+          PrintQueueService().addJob(PrintJobType.receipt, receiptPayload);
+          ToastService().show(message: 'Đã gửi lệnh in hóa đơn', type: ToastType.success);
+        }
+      } catch (e) {
+        debugPrint('>>> [DEBUG PAYMENT] Lỗi in hóa đơn: $e');
       }
+    } else {
+      debugPrint(">>> [DEBUG PAYMENT] Bỏ qua in Hóa đơn (Cài đặt tắt hoặc User bỏ chọn).");
+    }
 
-      final receiptPayload = _buildReceiptPayload(
-        storeInfo: storeInfo,
-        billItems: billItems,
-        result: result,
-        billData: billData,
-        eInvoiceResult: eInvoiceResult,
-        newBillId: newBillId,
-      );
+    // 2. LOGIC IN TEM (LABEL) - CHECK TRỰC TIẾP TỪ SERVER (OWNER SETTINGS)
+    try {
+      // Xác định ID của chủ cửa hàng để lấy cài đặt gốc
+      final String ownerUid = widget.currentUser.role == 'owner'
+          ? widget.currentUser.uid
+          : (widget.currentUser.ownerUid ?? widget.currentUser.uid);
 
-      PrintQueueService().addJob(PrintJobType.receipt, receiptPayload);
+      debugPrint(">>> [DEBUG PAYMENT] Đang lấy cài đặt từ Owner UID: $ownerUid");
 
-      ToastService().show(
-        message: 'Đã gửi lệnh in hóa đơn',
-        type: ToastType.success,
-      );
-    } catch (e) {
-      ToastService().show(message: 'Lỗi khi in: $e', type: ToastType.error);
+      // Gọi SettingsService để lấy dữ liệu mới nhất từ Firestore
+      final settings = await SettingsService().getStoreSettings(ownerUid);
+
+      // Lấy giá trị cài đặt (Mặc định là false nếu null)
+      final bool shouldPrintLabel = settings.printLabelOnPayment ?? false;
+
+      debugPrint(">>> [DEBUG PAYMENT] Kết quả Check Cài đặt 'printLabelOnPayment': $shouldPrintLabel");
+
+      if (shouldPrintLabel) {
+        final double w = settings.labelWidth ?? 50.0;
+        final double h = settings.labelHeight ?? 30.0;
+
+        // Lấy Bill Code
+        final String billCode = newBillId.split('_').last;
+
+        // --- SỬA: Lọc bỏ dịch vụ tính giờ khỏi danh sách in tem ---
+        final labelItems = billItems.where((item) {
+          final product = item['product'] as Map<String, dynamic>? ?? {};
+          final serviceSetup = product['serviceSetup'] as Map<String, dynamic>?;
+          // Giữ lại nếu KHÔNG phải là tính giờ
+          return serviceSetup?['isTimeBased'] != true;
+        }).toList();
+
+        if (labelItems.isNotEmpty) {
+          debugPrint(">>> [DEBUG PAYMENT] Đang tạo lệnh in Tem. Size: ${w}x$h, BillCode: $billCode");
+
+          PrintQueueService().addJob(PrintJobType.label, {
+            'storeId': widget.currentUser.storeId,
+            'tableName': billCode,
+            'items': labelItems, // Sử dụng danh sách đã lọc
+            'labelWidth': w,
+            'labelHeight': h,
+          });
+
+          ToastService().show(message: "Đã gửi lệnh in tem.", type: ToastType.success);
+        } else {
+          debugPrint(">>> [DEBUG PAYMENT] Không có món cần in tem (chỉ có dịch vụ tính giờ).");
+        }
+      } else {
+        debugPrint(">>> [DEBUG PAYMENT] KHÔNG in tem vì cài đặt của Chủ cửa hàng đang TẮT.");
+      }
+    } catch (e, st) {
+      debugPrint(">>> [DEBUG PAYMENT] Lỗi khi kiểm tra in tem: $e");
+      debugPrint(st.toString());
     }
   }
 

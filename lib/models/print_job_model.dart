@@ -9,6 +9,7 @@ enum PrintJobType {
   cashFlow,
   endOfDayReport,
   tableManagement,
+  label,
 }
 
 PrintJobType _printJobTypeFromString(String? s) {

@@ -1,3 +1,5 @@
+// File: lib/models/store_settings_model.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class StoreSettings {
@@ -14,6 +16,16 @@ class StoreSettings {
   final String? defaultPaymentMethodId;
   final bool? qrOrderRequiresConfirmation;
 
+  // --- CÁC TRƯỜNG CHO TEM NHÃN ---
+  final bool? printLabelOnKitchen;
+  final bool? printLabelOnPayment;
+  final double? labelWidth;
+  final double? labelHeight;
+
+  // --- TRƯỜNG MỚI: TẮT IN BẾP ---
+  final bool? skipKitchenPrint;
+  // ------------------------------
+
   const StoreSettings({
     required this.printBillAfterPayment,
     required this.allowProvisionalBill,
@@ -27,7 +39,13 @@ class StoreSettings {
     this.redeemRate,
     this.defaultPaymentMethodId,
     this.qrOrderRequiresConfirmation,
+    this.printLabelOnKitchen,
+    this.printLabelOnPayment,
+    this.labelWidth,
+    this.labelHeight,
 
+    // Thêm vào constructor
+    this.skipKitchenPrint,
   });
 
   factory StoreSettings.fromMap(Map<String, dynamic>? m) {
@@ -46,6 +64,13 @@ class StoreSettings {
       defaultPaymentMethodId    : (d['defaultPaymentMethodId'] as String?),
       qrOrderRequiresConfirmation: (d['qrOrderRequiresConfirmation'] as bool?) ?? false,
 
+      printLabelOnKitchen       : (d['printLabelOnKitchen'] as bool?),
+      printLabelOnPayment       : (d['printLabelOnPayment'] as bool?),
+      labelWidth                : (d['labelWidth'] as num?)?.toDouble(),
+      labelHeight               : (d['labelHeight'] as num?)?.toDouble(),
+
+      // Đọc từ Map
+      skipKitchenPrint          : (d['skipKitchenPrint'] as bool?),
     );
   }
 
@@ -61,8 +86,16 @@ class StoreSettings {
     'earnRate'                  : earnRate,
     'redeemRate'                : redeemRate,
     'defaultPaymentMethodId'    : defaultPaymentMethodId,
+    'qrOrderRequiresConfirmation': qrOrderRequiresConfirmation,
     'updatedAt'                 : FieldValue.serverTimestamp(),
 
+    'printLabelOnKitchen'       : printLabelOnKitchen,
+    'printLabelOnPayment'       : printLabelOnPayment,
+    'labelWidth'                : labelWidth,
+    'labelHeight'               : labelHeight,
+
+    // Ghi vào Map
+    'skipKitchenPrint'          : skipKitchenPrint,
   };
 
   StoreSettings copyWith({
@@ -78,7 +111,13 @@ class StoreSettings {
     double? redeemRate,
     String? defaultPaymentMethodId,
     bool? qrOrderRequiresConfirmation,
+    bool? printLabelOnKitchen,
+    bool? printLabelOnPayment,
+    double? labelWidth,
+    double? labelHeight,
 
+    // Thêm tham số
+    bool? skipKitchenPrint,
   }) {
     return StoreSettings(
       printBillAfterPayment: printBillAfterPayment ?? this.printBillAfterPayment,
@@ -93,6 +132,13 @@ class StoreSettings {
       redeemRate: redeemRate ?? this.redeemRate,
       defaultPaymentMethodId: defaultPaymentMethodId ?? this.defaultPaymentMethodId,
       qrOrderRequiresConfirmation: qrOrderRequiresConfirmation ?? this.qrOrderRequiresConfirmation,
+      printLabelOnKitchen: printLabelOnKitchen ?? this.printLabelOnKitchen,
+      printLabelOnPayment: printLabelOnPayment ?? this.printLabelOnPayment,
+      labelWidth: labelWidth ?? this.labelWidth,
+      labelHeight: labelHeight ?? this.labelHeight,
+
+      // Logic copy
+      skipKitchenPrint: skipKitchenPrint ?? this.skipKitchenPrint,
     );
   }
 }

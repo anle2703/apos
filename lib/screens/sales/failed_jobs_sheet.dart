@@ -222,6 +222,10 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
         typeText = 'QUẢN LÝ BÀN';
         typeIcon = Icons.swap_horiz_outlined;
         break;
+      case PrintJobType.label:
+        typeText = 'IN TEM';
+        typeIcon = Icons.label_outline;
+        break;
     }
 
     final tableName = job.data['tableName'] ??

@@ -47,7 +47,8 @@ class PrintQueueService {
         type == PrintJobType.detailedProvisional ||
         type == PrintJobType.cashFlow ||
         type == PrintJobType.endOfDayReport ||
-        type == PrintJobType.tableManagement) {
+        type == PrintJobType.tableManagement ||
+        type == PrintJobType.label) {
       final job = PrintJob(
         id: _uuid.v4(),
         type: type,
@@ -181,6 +182,11 @@ class PrintQueueService {
       if (data.containsKey('totalAmount')) payload['totalAmount'] = data['totalAmount'];
       if (data.containsKey('showPrices'))  payload['showPrices']  = data['showPrices'];
 
+      if (job.type == PrintJobType.label) {
+        if (data.containsKey('labelWidth')) payload['labelWidth'] = data['labelWidth'];
+        if (data.containsKey('labelHeight')) payload['labelHeight'] = data['labelHeight'];
+      }
+
       if (data['summary'] is Map) {
         payload['summary'] = Map<String, dynamic>.from(data['summary']);
       }
@@ -261,8 +267,6 @@ class PrintQueueService {
     final allConfiguredPrinters =
     jsonList.map((j) => ConfiguredPrinter.fromJson(j)).toList();
 
-    // --- BẮT ĐẦU LOGIC TÁI CẤU TRÚC ---
-
     // 1. Quyết định một lần duy nhất: Có phải gửi lệnh in qua Server LAN không?
     final bool isMobileAndInServerMode = printMode == 'server' &&
         !(Platform.isWindows || Platform.isMacOS || Platform.isLinux);
@@ -277,9 +281,6 @@ class PrintQueueService {
     }
 
     // 2. Nếu không, tất cả các trường hợp còn lại đều là in trực tiếp (Direct Print)
-    // Bao gồm: 'direct' mode trên mọi nền tảng, và 'server' mode trên PC.
-
-    // Logic cho phiếu Bếp / Hủy
     if (job.type == PrintJobType.kitchen || job.type == PrintJobType.cancel) {
       // Ưu tiên Sunmi nếu có máy in bếp nào là Sunmi
       final useSunmi = allConfiguredPrinters.any((p) =>
@@ -311,7 +312,9 @@ class PrintQueueService {
         return await _printWithGenericService(job, allConfiguredPrinters);
       }
     }
-
+    if (job.type == PrintJobType.label) {
+      return await _printWithGenericService(job, allConfiguredPrinters);
+    }
     return true;
   }
 
@@ -371,8 +374,11 @@ class PrintQueueService {
         case PrintJobType.endOfDayReport:
           title = 'BÁO CÁO TỔNG KẾT';
           break;
-        case PrintJobType.tableManagement: // <-- THÊM VÀO ĐÂY
-          title = 'THÔNG BÁO'; // Sunmi không dùng mẫu này, nhưng để phòng hờ
+        case PrintJobType.tableManagement:
+          title = 'THÔNG BÁO';
+          break;
+        case PrintJobType.label:
+          title = 'TEM NHÃN';
           break;
       }
 
@@ -577,6 +583,17 @@ class PrintQueueService {
           timestamp: DateTime.parse(data['timestamp'] as String),
           configuredPrinters: configuredPrinters,
         );
+
+      case PrintJobType.label:
+        final service = PrintingService(tableName: data['tableName'], userName: 'System');
+        return await service.printLabels(
+          items: (data['items'] as List).map((e) => e as Map<String, dynamic>).toList(),
+          tableName: data['tableName'],
+          createdAt: DateTime.now(),
+          configuredPrinters: configuredPrinters,
+          width: (data['labelWidth'] as num?)?.toDouble() ?? 50.0,
+          height: (data['labelHeight'] as num?)?.toDouble() ?? 30.0,
+        );
     }
   }
 
@@ -607,6 +624,9 @@ class PrintQueueService {
       case PrintJobType.tableManagement:
         endpoint = '/print/tableManagement';
         break;
+      case PrintJobType.label:
+        endpoint = '/print/label';
+        break;
     }
 
     final url = Uri.parse('http://$serverIp:8080$endpoint');
@@ -626,7 +646,7 @@ class PrintQueueService {
       headers: {'Content-Type': 'application/json; charset=UTF-8'},
       body: body,
     )
-        .timeout(const Duration(seconds: 8));
+        .timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 200) {
       return true;

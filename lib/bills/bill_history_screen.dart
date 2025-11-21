@@ -862,6 +862,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       'eInvoiceUrl': (eInvoiceInfo != null) ? 'vinvoice.viettel.vn' : null,
       'eInvoiceFullUrl': eInvoiceInfo?['lookupUrl'],
       'eInvoiceMst': eInvoiceInfo?['mst'],
+      'items': widget.bill.items,
     };
   }
 

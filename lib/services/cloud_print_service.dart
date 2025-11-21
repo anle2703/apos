@@ -79,9 +79,10 @@ class CloudPrintService {
             await doc.reference.update({'status': 'processing'});
 
             final data = doc.data();
+
             final service = PrintingService(
-              tableName: data['tableName'],
-              userName: data['userName'],
+              tableName: data['tableName']?.toString() ?? 'Unknown',
+              userName: data['userName']?.toString() ?? 'System',
             );
 
             final items = (data['items'] as List).map((m) => OrderItem.fromMap(m)).toList();
@@ -95,6 +96,7 @@ class CloudPrintService {
             final customerName = data['customerName'] as String?;
 
             if (jobType == 'kitchen' || jobType == 'cancel') {
+              // 1. CHUẨN BỊ DỮ LIỆU (Phân loại món theo máy in)
               final labelsToKeys = const {
                 'Máy in Thu ngân': 'cashier_printer',
                 'Máy in A': 'kitchen_printer_a',
@@ -114,11 +116,13 @@ class CloudPrintService {
                 }
               }
 
+              // 2. VÒNG LẶP IN BẾP
               bool allSuccess = true;
               for (var entry in jobsByPrinter.entries) {
                 final printerRole = entry.key;
                 final itemsForPrinter = entry.value;
                 bool success = false;
+
                 if (jobType == 'kitchen') {
                   success = await service.printKitchenTicket(
                     itemsToPrint: itemsForPrinter,
@@ -135,10 +139,51 @@ class CloudPrintService {
                 }
                 if (!success) allSuccess = false;
               }
+
               if (!allSuccess) {
                 throw Exception("Một vài lệnh in bếp/hủy từ Cloud đã thất bại.");
               }
 
+              // 3. LOGIC TỰ ĐỘNG IN TEM TẠI SERVER
+              if (jobType == 'kitchen') {
+                debugPrint(">>> [DEBUG SERVER] Bắt đầu kiểm tra in tem tự động...");
+
+                final ownerQuery = await FirebaseFirestore.instance
+                    .collection('users')
+                    .where('storeId', isEqualTo: storeId)
+                    .where('role', isEqualTo: 'owner')
+                    .limit(1)
+                    .get();
+
+                bool shouldPrintLabel = false;
+                double w = 50.0;
+                double h = 30.0;
+
+                if (ownerQuery.docs.isNotEmpty) {
+                  final sData = ownerQuery.docs.first.data();
+                  // Đọc cài đặt từ user data
+                  shouldPrintLabel = sData['printLabelOnKitchen'] ?? false;
+                  w = (sData['labelWidth'] as num?)?.toDouble() ?? 50.0;
+                  h = (sData['labelHeight'] as num?)?.toDouble() ?? 30.0;
+                }
+
+                // Nếu bật in tem -> Thực thi
+                if (shouldPrintLabel) {
+                  try {
+                    final rawItems = items.map((e) => e.toMap()).toList();
+                    await service.printLabels(
+                      items: rawItems,
+                      tableName: data['tableName'],
+                      createdAt: (data['createdAt'] as Timestamp).toDate(),
+                      configuredPrinters: configuredPrinters,
+                      width: w,
+                      height: h,
+                    );
+                  } catch (e) {
+                    debugPrint(">>> [DEBUG SERVER] Lỗi khi gọi hàm printLabels: $e");
+                  }
+                }
+              }
             } else if (jobType == 'provisional') {
               final storeInfo = (data['storeInfo'] as Map)
                   .map((k, v) => MapEntry(k.toString(), v.toString()));
@@ -253,6 +298,39 @@ class CloudPrintService {
                 configuredPrinters: configuredPrinters,
               );
               if (!ok) throw Exception("In thông báo QL Bàn từ Cloud thất bại.");
+            } else if (jobType == 'label') {
+              // --- SỬA LỖI NULL TẠI ĐÂY ---
+
+              // 1. Xử lý an toàn cho tableName (nếu null thì gán giá trị mặc định)
+              final String tableName = data['tableName']?.toString() ?? 'Tem';
+
+              final printingService = PrintingService(
+                  tableName: tableName,
+                  userName: data['userName'] ?? 'System'
+              );
+
+              // 2. Parse items
+              final rawItems = data['items'] as List;
+              final itemsMap = rawItems.map((e) => e as Map<String, dynamic>).toList();
+
+              // 3. Xử lý an toàn cho createdAt (nếu null hoặc sai kiểu thì lấy giờ hiện tại)
+              DateTime createdAt;
+              if (data['createdAt'] != null && data['createdAt'] is Timestamp) {
+                createdAt = (data['createdAt'] as Timestamp).toDate();
+              } else {
+                createdAt = DateTime.now();
+              }
+
+              final ok = await printingService.printLabels(
+                items: itemsMap,
+                tableName: tableName,
+                createdAt: createdAt,
+                configuredPrinters: configuredPrinters,
+                width: (data['labelWidth'] as num?)?.toDouble() ?? 50.0,
+                height: (data['labelHeight'] as num?)?.toDouble() ?? 30.0,
+              );
+
+              if (!ok) throw Exception("In Tem từ Cloud thất bại.");
             } else {
               throw Exception('Loại lệnh in không xác định: $jobType');
             }
@@ -549,6 +627,49 @@ class CloudPrintService {
         return success ? Response.ok('OK') : Response.internalServerError(body: 'In thông báo QL Bàn thất bại');
       } catch (e, st) {
         debugPrint(">>> Lỗi in server tableManagement: $e\n$st");
+        return Response.internalServerError(body: e.toString());
+      }
+    });
+    router.post('/print/label', (Request request) async {
+      try {
+        final data = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+        final configuredPrinters = await _getConfiguredPrintersFromPrefs() ?? [];
+
+        // FIX: Kiểm tra tableName (nếu null thì fallback)
+        final String tableName = data['tableName']?.toString() ?? 'Tem';
+
+        final printingService = PrintingService(
+            tableName: tableName,
+            userName: 'System' // Tem không quan trọng user
+        );
+
+        // Chuẩn hóa dữ liệu items
+        final normalizedItems = _normalizeItemsData(data['items'] as List);
+
+        // FIX: Kiểm tra createdAt an toàn
+        DateTime createdAt;
+        if (data['createdAt'] != null) {
+          try {
+            createdAt = DateTime.parse(data['createdAt'].toString());
+          } catch (_) {
+            createdAt = DateTime.now();
+          }
+        } else {
+          createdAt = DateTime.now();
+        }
+
+        final success = await printingService.printLabels(
+          items: normalizedItems,
+          tableName: tableName,
+          createdAt: createdAt,
+          configuredPrinters: configuredPrinters,
+          width: (data['labelWidth'] as num?)?.toDouble() ?? 50.0,
+          height: (data['labelHeight'] as num?)?.toDouble() ?? 30.0,
+        );
+
+        return success ? Response.ok('OK') : Response.internalServerError(body: 'In Tem thất bại');
+      } catch (e, st) {
+        debugPrint(">>> Lỗi in server label: $e\n$st");
         return Response.internalServerError(body: e.toString());
       }
     });

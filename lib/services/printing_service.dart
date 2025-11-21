@@ -19,6 +19,11 @@ import '../models/cash_flow_transaction_model.dart';
 import '../widgets/end_of_day_report_printing_helper.dart';
 import '../theme/string_extensions.dart';
 import '../widgets/bank_list.dart';
+import 'label_printing_service.dart';
+import 'package:printing/printing.dart' as printing_lib;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'dart:io';
 
 class PrintingService {
   final String tableName;
@@ -1273,46 +1278,65 @@ class PrintingService {
       PrinterType type, {
         required Uint8List pdfBytes,
       }) async {
+
+    debugPrint(">>> KIỂM TRA MÁY IN: Name='${printer.name}', Address='${printer.address}', VendorId='${printer.vendorId}'");
+
+    bool shouldUseWindowsDriver = (printer.vendorId == 'DRIVER_WINDOWS') ||
+        (printer.name == printer.address);
+
+    if (shouldUseWindowsDriver) {
+      try {
+        debugPrint(">>> [MODE 1] ĐANG IN QUA WINDOWS DRIVER (PDF Mode)...");
+
+        final printers = await printing_lib.Printing.listPrinters();
+        final targetPrinter = printers.firstWhere(
+              (p) => p.name == printer.name,
+          orElse: () {
+            debugPrint(">>> Cảnh báo: Không tìm thấy driver '${printer.name}' trong hệ thống. Thử dùng tên làm URL.");
+            return printing_lib.Printer(url: printer.name, name: printer.name);
+          },
+        );
+
+        // In trực tiếp PDF qua Driver
+        return await printing_lib.Printing.directPrintPdf(
+          printer: targetPrinter,
+          onLayout: (format) async => pdfBytes,
+          usePrinterSettings: true,
+        );
+      } catch (e) {
+        debugPrint(">>> LỖI IN DRIVER: $e");
+        return false;
+      }
+    }
+
+    // --- [MODE 2] CÁCH IN CŨ (Cho Sunmi, Mobile, Mạng LAN) ---
+    debugPrint(">>> [MODE 2] ĐANG IN QUA RAW BYTES (PrinterManager)...");
+
     final printerManager = PrinterManager.instance;
     final profile = await CapabilityProfile.load(name: 'default');
     final generator = Generator(PaperSize.mm80, profile);
-
     List<int> totalBytes = [];
     final model = _getPrinterModel(printer, type);
 
-    // --- CHIẾN LƯỢC "GIAO DỊCH IN AN TOÀN" ---
-
-    // 1. Luôn ngắt kết nối cũ (phòng hờ)
     try {
       await printerManager.disconnect(type: type);
-      debugPrint("Đã ngắt kết nối cũ (phòng hờ).");
-    } catch (e) {
-      debugPrint("Lỗi khi ngắt kết nối phòng hờ (bỏ qua): $e");
-    }
+    } catch (_) {}
 
-    // 2. Thêm độ trễ để HĐH (Windows) "thả" cổng USB
     if (type == PrinterType.usb) {
       await Future.delayed(const Duration(milliseconds: 200));
     }
-    // --- KẾT THÚC SỬA ---
 
-    debugPrint("Đang kết nối tới máy in: ${printer.name} (${printer.address})");
     final result = await printerManager.connect(type: type, model: model);
-    debugPrint("Kết quả connect: $result");
 
     if (result == true) {
       try {
-        // 3. Thêm độ trễ SAU KHI connect
         if (type == PrinterType.network || type == PrinterType.usb) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
 
-        // --- Logic gom byte (Gộp lại 1 lần) ---
         await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
           final ui.Image uiImage = await page.toImage();
-          final byteData =
-          await uiImage.toByteData(format: ui.ImageByteFormat.png);
-
+          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
           if (byteData != null) {
             final rawBytes = byteData.buffer.asUint8List();
             final decoded = img.decodeImage(rawBytes);
@@ -1322,34 +1346,36 @@ class PrintingService {
             }
           }
         }
-        totalBytes += generator.feed(1);
-        totalBytes += generator.cut();
-        // --- Hết logic gom byte ---
 
-        // 4. Gửi TOÀN BỘ list TỔNG trong MỘT LẦN
-        debugPrint("Đang gửi ${totalBytes.length} bytes (ảnh + cắt) tới máy in...");
-        await printerManager.send(
-            type: type, bytes: Uint8List.fromList(totalBytes));
-
-        debugPrint("Đã gửi xong.");
-
-        // 5. Ngắt kết nối NGAY SAU KHI in thành công
+        await printerManager.send(type: type, bytes: Uint8List.fromList(totalBytes));
         await printerManager.disconnect(type: type);
-        debugPrint("Đã ngắt kết nối (sau khi thành công).");
-
         return true;
-
       } catch (e) {
-        debugPrint("Lỗi khi gửi dữ liệu: $e");
-        await printerManager.disconnect(type: type).catchError((_) {
-          debugPrint("Lỗi khi ngắt kết nối (trong catch).");
-          return false;
-        });
+        debugPrint("Lỗi Raw Send: $e");
+        await printerManager.disconnect(type: type);
         return false;
       }
     } else {
-      throw Exception('Không thể kết nối đến máy in.');
+      throw Exception('Không thể kết nối đến máy in (Raw Mode).');
     }
+  }
+
+  Future<int> _getNextLabelSequence() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String todayStr = DateFormat('yyyyMMdd').format(DateTime.now());
+
+    final String lastDate = prefs.getString('label_seq_date') ?? '';
+    int currentSeq = prefs.getInt('label_seq_num') ?? 0;
+
+    if (lastDate != todayStr) {
+      currentSeq = 1;
+      await prefs.setString('label_seq_date', todayStr);
+    } else {
+      currentSeq++;
+    }
+
+    await prefs.setInt('label_seq_num', currentSeq);
+    return currentSeq;
   }
 
   Future<void> disconnectPrinter(PrinterType type) async {
@@ -1422,5 +1448,300 @@ class PrintingService {
         }).toList(),
       ),
     );
+  }
+
+
+  Future<bool> printLabels({
+    required List<Map<String, dynamic>> items,
+    required String tableName,
+    required DateTime createdAt,
+    required List<ConfiguredPrinter> configuredPrinters,
+    required double width,
+    required double height,
+  }) async {
+    try {
+      final labelPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'label_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Tem".'),
+      );
+
+      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
+      // --- 1. TÍNH TỔNG SỐ LƯỢNG TEM CẦN IN TRONG ĐỢT NÀY (GRAND TOTAL) ---
+      int grandTotalQty = 0;
+      for (var itemData in items) {
+        // ceil() để làm tròn lên (ví dụ 1.5 ly -> 2 tem)
+        grandTotalQty += (OrderItem.fromMap(itemData).quantity).ceil();
+      }
+
+      // Biến đếm chạy toàn cục (ví dụ: 1/3 -> 2/3 -> 3/3)
+      int globalCurrentIndex = 0;
+
+      // --- LOGIC CHO MOBILE IN QUA LAN (SOCKET GIỮ KẾT NỐI) ---
+      if (!isDesktop && labelPrinter.physicalPrinter.type == PrinterType.network) {
+        final String ip = labelPrinter.physicalPrinter.device.address!;
+        debugPrint(">>> [DEBUG] Bắt đầu chuỗi in liên tục tới $ip. Tổng tem: $grandTotalQty");
+
+        Socket? socket;
+        try {
+          socket = await Socket.connect(ip, 9100, timeout: const Duration(seconds: 5));
+          List<int> totalCommands = [];
+
+          // Duyệt qua từng món
+          for (var itemData in items) {
+            final item = OrderItem.fromMap(itemData);
+            final int itemQty = item.quantity.ceil();
+
+            // Duyệt qua số lượng của từng món
+            for (int i = 1; i <= itemQty; i++) {
+              final int dailySeq = await _getNextLabelSequence();
+
+              // Tăng biến đếm toàn cục
+              globalCurrentIndex++;
+
+              final pdfBytes = await LabelPrintingService.generateLabelPdf(
+                item: item,
+                tableName: tableName,
+                createdAt: createdAt,
+                widthMm: width,
+                heightMm: height,
+                dailySeq: dailySeq,
+
+                // THAY ĐỔI Ở ĐÂY: Truyền index toàn cục và tổng toàn cục
+                copyIndex: globalCurrentIndex,
+                totalCopies: grandTotalQty,
+
+                forceWhiteBackground: false,
+              );
+
+              final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, width, height);
+              if (commands.isNotEmpty) {
+                totalCommands.addAll(commands);
+              }
+            }
+          }
+
+          if (totalCommands.isNotEmpty) {
+            const int chunkSize = 4096;
+            for (var j = 0; j < totalCommands.length; j += chunkSize) {
+              var end = (j + chunkSize < totalCommands.length) ? j + chunkSize : totalCommands.length;
+              socket.add(totalCommands.sublist(j, end));
+              await Future.delayed(const Duration(milliseconds: 5));
+            }
+            await socket.flush();
+          }
+
+          await Future.delayed(const Duration(seconds: 2));
+          socket.destroy();
+          return true;
+
+        } catch (e) {
+          debugPrint(">>> [ERROR] Lỗi in LAN liên tục: $e");
+          try { socket?.destroy(); } catch (_) {}
+          return false;
+        }
+      }
+
+      // --- LOGIC CHO DESKTOP / KHÁC ---
+      else {
+        for (var itemData in items) {
+          final item = OrderItem.fromMap(itemData);
+          final int itemQty = item.quantity.ceil();
+
+          for (int i = 1; i <= itemQty; i++) {
+            final int dailySeq = await _getNextLabelSequence();
+
+            // Tăng biến đếm toàn cục
+            globalCurrentIndex++;
+
+            final pdfBytes = await LabelPrintingService.generateLabelPdf(
+              item: item,
+              tableName: tableName,
+              createdAt: createdAt,
+              widthMm: width,
+              heightMm: height,
+              dailySeq: dailySeq,
+
+              // THAY ĐỔI Ở ĐÂY
+              copyIndex: globalCurrentIndex,
+              totalCopies: grandTotalQty,
+
+              forceWhiteBackground: isDesktop,
+            );
+
+            if (isDesktop) {
+              await _printRawData(
+                labelPrinter.physicalPrinter.device,
+                labelPrinter.physicalPrinter.type,
+                pdfBytes: pdfBytes,
+              );
+            } else {
+              await _printLabelRawTSPL(
+                labelPrinter.physicalPrinter.device,
+                labelPrinter.physicalPrinter.type,
+                pdfBytes: pdfBytes,
+                labelWidthMm: width,
+                labelHeightMm: height,
+              );
+            }
+            await Future.delayed(const Duration(milliseconds: 300));
+          }
+        }
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Lỗi in tem: $e');
+      return false;
+    }
+  }
+
+  Future<List<int>> _getTsplCommandsFromPdf(Uint8List pdfBytes, double width, double height) async {
+    List<int> allCommands = [];
+
+    await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
+      final ui.Image uiImage = await page.toImage();
+      final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+
+      if (byteData != null) {
+        final rawBytes = byteData.buffer.asUint8List();
+        var decodedImage = img.decodeImage(rawBytes);
+
+        if (decodedImage != null) {
+          // --- XỬ LÝ NỀN TRẮNG (Fix lỗi nền đen) ---
+          final whiteBgImage = img.Image(width: decodedImage.width, height: decodedImage.height);
+          img.fill(whiteBgImage, color: img.ColorRgb8(255, 255, 255));
+          img.compositeImage(whiteBgImage, decodedImage);
+
+          // Sinh lệnh TSPL (Dùng hàm _generateTSPL chuẩn đã sửa ở bước trước)
+          allCommands.addAll(_generateTSPL(whiteBgImage, width, height));
+        }
+      }
+    }
+    return allCommands;
+  }
+
+  List<int> _generateTSPL(img.Image image, double widthMm, double heightMm) {
+    List<int> commands = [];
+
+    int w = widthMm.toInt();
+    int h = heightMm.toInt();
+
+    // 1. SETUP
+    // Khai báo kích thước tem vật lý
+    String cmd = 'SIZE $w mm, $h mm\r\n';
+    cmd += 'GAP 2 mm, 0 mm\r\n';
+    cmd += 'DIRECTION 1\r\n';
+    cmd += 'CLS\r\n';
+    commands.addAll(utf8.encode(cmd));
+
+    // 2. BITMAP
+    // Lưu ý: widthPx là chiều rộng thực tế của ảnh (có thể nhỏ hơn w vật lý)
+    int widthPx = image.width;
+    int heightPx = image.height;
+
+    // Tính số byte cho mỗi dòng (làm tròn lên)
+    int widthBytes = (widthPx + 7) ~/ 8;
+
+    String bitmapHeader = 'BITMAP 0,0,$widthBytes,$heightPx,0,';
+    commands.addAll(utf8.encode(bitmapHeader));
+
+    List<int> bitmapData = [];
+    for (int y = 0; y < heightPx; y++) {
+      for (int i = 0; i < widthBytes; i++) {
+
+        // --- THAY ĐỔI QUAN TRỌNG Ở ĐÂY ---
+        // Khởi tạo byte là 0xFF (11111111) -> Tương ứng toàn màu TRẮNG
+        // Điều này đảm bảo các bit thừa (padding) luôn là trắng -> Hết bị kẻ dọc
+        int byte = 0xFF;
+
+        for (int j = 0; j < 8; j++) {
+          int x = i * 8 + j;
+          if (x < widthPx) {
+            final pixel = image.getPixel(x, y);
+
+            // LOGIC MỚI: TÌM ĐIỂM ĐEN ĐỂ "ĐỤC LỖ" TRÊN NỀN TRẮNG
+
+            // 1. Kiểm tra có nội dung không (Alpha > 0)
+            bool hasContent = pixel.a > 0;
+
+            if (hasContent) {
+              // 2. Kiểm tra độ tối (Luminance < 128 là màu tối/đen)
+              // Nếu là màu tối -> Gán bit thành 0 (Set bit to 0)
+              if (pixel.luminance < 128) {
+                // Phép toán bit: Đảo bit 1 thành 0 tại vị trí j
+                byte &= ~(1 << (7 - j));
+              }
+            }
+            // Nếu là màu sáng hoặc trong suốt, byte vẫn giữ nguyên là 1 (Trắng)
+          }
+        }
+        bitmapData.add(byte);
+      }
+    }
+    commands.addAll(bitmapData);
+    commands.addAll(utf8.encode('\r\n'));
+
+    // 3. PRINT
+    commands.addAll(utf8.encode('PRINT 1,1\r\n'));
+
+    return commands;
+  }
+
+  Future<bool> _printLabelRawTSPL(
+      PrinterDevice printer,
+      PrinterType type, {
+        required Uint8List pdfBytes,
+        required double labelWidthMm,
+        required double labelHeightMm,
+      }) async {
+    final printerManager = PrinterManager.instance;
+    try {
+      await printerManager.disconnect(type: type);
+      if (type == PrinterType.network) await Future.delayed(const Duration(milliseconds: 200));
+      final model = _getPrinterModel(printer, type);
+      bool connected = await printerManager.connect(type: type, model: model).timeout(const Duration(seconds: 3), onTimeout: () => false);
+      if (!connected) return false;
+
+      List<int> tsplCommands = [];
+      await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
+        final ui.Image uiImage = await page.toImage();
+        final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData != null) {
+          final rawBytes = byteData.buffer.asUint8List();
+          var decodedImage = img.decodeImage(rawBytes);
+          if (decodedImage != null) {
+            // SỬA LỖI API IMAGE v4 tại đây tương tự hàm trên
+
+            // 1. Tạo ảnh nền trắng
+            var whiteBgImage = img.Image(width: decodedImage.width, height: decodedImage.height);
+
+            // 2. Fill màu trắng
+            img.fill(whiteBgImage, color: img.ColorRgb8(255, 255, 255));
+
+            // 3. Merge ảnh
+            img.compositeImage(whiteBgImage, decodedImage);
+
+            tsplCommands.addAll(_generateTSPL(whiteBgImage, labelWidthMm, labelHeightMm));
+          }
+        }
+      }
+
+      if (tsplCommands.isNotEmpty) {
+        const int chunkSize = 1024;
+        for (var i = 0; i < tsplCommands.length; i += chunkSize) {
+          var end = (i + chunkSize < tsplCommands.length) ? i + chunkSize : tsplCommands.length;
+          await printerManager.send(type: type, bytes: Uint8List.fromList(tsplCommands.sublist(i, end)));
+          await Future.delayed(const Duration(milliseconds: 5));
+        }
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+      await printerManager.disconnect(type: type);
+      return true;
+
+    } catch (e) {
+      debugPrint(">>> Lỗi _printLabelRawTSPL: $e");
+      try { await printerManager.disconnect(type: type); } catch (_) {}
+      return false;
+    }
   }
 }
