@@ -1,11 +1,19 @@
+// File: android/build.gradle (Cấp độ dự án)
+
 buildscript {
+    ext.kotlin_version = '1.9.22'
     repositories {
         google()
         mavenCentral()
     }
+
     dependencies {
-        // Google services (Firebase)
-        classpath "com.google.gms:google-services:4.3.15"
+        // Dependencies tiêu chuẩn của Flutter/Android
+        classpath 'com.android.tools.build:gradle:7.4.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        
+        // Google services (Firebase) - Dòng của bạn
+        classpath "com.google.gms:google-services:4.3.15" 
     }
 }
 
@@ -22,6 +30,21 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 
+// KHỐI SỬA LỖI JAVA CŨ: Buộc tất cả các plugin sử dụng Java 17
+subprojects {
+    project.afterEvaluate {
+        if (project.hasProperty('android')) {
+            android {
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
+                }
+            }
+        }
+    }
+}
+
+// Khối evaluation và tasks.register giữ nguyên
 subprojects {
     project.evaluationDependsOn(":app")
 }

@@ -639,6 +639,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   setState(() => _clientPrintMode = mode);
                 },
               ),
+              const SizedBox(height: 16),
               if (_clientPrintMode == 'server')
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
