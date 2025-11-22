@@ -189,7 +189,6 @@ class _ConfirmationScreenState extends State<ConfirmationScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Thông tin NCC', style: Theme.of(context).textTheme.titleLarge),
-            const Divider(height: 12),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.store_mall_directory_outlined, color: AppTheme.primaryColor),
@@ -209,7 +208,6 @@ class _ConfirmationScreenState extends State<ConfirmationScreen> {
             ),
             const SizedBox(height: 24),
             Text('Thanh toán', style: Theme.of(context).textTheme.titleLarge),
-            const Divider(height: 24),
             ValueListenableBuilder<double>(
               valueListenable: _subtotal,
               builder: (_, v, __) => _buildSummaryRow('Tổng tiền hàng:', v),
@@ -262,7 +260,7 @@ class _ConfirmationScreenState extends State<ConfirmationScreen> {
                 prefixIcon: Icon(Icons.local_shipping_outlined, size: 20),
               ),
             ),
-            const Divider(height: 12),
+            const SizedBox(height: 12),
             ValueListenableBuilder<double>(
               valueListenable: _totalAmount,
               builder: (_, v, __) => _buildSummaryRow('Tổng cộng:', v, isTotal: true),

@@ -17,16 +17,17 @@ class PurchaseOrderService {
   final CollectionReference _poCollection =
   FirebaseFirestore.instance.collection('purchase_orders');
 
-  Stream<List<PurchaseOrderModel>> getPurchaseOrdersStream({
-    DateTime? startDate,
-    DateTime? endDate,
-    String? status,
-    String? supplierName,
-    String? createdBy,
-    String? updatedBy,
-    String? purchaseOrderId,
-  }) {
-    Query query = _poCollection;
+  Stream<List<PurchaseOrderModel>> getPurchaseOrdersStream(
+      String storeId, {
+        DateTime? startDate,
+        DateTime? endDate,
+        String? status,
+        String? supplierName,
+        String? createdBy,
+        String? updatedBy,
+        String? purchaseOrderId,
+      }) {
+    Query query = _poCollection.where('storeId', isEqualTo: storeId);
 
     if (purchaseOrderId != null && purchaseOrderId.isNotEmpty) {
       query = query.where(FieldPath.documentId, isEqualTo: purchaseOrderId);
@@ -36,10 +37,12 @@ class PurchaseOrderService {
     }
 
     if (startDate != null) {
-      query = query.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
+      query = query.where('createdAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startDate));
     }
     if (endDate != null) {
-      query = query.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
+      query = query.where('createdAt',
+          isLessThanOrEqualTo: Timestamp.fromDate(endDate));
     }
     if (status != null && status.isNotEmpty) {
       query = query.where('status', isEqualTo: status);
@@ -65,9 +68,12 @@ class PurchaseOrderService {
         .toList());
   }
 
-  Future<List<String>> getDistinctSupplierNames() async {
+  Future<List<String>> getDistinctSupplierNames(String storeId) async {
     try {
-      final snapshot = await _db.collection('suppliers').get();
+      final snapshot = await _db
+          .collection('suppliers')
+          .where('storeId', isEqualTo: storeId)
+          .get();
       if (snapshot.docs.isEmpty) return [];
       final names = snapshot.docs
           .map((doc) => doc.data()['name'] as String?)
@@ -80,9 +86,12 @@ class PurchaseOrderService {
     }
   }
 
-  Future<List<String>> getDistinctUserNames() async {
+  Future<List<String>> getDistinctUserNames(String storeId) async {
     try {
-      final snapshot = await _db.collection('users').get();
+      final snapshot = await _db
+          .collection('users')
+          .where('storeId', isEqualTo: storeId)
+          .get();
       if (snapshot.docs.isEmpty) return [];
       final names = snapshot.docs
           .map((doc) => doc.data()['name'] as String?)
@@ -153,8 +162,8 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
   Future<void> _loadFilterData() async {
     try {
       final results = await Future.wait([
-        _poService.getDistinctSupplierNames(),
-        _poService.getDistinctUserNames(),
+        _poService.getDistinctSupplierNames(widget.currentUser.storeId),
+        _poService.getDistinctUserNames(widget.currentUser.storeId),
       ]);
 
       if (mounted) {
@@ -398,6 +407,7 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
       ),
       body: StreamBuilder<List<PurchaseOrderModel>>(
         stream: _poService.getPurchaseOrdersStream(
+          widget.currentUser.storeId,
           purchaseOrderId: widget.initialPurchaseOrderId,
           startDate: _selectedStartDate,
           endDate: _selectedEndDate,
