@@ -30,6 +30,7 @@ import '../theme/string_extensions.dart';
 import '../models/quick_note_model.dart';
 import '../screens/quick_notes_screen.dart';
 import '../tables/table_transfer_screen.dart';
+import 'package:flutter/services.dart';
 
 class OrderScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -54,7 +55,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
   double get _totalAmount =>
       _displayCart.values.fold(0, (total, item) => total + item.subtotal);
-
+  final FocusNode _searchFocusNode = FocusNode();
   Timer? _priceUpdateTimer;
   final Map<String, OrderItem> _cart = {};
   final Map<String, OrderItem> _localChanges = {};
@@ -139,7 +140,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }, onError: (e, st) {
       debugPrint('watchStoreSettings error: $e');
     }, cancelOnError: true);
-
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     _currentOrder = widget.initialOrder;
     _isMenuView = widget.initialOrder == null;
     if (widget.initialOrder != null) _suppressInitialToast = true;
@@ -175,11 +176,91 @@ class _OrderScreenState extends State<OrderScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _settingsSub?.cancel();
     _quickNotesSub?.cancel();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _priceUpdateTimer?.cancel();
     super.dispose();
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    // 1. Kiểm tra màn hình hiện tại có hợp lệ không
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return false;
+
+    // 2. Kiểm tra xem người dùng có đang nhập liệu ở ô khác (ví dụ dialog ghi chú) không?
+    // Nếu đang nhập ở ô khác thì KHÔNG CAN THIỆP.
+    final currentFocus = FocusManager.instance.primaryFocus;
+    if (currentFocus != null &&
+        currentFocus.context != null &&
+        currentFocus.context!.widget is EditableText &&
+        currentFocus != _searchFocusNode) {
+      return false;
+    }
+
+    // 3. Nếu ô tìm kiếm ĐANG được chọn (Focus) -> Để hệ thống tự xử lý, không can thiệp
+    if (_searchFocusNode.hasFocus) {
+      return false;
+    }
+
+    // --- XỬ LÝ KHI Ô TÌM KIẾM KHÔNG CÓ FOCUS ---
+
+    // TRƯỜNG HỢP A: Phím Enter -> Thực hiện tìm kiếm/thêm món
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      if (_searchController.text.isNotEmpty) {
+        _handleBarcodeScan(_searchController.text);
+        return true; // Đã xử lý
+      }
+      return false;
+    }
+
+    // TRƯỜNG HỢP B: Phím Xóa (Backspace) -> Xóa ký tự cuối
+    if (event.logicalKey == LogicalKeyboardKey.backspace) {
+      final text = _searchController.text;
+      if (text.isNotEmpty) {
+        final newText = text.substring(0, text.length - 1);
+        _searchController.value = TextEditingValue(
+          text: newText,
+          selection: TextSelection.collapsed(offset: newText.length),
+        );
+        return true;
+      }
+      return false;
+    }
+
+    // TRƯỜNG HỢP C: Ký tự bình thường (Số/Chữ) -> Điền vào ô tìm kiếm
+    if (event.character != null &&
+        event.character!.isNotEmpty &&
+        !_isControlKey(event.logicalKey)) {
+
+      final newText = _searchController.text + event.character!;
+      _searchController.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: newText.length), // Đưa con trỏ về cuối
+      );
+      return true; // Đã xử lý
+    }
+
+    return false;
+  }
+
+  bool _isControlKey(LogicalKeyboardKey key) {
+    return key == LogicalKeyboardKey.shift ||
+        key == LogicalKeyboardKey.control ||
+        key == LogicalKeyboardKey.alt ||
+        key == LogicalKeyboardKey.meta ||
+        key == LogicalKeyboardKey.tab ||
+        key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.f1 || key == LogicalKeyboardKey.f2 ||
+        key == LogicalKeyboardKey.f3 || key == LogicalKeyboardKey.f4 ||
+        key == LogicalKeyboardKey.f5 || key == LogicalKeyboardKey.f6 ||
+        key == LogicalKeyboardKey.f7 || key == LogicalKeyboardKey.f8 ||
+        key == LogicalKeyboardKey.f9 || key == LogicalKeyboardKey.f10 ||
+        key == LogicalKeyboardKey.f11 || key == LogicalKeyboardKey.f12;
   }
 
   Future<void> _listenQuickNotes() async {
@@ -195,11 +276,13 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   void _handleBarcodeScan(String value) async {
-    if (value.trim().isEmpty) return;
+    if (value.trim().isEmpty) {
+      // Nếu gọi từ TextField mà rỗng thì focus lại
+      if (!_searchFocusNode.hasFocus) _searchFocusNode.requestFocus();
+      return;
+    }
     final query = value.trim();
 
-    // Tìm sản phẩm khớp CHÍNH XÁC mã vạch hoặc mã sản phẩm
-    // (Ưu tiên khớp chính xác, sau đó mới khớp không phân biệt hoa thường)
     final foundProduct = _menuProducts.firstWhereOrNull((p) =>
     p.productCode == query ||
         p.additionalBarcodes.contains(query) ||
@@ -208,25 +291,31 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (foundProduct != null) {
-      // Nếu tìm thấy: Thêm vào giỏ và xóa ô tìm kiếm
       await _addItemToCart(foundProduct);
-      _searchController.clear();
 
-      // Focus lại vào ô tìm kiếm (quan trọng để quét liên tục)
-      // Lưu ý: TextField cần focusNode để làm việc này tốt nhất,
-      // nhưng mặc định autofocus + onSubmitted thường giữ focus tốt trên Desktop.
+      // Nếu đang dùng TextField thì xóa text đi
+      if (_searchController.text.isNotEmpty) {
+        _searchController.clear();
+      }
+
+      // Tùy chọn: Luôn focus lại ô tìm kiếm sau khi quét thành công (để đẹp giao diện)
+      // Nhưng với Listener toàn cục thì không bắt buộc dòng này nữa.
+      _searchFocusNode.requestFocus();
+
       ToastService().show(
           message: "Đã thêm: ${foundProduct.productName}",
           type: ToastType.success,
-          duration: const Duration(seconds: 1) // Hiện nhanh rồi tắt
+          duration: const Duration(seconds: 1)
       );
     } else {
-      // Nếu không tìm thấy: Báo lỗi và xóa ô tìm kiếm (hoặc giữ lại tùy bạn)
       ToastService().show(
           message: "Không tìm thấy mã: $query",
           type: ToastType.warning
       );
-      _searchController.clear();
+      if (_searchController.text.isNotEmpty) {
+        _searchController.clear();
+      }
+      _searchFocusNode.requestFocus();
     }
   }
 
@@ -1942,13 +2031,19 @@ class _OrderScreenState extends State<OrderScreen> {
   Widget _buildSearchBar() {
     return TextField(
       controller: _searchController,
-      // --- BỔ SUNG CÁC DÒNG NÀY ---
-      autofocus: true, // Tự động focus khi mở màn hình (tiện cho desktop)
-      textInputAction: TextInputAction.done, // Hiển thị icon Done/Enter
-      onSubmitted: (value) => _handleBarcodeScan(value), // Xử lý khi nhấn Enter hoặc máy quét bắn xong
-      // -----------------------------
+
+      // --- THÊM DÒNG NÀY ---
+      focusNode: _searchFocusNode,
+      // ---------------------
+
+      autofocus: true,
+      textInputAction: TextInputAction.done,
+
+      // Khi nhấn Enter (hoặc máy quét bắn ký tự kết thúc), gọi hàm xử lý
+      onSubmitted: (value) => _handleBarcodeScan(value),
+
       decoration: InputDecoration(
-        hintText: 'Quét mã hoặc tìm tên...', // Sửa lại hint cho rõ nghĩa
+        hintText: 'Quét mã hoặc tìm tên...',
         prefixIcon: const Icon(Icons.search),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(30.0),
@@ -1956,14 +2051,13 @@ class _OrderScreenState extends State<OrderScreen> {
         ),
         filled: true,
         fillColor: Colors.grey[100],
-        contentPadding: EdgeInsets.zero, // Giữ nguyên style cũ của bạn
+        contentPadding: EdgeInsets.zero,
         suffixIcon: _searchController.text.isNotEmpty
             ? IconButton(
           icon: const Icon(Icons.clear, size: 20, color: AppTheme.primaryColor),
           onPressed: () {
             _searchController.clear();
-            // Focus lại sau khi clear bằng tay để có thể quét tiếp
-            FocusScope.of(context).requestFocus();
+            _searchFocusNode.requestFocus(); // Focus lại khi bấm nút xóa tay
           },
         )
             : null,

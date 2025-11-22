@@ -1450,7 +1450,6 @@ class PrintingService {
     );
   }
 
-
   Future<bool> printLabels({
     required List<Map<String, dynamic>> items,
     required String tableName,
@@ -1470,9 +1469,12 @@ class PrintingService {
       // --- 1. TÍNH TỔNG SỐ LƯỢNG TEM CẦN IN TRONG ĐỢT NÀY (GRAND TOTAL) ---
       int grandTotalQty = 0;
       for (var itemData in items) {
-        // ceil() để làm tròn lên (ví dụ 1.5 ly -> 2 tem)
         grandTotalQty += (OrderItem.fromMap(itemData).quantity).ceil();
       }
+
+      // --- 2. LẤY SỐ THỨ TỰ (DAILY SEQ) MỘT LẦN DUY NHẤT CHO CẢ ĐỢT IN ---
+      // (Sửa đổi: Đưa ra ngoài vòng lặp để tất cả tem trong đợt này cùng 1 số #)
+      final int dailySeq = await _getNextLabelSequence();
 
       // Biến đếm chạy toàn cục (ví dụ: 1/3 -> 2/3 -> 3/3)
       int globalCurrentIndex = 0;
@@ -1480,7 +1482,7 @@ class PrintingService {
       // --- LOGIC CHO MOBILE IN QUA LAN (SOCKET GIỮ KẾT NỐI) ---
       if (!isDesktop && labelPrinter.physicalPrinter.type == PrinterType.network) {
         final String ip = labelPrinter.physicalPrinter.device.address!;
-        debugPrint(">>> [DEBUG] Bắt đầu chuỗi in liên tục tới $ip. Tổng tem: $grandTotalQty");
+        debugPrint(">>> [DEBUG] Bắt đầu chuỗi in liên tục tới $ip. Tổng tem: $grandTotalQty. Seq: #$dailySeq");
 
         Socket? socket;
         try {
@@ -1494,9 +1496,7 @@ class PrintingService {
 
             // Duyệt qua số lượng của từng món
             for (int i = 1; i <= itemQty; i++) {
-              final int dailySeq = await _getNextLabelSequence();
-
-              // Tăng biến đếm toàn cục
+              // Tăng biến đếm toàn cục (VD: Tem 1/5, Tem 2/5...)
               globalCurrentIndex++;
 
               final pdfBytes = await LabelPrintingService.generateLabelPdf(
@@ -1505,9 +1505,8 @@ class PrintingService {
                 createdAt: createdAt,
                 widthMm: width,
                 heightMm: height,
-                dailySeq: dailySeq,
+                dailySeq: dailySeq, // Sử dụng số thứ tự chung
 
-                // THAY ĐỔI Ở ĐÂY: Truyền index toàn cục và tổng toàn cục
                 copyIndex: globalCurrentIndex,
                 totalCopies: grandTotalQty,
 
@@ -1549,8 +1548,6 @@ class PrintingService {
           final int itemQty = item.quantity.ceil();
 
           for (int i = 1; i <= itemQty; i++) {
-            final int dailySeq = await _getNextLabelSequence();
-
             // Tăng biến đếm toàn cục
             globalCurrentIndex++;
 
@@ -1560,9 +1557,8 @@ class PrintingService {
               createdAt: createdAt,
               widthMm: width,
               heightMm: height,
-              dailySeq: dailySeq,
+              dailySeq: dailySeq, // Sử dụng số thứ tự chung
 
-              // THAY ĐỔI Ở ĐÂY
               copyIndex: globalCurrentIndex,
               totalCopies: grandTotalQty,
 
