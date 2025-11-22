@@ -183,7 +183,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         setState(() {
           _parentProducts = parents;
         });
-        print("Đã tìm thấy ${parents.length} sản phẩm cha chứa topping này.");
+        debugPrint("Đã tìm thấy ${parents.length} sản phẩm cha chứa topping này.");
       }
     });
   }
@@ -642,7 +642,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             updatedCount++;
           }
         }
-        print('Đã đồng bộ Topping cho $updatedCount sản phẩm cha.');
+        debugPrint('Đã đồng bộ Topping cho $updatedCount sản phẩm cha.');
       }
 
       navigator.pop();
