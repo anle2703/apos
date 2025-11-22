@@ -2279,8 +2279,24 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final isTimeBased = product['serviceSetup']?['isTimeBased'] == true;
 
       if (isTimeBased) {
-        totalProfit += salePrice - (costPrice * quantity);
+        // --- LOGIC MỚI CHO DỊCH VỤ TÍNH GIỜ ---
+        // Với dịch vụ tính giờ: quantity luôn là 1, salePrice là Tổng thành tiền.
+        // Ta tính giá vốn dựa trên tỷ lệ (Giá vốn gốc / Giá bán gốc)
+
+        final baseSellPrice = (product['sellPrice'] as num?)?.toDouble() ?? 0.0;
+
+        if (baseSellPrice > 0) {
+          // 1. Tính chi phí ước tính = Thành tiền * (Giá vốn / Giá bán)
+          final estimatedTotalCost = salePrice * (costPrice / baseSellPrice);
+
+          // 2. Lợi nhuận = Thành tiền - Chi phí
+          totalProfit += salePrice - estimatedTotalCost;
+        } else {
+          // Nếu không có giá bán gốc, tạm tính lợi nhuận = doanh thu (hoặc 0 tùy bạn chọn)
+          totalProfit += salePrice;
+        }
       } else {
+        // Logic cũ cho sản phẩm thường
         totalProfit += (salePrice - costPrice) * quantity;
       }
     }

@@ -464,6 +464,60 @@ class _ImportTabState extends State<_ImportTab> {
         ));
       }
 
+      if (_updateComplexData) {
+        setState(() => _statusText = 'Đang kiểm tra liên kết dữ liệu...');
+
+        // 1. Tạo tập hợp tất cả ID hợp lệ (Bao gồm ID trong DB + ID đang có trong file Excel)
+        // Điều này cho phép tham chiếu đến một sản phẩm vừa được định nghĩa trong cùng file Excel
+        final Set<String> validIds = Set.from(productMapById.keys);
+        for (var job in jobsToProcess) {
+          if (job.idFromFile != null && job.idFromFile!.isNotEmpty) {
+            validIds.add(job.idFromFile!);
+          }
+        }
+
+        // 2. Duyệt qua từng job để kiểm tra
+        for (var job in jobsToProcess) {
+          final rowName = job.data['productName'];
+          final rowLine = job.excelRow;
+
+          // Hàm helper để kiểm tra danh sách
+          void validateRefIds(String listKey, String contextName) {
+            final listData = job.data[listKey] as List<Map<String, dynamic>>?;
+            if (listData == null || listData.isEmpty) return;
+
+            for (var item in listData) {
+              String? refId;
+
+              // Check các cấu trúc JSON phổ biến có thể gặp
+              if (item.containsKey('productId')) {
+                refId = item['productId']; // Cấu trúc Firestore flattened
+              } else if (item.containsKey('product') && item['product'] is Map) {
+                refId = item['product']['id']; // Cấu trúc Object lồng nhau
+              } else if (item.containsKey('id')) {
+                refId = item['id']; // Cấu trúc dự phòng
+              }
+
+              // Nếu item có tham chiếu ID, thì ID đó phải tồn tại
+              if (refId != null && refId.isNotEmpty) {
+                if (!validIds.contains(refId)) {
+                  throw Exception(
+                      "Lỗi tại dòng $rowLine ($rowName):\n"
+                          "Không tìm thấy sản phẩm $contextName với ID: $refId.\n"
+                          "ID này không tồn tại trên hệ thống và không có trong file Excel.\n"
+                          "Giải pháp: Kiểm tra lại ID hoặc bỏ chọn 'Cập nhật dữ liệu phức tạp'."
+                  );
+                }
+              }
+            }
+          }
+
+          // Thực hiện kiểm tra
+          validateRefIds('recipeItems', 'nguyên liệu/thành phần');
+          validateRefIds('accompanyingItems', 'bán kèm/topping');
+        }
+      }
+
       // 5. PHA 2: KHỞI TẠO MÃ SP VÀ NHÓM MỚI
       setState(() => _statusText = 'Đang khởi tạo Mã SP và Nhóm...');
 

@@ -48,6 +48,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canViewListTable = false;
   bool _canViewEmployee = false;
 
+  // Biến cờ để tránh hiện popup nhiều lần
+  bool _isShowingTypePicker = false;
+
   @override
   void initState() {
     super.initState();
@@ -58,13 +61,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     PrintQueueService().dispose();
     _userStatusSubscription?.cancel();
-
     super.dispose();
   }
 
   Future<void> _initializeUserAndSettings() async {
     UserModel? loadedUser;
 
+    // 1. Xác định User
     if (widget.user != null) {
       loadedUser = widget.user;
     } else {
@@ -76,27 +79,45 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (loadedUser == null) return;
 
+    // 2. Nếu là nhân viên, lấy businessType từ Owner
     if (loadedUser.role != 'owner' && loadedUser.ownerUid != null) {
       final ownerProfile =
-          await _firestoreService.getUserProfile(loadedUser.ownerUid!);
+      await _firestoreService.getUserProfile(loadedUser.ownerUid!);
       if (ownerProfile != null) {
         loadedUser =
             loadedUser.copyWith(businessType: ownerProfile.businessType);
       }
     }
 
-    _currentUser = loadedUser;
+    // 3. Cập nhật State và Lắng nghe thay đổi
+    if (mounted) {
+      setState(() {
+        _currentUser = loadedUser;
+      });
+    }
 
     _listenForUserStatusChanges();
 
     if (_currentUser != null) {
       await PrintQueueService().initialize(_currentUser!.storeId);
-      // Hiển thị popup chọn ngành nghề sau khi màn hình đã build xong
-      if (_currentUser!.businessType == null && _currentUser!.role == 'owner') {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _showBusinessTypePicker(context);
-        });
-      }
+
+      // [FIX] Kiểm tra và hiện popup ngay sau khi init xong dữ liệu
+      _checkAndShowBusinessTypePicker();
+    }
+  }
+
+  void _checkAndShowBusinessTypePicker() {
+    if (_currentUser == null) return;
+    if (_isShowingTypePicker) return; // Đang hiện rồi thì thôi
+
+    // Chỉ hiện nếu là Owner và chưa có businessType
+    if (_currentUser!.role == 'owner' &&
+        (_currentUser!.businessType == null || _currentUser!.businessType!.isEmpty)) {
+
+      _isShowingTypePicker = true; // Đánh dấu đang hiện
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showBusinessTypePicker(context);
+      });
     }
   }
 
@@ -113,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _authService.signOut().then((_) {
             navigator.pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => const AuthGate()),
-                (route) => false);
+                    (route) => false);
           });
           return;
         }
@@ -129,7 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _authService.signOut().then((_) {
               navigator.pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const AuthGate()),
-                  (route) => false);
+                      (route) => false);
             });
           });
           return;
@@ -143,23 +164,30 @@ class _HomeScreenState extends State<HomeScreen> {
           _canViewEmployee = true;
         } else {
           _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']
-                  ?['canViewPurchaseOrder'] ??
+          ?['canViewPurchaseOrder'] ??
               false;
           _canViewPromotions = userProfile.permissions?['promotions']
-                  ?['canViewPromotions'] ??
+          ?['canViewPromotions'] ??
               false;
           _canViewListTable = userProfile.permissions?['listTable']
-                  ?['canViewListTable'] ??
+          ?['canViewListTable'] ??
               false;
           _canViewEmployee =
               userProfile.permissions?['employee']?['canViewEmployee'] ?? false;
         }
 
-        setState(() {
-          _currentUser = userProfile.copyWith(
-            businessType: _currentUser?.businessType,
-          );
-        });
+        if (mounted) {
+          setState(() {
+            // Cập nhật _currentUser từ Stream để UI tự động refresh khi có thay đổi
+            _currentUser = userProfile.copyWith(
+              // Giữ lại businessType nếu stream trả về null (đề phòng)
+              businessType: userProfile.businessType ?? _currentUser?.businessType,
+            );
+          });
+
+          // Kiểm tra lại popup mỗi khi có data mới (phòng trường hợp init chưa bắt được)
+          _checkAndShowBusinessTypePicker();
+        }
       });
     }
   }
@@ -173,19 +201,34 @@ class _HomeScreenState extends State<HomeScreen> {
           onConfirm: (type) async {
             final navigator = Navigator.of(dialogContext);
             try {
+              // 1. Cập nhật Firestore
               await _firestoreService
                   .updateUserField(_currentUser!.uid, {'businessType': type});
+
+              // Đóng dialog NẾU thành công
               navigator.pop();
-              _initializeUserAndSettings();
+
+              // Cập nhật Local State NGAY LẬP TỨC
+              if (mounted) {
+                setState(() {
+                  _currentUser = _currentUser!.copyWith(businessType: type);
+                  _isShowingTypePicker = false;
+                  _selectedIndex = 0;
+                });
+              }
+
             } catch (e) {
+              // Nếu lỗi: Hiện thông báo nhưng KHÔNG đóng dialog
+              // để nút "Xác nhận" dừng quay và user có thể thử lại
               ToastService()
                   .show(message: "Lỗi cập nhật: $e", type: ToastType.error);
-              navigator.pop();
             }
           },
         );
       },
-    );
+    ).then((_) {
+      _isShowingTypePicker = false;
+    });
   }
 
   void _onItemTapped(int index) {
@@ -239,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     ToastService().show(
                         message:
-                            'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
                         type: ToastType.warning);
                   }
                 },
@@ -258,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     ToastService().show(
                         message:
-                            'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
                         type: ToastType.warning);
                   }
                 },
@@ -279,7 +322,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     } else {
                       ToastService().show(
                           message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
@@ -299,7 +342,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     ToastService().show(
                         message:
-                            'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
                         type: ToastType.warning);
                   }
                 },
@@ -344,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     ToastService().show(
                         message:
-                            'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
                         type: ToastType.warning);
                   }
                 },
@@ -414,7 +457,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _authService.signOut();
                   navigator.pushAndRemoveUntil(
                     MaterialPageRoute(builder: (context) => const AuthGate()),
-                    (route) => false,
+                        (route) => false,
                   );
                 },
               ),
@@ -446,7 +489,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         // Khi dữ liệu đã sẵn sàng, hiển thị giao diện chính
-        // (Đây là nội dung của hàm build() cũ)
         return LayoutBuilder(
           builder: (context, constraints) {
             const double mobileBreakpoint = 700;
@@ -464,10 +506,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildDesktopLayout() {
     // Label của tab đầu tiên sẽ thay đổi tùy theo logic hiển thị
     String firstTabLabel;
-    if (_currentUser!.businessType == 'fnb') {
+    if (_currentUser?.businessType == 'fnb') {
       firstTabLabel = 'Bán hàng';
     } else {
-      firstTabLabel = _currentUser!.role == 'owner' ? 'Tổng quan' : 'Bán hàng';
+      firstTabLabel = _currentUser?.role == 'owner' ? 'Tổng quan' : 'Bán hàng';
     }
 
     return Scaffold(
@@ -515,10 +557,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildMobileLayout() {
     String firstTabLabel;
-    if (_currentUser!.businessType == 'fnb') {
+    if (_currentUser?.businessType == 'fnb') {
       firstTabLabel = 'Bán hàng';
     } else {
-      firstTabLabel = _currentUser!.role == 'owner' ? 'Tổng quan' : 'Bán hàng';
+      firstTabLabel = _currentUser?.role == 'owner' ? 'Tổng quan' : 'Bán hàng';
     }
 
     return Scaffold(
@@ -566,12 +608,13 @@ class BusinessTypePickerPopup extends StatefulWidget {
 
 class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
   String? _selectedType;
+  bool _isUpdating = false; // Biến trạng thái loading
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title:
-          const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
+      const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -595,10 +638,32 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
       ),
       actions: [
         TextButton(
-          onPressed: _selectedType == null
+          // Vô hiệu hóa nút khi chưa chọn HOẶC đang loading
+          onPressed: (_selectedType == null || _isUpdating)
               ? null
-              : () => widget.onConfirm(_selectedType!),
-          child: const Text('Xác nhận'),
+              : () async {
+            // Bắt đầu loading
+            setState(() {
+              _isUpdating = true;
+            });
+
+            // Gọi hàm xử lý từ cha và đợi kết quả
+            await widget.onConfirm(_selectedType!);
+
+            // Nếu widget chưa bị đóng (do lỗi), tắt loading
+            if (mounted) {
+              setState(() {
+                _isUpdating = false;
+              });
+            }
+          },
+          child: _isUpdating
+              ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+              : const Text('Xác nhận'),
         ),
       ],
     );
@@ -610,7 +675,8 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
     final color = Theme.of(context).primaryColor;
 
     return InkWell(
-      onTap: () => setState(() => _selectedType = value),
+      // Chặn bấm chọn loại khi đang loading
+      onTap: _isUpdating ? null : () => setState(() => _selectedType = value),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 100,
@@ -631,7 +697,7 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
             Text(title,
                 style: TextStyle(
                     fontWeight:
-                        isSelected ? FontWeight.bold : FontWeight.normal)),
+                    isSelected ? FontWeight.bold : FontWeight.normal)),
           ],
         ),
       ),

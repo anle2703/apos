@@ -214,6 +214,12 @@ class PrintQueueService {
         payload['shiftReportsData'] = data['shiftReportsData'];
       }
 
+      if (job.type == PrintJobType.tableManagement) {
+        payload['actionTitle'] = data['actionTitle'];
+        payload['message'] = data['message'];
+        payload['timestamp'] = data['timestamp'];
+      }
+
       payload.remove('targetPrinterRole');
       payload.remove('error');
 

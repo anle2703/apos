@@ -71,13 +71,21 @@ class FirestoreService {
         .toList());
   }
 
-  Future<void> addProduct(Map<String, dynamic> productData) async {
+  Future<DocumentReference> addProduct(Map<String, dynamic> productData) async {
     try {
+      // Logic chuẩn hóa dữ liệu (giữ nguyên của bạn)
       final product = ProductModel.fromMap(productData);
       final formatted = product.toMap();
       formatted['createdAt'] = FieldValue.serverTimestamp();
+
+      // 1. Tạo document reference trước
       final docRef = _db.collection('products').doc();
+
+      // 2. Ghi dữ liệu vào reference đó
       await docRef.set(formatted);
+
+      // 3. QUAN TRỌNG: Trả về docRef để bên ngoài lấy được ID (docRef.id)
+      return docRef;
     } catch (e) {
       throw Exception('Không thể thêm sản phẩm: $e');
     }
@@ -85,10 +93,29 @@ class FirestoreService {
 
   Future<void> updateProduct(String productId, Map<String, dynamic> data) async {
     try {
-      final formatted = ProductModel.fromMap(data).toMap();
-      formatted['updatedAt'] = FieldValue.serverTimestamp();
+      // SAU KHI SỬA: Cập nhật trực tiếp map nhận được, không convert qua Model
+      // để tránh việc các trường không gửi lên bị reset về null/mặc định.
 
-      await _db.collection('products').doc(productId).update(formatted);
+      final Map<String, dynamic> dataToUpdate = Map.from(data);
+
+      // Xử lý format thủ công cho các trường quan trọng (nếu có trong data gửi lên)
+      // Giữ logic TitleCase và UpperCase như cũ nhưng an toàn hơn
+      if (dataToUpdate.containsKey('productName') && dataToUpdate['productName'] != null) {
+        dataToUpdate['productName'] = _toTitleCase(dataToUpdate['productName']);
+      }
+
+      if (dataToUpdate.containsKey('unit') && dataToUpdate['unit'] != null) {
+        dataToUpdate['unit'] = _toTitleCase(dataToUpdate['unit']);
+      }
+
+      if (dataToUpdate.containsKey('productCode') && dataToUpdate['productCode'] != null) {
+        dataToUpdate['productCode'] = dataToUpdate['productCode'].toString().toUpperCase();
+      }
+
+      // Luôn cập nhật thời gian sửa
+      dataToUpdate['updatedAt'] = FieldValue.serverTimestamp();
+
+      await _db.collection('products').doc(productId).update(dataToUpdate);
     } catch (e) {
       throw Exception('Không thể cập nhật sản phẩm: $e');
     }

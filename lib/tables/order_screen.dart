@@ -194,6 +194,42 @@ class _OrderScreenState extends State<OrderScreen> {
     });
   }
 
+  void _handleBarcodeScan(String value) async {
+    if (value.trim().isEmpty) return;
+    final query = value.trim();
+
+    // Tìm sản phẩm khớp CHÍNH XÁC mã vạch hoặc mã sản phẩm
+    // (Ưu tiên khớp chính xác, sau đó mới khớp không phân biệt hoa thường)
+    final foundProduct = _menuProducts.firstWhereOrNull((p) =>
+    p.productCode == query ||
+        p.additionalBarcodes.contains(query) ||
+        (p.productCode?.toLowerCase() == query.toLowerCase()) ||
+        p.additionalBarcodes.any((b) => b.toLowerCase() == query.toLowerCase())
+    );
+
+    if (foundProduct != null) {
+      // Nếu tìm thấy: Thêm vào giỏ và xóa ô tìm kiếm
+      await _addItemToCart(foundProduct);
+      _searchController.clear();
+
+      // Focus lại vào ô tìm kiếm (quan trọng để quét liên tục)
+      // Lưu ý: TextField cần focusNode để làm việc này tốt nhất,
+      // nhưng mặc định autofocus + onSubmitted thường giữ focus tốt trên Desktop.
+      ToastService().show(
+          message: "Đã thêm: ${foundProduct.productName}",
+          type: ToastType.success,
+          duration: const Duration(seconds: 1) // Hiện nhanh rồi tắt
+      );
+    } else {
+      // Nếu không tìm thấy: Báo lỗi và xóa ô tìm kiếm (hoặc giữ lại tùy bạn)
+      ToastService().show(
+          message: "Không tìm thấy mã: $query",
+          type: ToastType.warning
+      );
+      _searchController.clear();
+    }
+  }
+
   Widget _buildTableTransferButton() {
     return IconButton(
       icon: const Icon(Icons.call_split_outlined, color: AppTheme.primaryColor, size: 30),
@@ -353,27 +389,38 @@ class _OrderScreenState extends State<OrderScreen> {
       return; // kết thúc nhánh dịch vụ tính giờ
     }
 
-    final bool needsOptionDialog = product.additionalUnits.isNotEmpty || product.accompanyingItems.isNotEmpty;
+    // --- LOGIC MỚI: Xử lý Ghi chú nhanh và Tùy chọn ---
+    final relevantNotes = _quickNotes.where((note) {
+      return note.productIds.isEmpty || note.productIds.contains(product.id);
+    }).toList();
+
+    // Điều kiện mở dialog: Tùy chọn đơn vị, Topping, HOẶC Ghi chú nhanh
+    final bool needsOptionDialog = product.additionalUnits.isNotEmpty || product.accompanyingItems.isNotEmpty || relevantNotes.isNotEmpty;
 
     OrderItem newItem;
 
     if (needsOptionDialog) {
       final result = await showDialog<Map<String, dynamic>>(
         context: context,
-        builder: (context) => _ProductOptionsDialog(product: product, allProducts: _menuProducts),
+        builder: (context) => _ProductOptionsDialog(
+          product: product,
+          allProducts: _menuProducts,
+          relevantQuickNotes: relevantNotes, // TRUYỀN GHI CHÚ
+        ),
       );
       if (result == null) return;
 
       final selectedUnit = result['selectedUnit'] as String;
       final priceForUnit = result['price'] as double;
       final selectedToppings = result['selectedToppings'] as Map<ProductModel, double>;
+      final selectedNoteText = result['selectedNote'] as String?; // LẤY GHI CHÚ
 
       newItem = OrderItem(
         product: product, selectedUnit: selectedUnit, price: priceForUnit,
         toppings: selectedToppings, addedBy: widget.currentUser.name ?? 'N/A', addedAt: Timestamp.now(),
         discountValue: 0,
         discountUnit: '%',
-        note: null,
+        note: selectedNoteText.nullIfEmpty, // GÁN GHI CHÚ (quan trọng cho groupKey)
         commissionStaff: {},
       );
     } else {
@@ -1895,8 +1942,13 @@ class _OrderScreenState extends State<OrderScreen> {
   Widget _buildSearchBar() {
     return TextField(
       controller: _searchController,
+      // --- BỔ SUNG CÁC DÒNG NÀY ---
+      autofocus: true, // Tự động focus khi mở màn hình (tiện cho desktop)
+      textInputAction: TextInputAction.done, // Hiển thị icon Done/Enter
+      onSubmitted: (value) => _handleBarcodeScan(value), // Xử lý khi nhấn Enter hoặc máy quét bắn xong
+      // -----------------------------
       decoration: InputDecoration(
-        hintText: 'Tìm theo tên hoặc mã SP...',
+        hintText: 'Quét mã hoặc tìm tên...', // Sửa lại hint cho rõ nghĩa
         prefixIcon: const Icon(Icons.search),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(30.0),
@@ -1904,11 +1956,15 @@ class _OrderScreenState extends State<OrderScreen> {
         ),
         filled: true,
         fillColor: Colors.grey[100],
-        contentPadding: EdgeInsets.zero,
+        contentPadding: EdgeInsets.zero, // Giữ nguyên style cũ của bạn
         suffixIcon: _searchController.text.isNotEmpty
             ? IconButton(
           icon: const Icon(Icons.clear, size: 20, color: AppTheme.primaryColor),
-          onPressed: () => _searchController.clear(),
+          onPressed: () {
+            _searchController.clear();
+            // Focus lại sau khi clear bằng tay để có thể quét tiếp
+            FocusScope.of(context).requestFocus();
+          },
         )
             : null,
       ),
@@ -3397,9 +3453,13 @@ class _OrderScreenState extends State<OrderScreen> {
 class _ProductOptionsDialog extends StatefulWidget {
   final ProductModel product;
   final List<ProductModel> allProducts;
+  final List<QuickNoteModel> relevantQuickNotes;
 
-  const _ProductOptionsDialog(
-      {required this.product, required this.allProducts});
+  const _ProductOptionsDialog({
+    required this.product,
+    required this.allProducts,
+    required this.relevantQuickNotes,
+  });
 
   @override
   State<_ProductOptionsDialog> createState() => _ProductOptionsDialogState();
@@ -3411,6 +3471,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
   late List<Map<String, dynamic>> _allUnitOptions;
   List<ProductModel> _accompanyingProducts = [];
   final Map<String, double> _selectedToppings = {};
+  final List<QuickNoteModel> _selectedQuickNotes = []; // THÊM DÒNG NÀY
 
   @override
   void initState() {
@@ -3445,10 +3506,14 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
       }
     });
 
+    // Gộp ghi chú nhanh thành một chuỗi
+    final String noteText = _selectedQuickNotes.map((n) => n.noteText).join(', ');
+
     Navigator.of(context).pop({
       'selectedUnit': _selectedUnit,
       'price': priceForSelectedUnit,
       'selectedToppings': toppingsMap,
+      'selectedNote': noteText, // TRẢ VỀ GHI CHÚ
     });
   }
 
@@ -3463,7 +3528,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
 
   Future<void> _showToppingQuantityInput(ProductModel topping) async {
     final controller = TextEditingController(
-        text: (_selectedToppings[topping.id] ?? 0).toString());
+        text: (NumberFormat('#,##0.##').format(_selectedToppings[topping.id] ?? 0)));
     final navigator = Navigator.of(context);
 
     final newQuantity = await showDialog<double>(
@@ -3474,13 +3539,14 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
           controller: controller,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           autofocus: true,
+          inputFormatters: [ThousandDecimalInputFormatter()],
           decoration: const InputDecoration(labelText: 'Số lượng'),
         ),
         actions: [
           TextButton(
               onPressed: () => navigator.pop(), child: const Text('Hủy')),
           ElevatedButton(
-            onPressed: () => navigator.pop(double.tryParse(controller.text)),
+            onPressed: () => navigator.pop(parseVN(controller.text)),
             child: const Text('Xác nhận'),
           ),
         ],
@@ -3496,6 +3562,10 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final hasUnits = widget.product.additionalUnits.isNotEmpty;
+    final hasToppings = _accompanyingProducts.isNotEmpty;
+    final hasNotes = widget.relevantQuickNotes.isNotEmpty;
+
     return AlertDialog(
       title: Text(widget.product.productName, textAlign: TextAlign.center),
       content: ConstrainedBox(
@@ -3505,7 +3575,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (widget.product.additionalUnits.isNotEmpty) ...[
+              if (hasUnits) ...[
                 const Text('Chọn đơn vị tính:',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
@@ -3538,7 +3608,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                   color: Colors.grey.shade200,
                 ),
               ],
-              if (_accompanyingProducts.isNotEmpty) ...[
+              if (hasToppings) ...[
                 const Text('Chọn Topping/Bán kèm:',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
@@ -3587,7 +3657,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                                       _showToppingQuantityInput(topping),
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 1, vertical: 1),
+                                        horizontal: 10, vertical: 1),
                                     child: Text(
                                       NumberFormat('#,##0.##').format(quantity),
                                       style: const TextStyle(
@@ -3610,7 +3680,41 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                     );
                   }).toList(),
                 ),
+                Divider(
+                  height: 24,
+                  thickness: 0.8,
+                  color: Colors.grey.shade200,
+                ),
               ],
+
+              // --- KHỐI GHI CHÚ NHANH MỚI ---
+              if (hasNotes) ...[
+                const Text('Ghi chú nhanh:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8.0,
+                  runSpacing: 8.0,
+                  children: widget.relevantQuickNotes.map((note) {
+                    final isSelected = _selectedQuickNotes.contains(note);
+                    return ChoiceChip(
+                      label: Text(note.noteText),
+                      selected: isSelected,
+                      selectedColor: AppTheme.primaryColor.withAlpha(50),
+                      onSelected: (selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedQuickNotes.add(note);
+                          } else {
+                            _selectedQuickNotes.remove(note);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                )
+              ]
+              // --- KẾT THÚC KHỐI GHI CHÚ NHANH ---
             ],
           ),
         ),

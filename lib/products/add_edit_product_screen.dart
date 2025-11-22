@@ -21,6 +21,7 @@ import '../../models/product_group_model.dart';
 import 'service_setup_screen.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../theme/number_utils.dart';
+import 'topping_setup_screen.dart';
 
 class AddEditProductScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -57,7 +58,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   List<String> _additionalBarcodes = [];
 
   late List<ProductGroupModel> _productGroups;
-
+  List<ProductModel> _parentProducts = [];
   ServiceSetupModel? _serviceSetup;
   String? _existingImageUrl;
   String? _selectedProductType;
@@ -132,7 +133,11 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         }).toList();
       }
       _isVisibleInMenu = widget.productToEdit!.isVisibleInMenu;
-
+      if (_selectedProductType == 'Topping/Bán kèm') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _loadParentProductsUsingTopping();
+        });
+      }
     }else {
       _selectedPrinters = ['Máy in A'];
     _serviceSetup ??= ServiceSetupModel();
@@ -159,6 +164,28 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         _productGroups = groups;
       });
     }
+  }
+
+  Future<void> _loadParentProductsUsingTopping() async {
+    if (widget.productToEdit == null) return;
+
+    // Lấy toàn bộ sản phẩm để tìm xem sản phẩm nào đang chứa topping này
+    final allProductsStream = _firestoreService.getAllProductsStream(widget.currentUser.storeId);
+
+    // Dùng listen để đảm bảo lấy được dữ liệu mới nhất
+    allProductsStream.first.then((allProducts) {
+      final parents = allProducts.where((p) {
+        // Kiểm tra trong danh sách món bán kèm của sản phẩm cha (p) có chứa ID của topping này không
+        return p.accompanyingItems.any((item) => item['productId'] == widget.productToEdit!.id);
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _parentProducts = parents;
+        });
+        print("Đã tìm thấy ${parents.length} sản phẩm cha chứa topping này.");
+      }
+    });
   }
 
   double _calculateCumulativeCost() {
@@ -452,16 +479,17 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       String productCodeFromController = _productCodeController.text.trim();
       String finalProductCode = productCodeFromController;
 
+      // --- 1. XỬ LÝ MÃ SẢN PHẨM VÀ ẢNH (GIỮ NGUYÊN) ---
       if (!_isEditMode && productCodeFromController.isEmpty) {
         String prefix;
         switch (_selectedProductType) {
-          case 'Hàng hóa':   prefix = 'HH'; break;
+          case 'Hàng hóa': prefix = 'HH'; break;
           case 'Thành phẩm/Combo': prefix = 'TP'; break;
-          case 'Dịch vụ/Tính giờ':    prefix = 'DV'; break;
-          case 'Topping/Bán kèm':    prefix = 'BK'; break;
+          case 'Dịch vụ/Tính giờ': prefix = 'DV'; break;
+          case 'Topping/Bán kèm': prefix = 'BK'; break;
           case 'Nguyên liệu': prefix = 'NL'; break;
-          case 'Vật liệu':   prefix = 'VL'; break;
-          default:           prefix = 'SP'; break;
+          case 'Vật liệu': prefix = 'VL'; break;
+          default: prefix = 'SP'; break;
         }
         finalProductCode = await _firestoreService.generateNextProductCode(
           widget.currentUser.storeId,
@@ -473,7 +501,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         final isDuplicate = await _firestoreService.isProductCodeDuplicate(
           storeId: widget.currentUser.storeId,
           productCode: finalProductCode,
-          // Nếu đang sửa, truyền ID sản phẩm hiện tại để loại trừ nó ra
           currentProductId: _isEditMode ? widget.productToEdit!.id : null,
         );
 
@@ -483,12 +510,11 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
             type: ToastType.error,
           );
           setState(() => _isLoading = false);
-          return; // Dừng hàm tại đây nếu mã bị trùng
+          return;
         }
       }
 
       String? imageUrl;
-      // Ưu tiên 1: Nếu người dùng chọn ảnh mới, luôn dùng ảnh đó.
       if (_imageXFile != null) {
         final imageBytes = await _imageXFile!.readAsBytes();
         imageUrl = await _storageService.uploadStoreProductImage(
@@ -496,29 +522,18 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
           storeId: widget.currentUser.storeId,
           fileName: finalProductCode,
         );
-      }
-      // Nếu không có ảnh mới được chọn, xử lý theo từng chế độ
-      else {
+      } else {
         if (_isEditMode) {
-          // CHỈNH SỬA
-          // Nếu có ảnh cũ hợp lệ thì giữ lại
-          if (widget.productToEdit?.imageUrl != null &&
-              widget.productToEdit!.imageUrl!.trim().isNotEmpty) {
-            imageUrl = widget.productToEdit!.imageUrl;
-          } else {
-            // Chỉnh sửa, nhưng CHƯA có ảnh -> Dùng logic TÌM KIẾM
-            imageUrl = await _storageService.findMatchingSharedImage(
-              _productNameController.text.trim(),
-            );
-          }
-        } else {
-          // THÊM MỚI -> Dùng logic TÌM KIẾM
+          imageUrl = widget.productToEdit?.imageUrl;
+        }
+        if (imageUrl == null || imageUrl.isEmpty) {
           imageUrl = await _storageService.findMatchingSharedImage(
             _productNameController.text.trim(),
           );
         }
       }
 
+      // --- 2. CHUẨN BỊ DỮ LIỆU TOPPING ---
       final manualCostPrice = parseVN(_costPriceController.text);
       final finalCostPrice = _isCumulativeCostPrice
           ? _calculateCumulativeCost()
@@ -547,7 +562,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         'isVisibleInMenu': _isVisibleInMenu,
         'manageStockSeparately': _manageStockSeparately,
         'compiledMaterials': compiledMaterialsList,
-
       };
 
       productData['accompanyingItems'] = _accompanyingItems.map((item) => item.toMap()).toList();
@@ -564,23 +578,76 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
       productData['serviceSetup'] = _serviceSetup?.toMap();
 
+      // --- 3. LƯU/CẬP NHẬT TOPPING VÀ LẤY ID ---
+      String savedProductId;
       if (_isEditMode) {
-        await _firestoreService.updateProduct(
-          widget.productToEdit!.id, // luôn dùng id cũ
-          productData,
-        );
+        savedProductId = widget.productToEdit!.id;
+        await _firestoreService.updateProduct(savedProductId, productData);
         toastService.show(message: 'Cập nhật sản phẩm thành công!', type: ToastType.success);
-        navigator.pop();
       } else {
         productData['createdAt'] = FieldValue.serverTimestamp();
         productData['ownerUid'] = widget.currentUser.uid;
-        await _firestoreService.addProduct(productData);
+        final docRef = await _firestoreService.addProduct(productData);
+        savedProductId = docRef.id;
         toastService.show(message: 'Thêm mới sản phẩm thành công!', type: ToastType.success);
-        navigator.pop();
       }
+
+      // --- 4. CẬP NHẬT NGƯỢC CHO CÁC SẢN PHẨM CHA (QUAN TRỌNG) ---
+      // Chỉ chạy logic này nếu sản phẩm hiện tại là Topping
+      if (_selectedProductType == 'Topping/Bán kèm') {
+
+        // Lấy danh sách ID các sản phẩm cha ĐƯỢC CHỌN trong giao diện
+        final selectedParentIds = _parentProducts.map((e) => e.id).toSet();
+
+        // Lấy toàn bộ sản phẩm trong cửa hàng để rà soát
+        // (Dùng .first để lấy snapshot hiện tại)
+        final allProducts = await _firestoreService.getAllProductsStream(widget.currentUser.storeId).first;
+
+        int updatedCount = 0;
+
+        for (var product in allProducts) {
+          // Bỏ qua chính nó
+          if (product.id == savedProductId) continue;
+
+          // Kiểm tra xem sản phẩm này có đang chứa Topping này không
+          bool hasThisTopping = product.accompanyingItems.any((item) => item['productId'] == savedProductId);
+
+          // Kiểm tra xem sản phẩm này có nằm trong danh sách ĐƯỢC CHỌN không
+          bool isSelected = selectedParentIds.contains(product.id);
+
+          List<Map<String, dynamic>> newAccompanying = List.from(product.accompanyingItems);
+          bool needsUpdate = false;
+
+          // TRƯỜNG HỢP 1: Được chọn nhưng chưa có -> THÊM VÀO
+          if (isSelected && !hasThisTopping) {
+            newAccompanying.add({
+              'productId': savedProductId,
+              'quantity': 1, // Số lượng mặc định
+              'selectedUnit': _unitController.text.trim(), // Đơn vị của topping
+            });
+            needsUpdate = true;
+          }
+
+          // TRƯỜNG HỢP 2: Không được chọn (bỏ tick) nhưng đang có -> XÓA ĐI
+          else if (!isSelected && hasThisTopping) {
+            newAccompanying.removeWhere((item) => item['productId'] == savedProductId);
+            needsUpdate = true;
+          }
+
+          // Thực hiện update nếu có thay đổi
+          if (needsUpdate) {
+            await _firestoreService.updateProduct(product.id, {
+              'accompanyingItems': newAccompanying
+            });
+            updatedCount++;
+          }
+        }
+        print('Đã đồng bộ Topping cho $updatedCount sản phẩm cha.');
+      }
+
+      navigator.pop();
     } catch (e) {
       final action = _isEditMode ? 'Cập nhật' : 'Thêm';
-      // Dùng biến đã lưu
       toastService.show(
         message: '$action sản phẩm thất bại: $e',
         type: ToastType.error,
@@ -914,9 +981,10 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   Widget _buildProductGroupDropdown() {
     final groups = _productGroups;
     final groupNames = groups.map((g) => g.name).toList();
-    final String? dropdownValue = (_selectedProductGroup != null && _selectedProductGroup!.isEmpty)
-        ? null
-        : _selectedProductGroup;
+    String? dropdownValue = _selectedProductGroup;
+    if (dropdownValue != null && dropdownValue.isNotEmpty && !groupNames.contains(dropdownValue)) {
+      dropdownValue = null;
+    }
 
     return AppDropdown(
       value: dropdownValue, // Sử dụng giá trị đã qua xử lý
@@ -1074,7 +1142,14 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
 
   Widget _buildStockField() {
     if (_selectedProductType == 'Thành phẩm/Combo'|| _selectedProductType == 'Topping/Bán kèm') {
-      final totalItems = _recipeItems.length + _accompanyingItems.length;
+      int totalItems;
+      if (_selectedProductType == 'Topping/Bán kèm') {
+        // Nếu là Topping: Tổng = Định lượng + Sản phẩm cha áp dụng
+        totalItems = _recipeItems.length + _parentProducts.length;
+      } else {
+        // Nếu là Thành phẩm: Tổng = Định lượng + Topping bán kèm
+        totalItems = _recipeItems.length + _accompanyingItems.length;
+      }
       final hasItems = totalItems > 0;
 
       return InkWell(
@@ -1082,27 +1157,63 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         highlightColor: Colors.transparent,
         hoverColor: Colors.transparent,
         onTap: () async {
-          final result = await Navigator.of(context)
-              .push<Map<String, List<SelectedIngredient>>>(
-            MaterialPageRoute(
-              builder: (context) => AddIngredientsScreen(
-                currentUser: widget.currentUser,
-                initialAccompanyingItems: _accompanyingItems,
-                initialRecipeItems: _recipeItems,
-                productType: _selectedProductType,
+          if (_selectedProductType == 'Topping/Bán kèm') {
+            final result = await Navigator.of(context).push<Map<String, dynamic>>(
+              MaterialPageRoute(
+                builder: (context) => ToppingSetupScreen(
+                  currentUser: widget.currentUser,
+                  initialAccompanyingItems: _accompanyingItems,
+                  initialRecipeItems: _recipeItems,
+                  productType: _selectedProductType,
+                  initialParentProducts: _parentProducts, // Truyền danh sách hiện tại vào
+                ),
               ),
-            ),
-          );
-          if (result != null) {
-            setState(() {
-              _accompanyingItems = result['accompanying'] ?? [];
-              _recipeItems = result['recipe'] ?? [];
+            );
+
+            // --- SỬA LỖI: CẬP NHẬT LẠI _parentProducts TỪ KẾT QUẢ TRẢ VỀ ---
+            if (result != null) {
+              setState(() {
+                _accompanyingItems = result['accompanying'] ?? [];
+                _recipeItems = result['recipe'] ?? [];
+
+                // Dòng quan trọng để lưu danh sách sản phẩm cha đã chọn
+                if (result['parentProducts'] != null) {
+                  _parentProducts = List<ProductModel>.from(result['parentProducts']);
+                }
+              });
+
+              // Nếu đang dùng giá vốn cộng dồn thì tính lại
               if (_isCumulativeCostPrice) {
                 final cumulativeCost = _calculateCumulativeCost();
                 _costPriceController.text = numberFormat.format(cumulativeCost);
               }
-            });
-            ToastService().show(message: 'Đã cập nhật thành phần.', type: ToastType.success);
+
+              ToastService().show(message: 'Đã cập nhật thiết lập Topping.', type: ToastType.success);
+            }
+          }
+          else {
+            final result = await Navigator.of(context)
+                .push<Map<String, List<SelectedIngredient>>>(
+              MaterialPageRoute(
+                builder: (context) => AddIngredientsScreen(
+                  currentUser: widget.currentUser,
+                  initialAccompanyingItems: _accompanyingItems,
+                  initialRecipeItems: _recipeItems,
+                  productType: _selectedProductType,
+                ),
+              ),
+            );
+            if (result != null) {
+              setState(() {
+                _accompanyingItems = result['accompanying'] ?? [];
+                _recipeItems = result['recipe'] ?? [];
+                if (_isCumulativeCostPrice) {
+                  final cumulativeCost = _calculateCumulativeCost();
+                  _costPriceController.text = numberFormat.format(cumulativeCost);
+                }
+              });
+              ToastService().show(message: 'Đã cập nhật thành phần.', type: ToastType.success);
+            }
           }
         },
         child: InputDecorator(
