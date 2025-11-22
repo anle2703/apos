@@ -20,6 +20,7 @@ import '../../widgets/app_dropdown.dart';
 import 'dart:io';
 import '../../widgets/custom_text_form_field.dart';
 import 'package:printing/printing.dart';
+import 'label_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -761,72 +762,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
 
-              // Dòng 2: Chọn kích thước tem (Chỉ hiện nếu là Label Printer và không phải Desktop)
-              if (roleKey == 'label_printer' && !isDesktop) ...[
-                const SizedBox(height: 16), // Khoảng cách giữa dòng chọn máy in và chọn khổ giấy
+              // --- NÚT THIẾT LẬP MẪU TEM ---
+              if (roleKey == 'label_printer') ...[
+                const SizedBox(height: 16),
+
                 Row(
                   children: [
+                    // Dùng Expanded để chiếm chiều ngang bằng với Dropdown ở trên
                     Expanded(
-                      child: AppDropdown<String>(
-                        labelText: 'Kích thước tem',
-                        value: _selectedLabelSizeOption,
-                        items: const [
-                          DropdownMenuItem(value: '50x30', child: Text('50x30mm')),
-                          DropdownMenuItem(value: '70x22', child: Text('70x22mm')),
-                          DropdownMenuItem(
-                              value: 'custom', child: Text('Tùy chỉnh...')),
-                        ],
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedLabelSizeOption = val!;
-                            if (val == '50x30') {
-                              _labelWidth = 50;
-                              _labelHeight = 30;
-                            } else if (val == '70x22') {
-                              _labelWidth = 70;
-                              _labelHeight = 22;
-                            }
-                          });
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
+                          );
                         },
+                        borderRadius: BorderRadius.circular(12), // Bo góc 12 cho hiệu ứng
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: 'Thiết kế mẫu tem',
+                            labelStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                            // Bỏ prefixIcon theo yêu cầu
+                            prefixIcon: null,
+                            suffixIcon: const Padding(
+                              padding: EdgeInsets.only(right: 12.0),
+                              child: Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.primaryColor),
+                            ),
+                            contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
+                            // Viền thường
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12), // Bo góc 12
+                              borderSide: BorderSide(color: Colors.grey.shade300), // Màu nhạt cho giống Dropdown
+                            ),
+                            // Viền khi focus (nếu có)
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.grey),
+                            ),
+                          ),
+                          child: Text(
+                            "Tùy chỉnh Kích thước & Bố cục",
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 48),
+
+                    IconButton(
+                      icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.grey),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
+                        );
+                      },
+                    ),
                   ],
                 ),
-
-                // Dòng 3: Nhập tay kích thước (Nếu chọn Tùy chỉnh)
-                if (_selectedLabelSizeOption == 'custom')
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                            child: CustomTextFormField(
-                              initialValue: _labelWidth.toInt().toString(),
-                              decoration: const InputDecoration(
-                                  labelText: 'Rộng (mm)', isDense: true),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                              onChanged: (v) {
-                                _labelWidth = (int.tryParse(v) ?? 50).toDouble();
-                              },
-                            )),
-                        const SizedBox(width: 16),
-                        Expanded(
-                            child: CustomTextFormField(
-                              initialValue: _labelHeight.toInt().toString(),
-                              decoration: const InputDecoration(
-                                  labelText: 'Cao (mm)', isDense: true),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: false),
-                              onChanged: (v) {
-                                _labelHeight = (int.tryParse(v) ?? 30).toDouble();
-                              },
-                            )),
-                        // Bù khoảng trống để input không bị lệch so với layout chung
-                        const SizedBox(width: 48),
-                      ],
-                    ),
-                  ),
-              ]
+              ],
+              // ----------------------------------------------------------
             ],
           ),
         );

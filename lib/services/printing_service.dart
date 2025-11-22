@@ -24,6 +24,7 @@ import 'package:printing/printing.dart' as printing_lib;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
+import '../models/label_template_model.dart';
 
 class PrintingService {
   final String tableName;
@@ -1309,7 +1310,6 @@ class PrintingService {
       }
     }
 
-    // --- [MODE 2] CÁCH IN CŨ (Cho Sunmi, Mobile, Mạng LAN) ---
     debugPrint(">>> [MODE 2] ĐANG IN QUA RAW BYTES (PrinterManager)...");
 
     final printerManager = PrinterManager.instance;
@@ -1457,6 +1457,7 @@ class PrintingService {
     required List<ConfiguredPrinter> configuredPrinters,
     required double width,
     required double height,
+    bool isRetailMode = false,
   }) async {
     try {
       final labelPrinter = configuredPrinters.firstWhere(
@@ -1466,60 +1467,73 @@ class PrintingService {
 
       final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
-      // --- 1. TÍNH TỔNG SỐ LƯỢNG TEM CẦN IN TRONG ĐỢT NÀY (GRAND TOTAL) ---
+      final prefs = await SharedPreferences.getInstance();
+      LabelTemplateModel settings = LabelTemplateModel();
+      final jsonStr = prefs.getString('label_template_settings');
+      if (jsonStr != null) {
+        settings = LabelTemplateModel.fromJson(jsonStr);
+      } else {
+        settings.labelWidth = width;
+        settings.labelHeight = height;
+        settings.labelColumns = (width >= 65) ? 2 : 1;
+      }
+
+      final double printWidth = settings.labelWidth;
+      final double printHeight = settings.labelHeight;
+      final int columns = settings.labelColumns;
+
+      List<LabelData> allLabelsQueue = [];
       int grandTotalQty = 0;
       for (var itemData in items) {
         grandTotalQty += (OrderItem.fromMap(itemData).quantity).ceil();
       }
-
-      // --- 2. LẤY SỐ THỨ TỰ (DAILY SEQ) MỘT LẦN DUY NHẤT CHO CẢ ĐỢT IN ---
-      // (Sửa đổi: Đưa ra ngoài vòng lặp để tất cả tem trong đợt này cùng 1 số #)
       final int dailySeq = await _getNextLabelSequence();
-
-      // Biến đếm chạy toàn cục (ví dụ: 1/3 -> 2/3 -> 3/3)
       int globalCurrentIndex = 0;
+      for (var itemData in items) {
+        final item = OrderItem.fromMap(itemData);
+        final int itemQty = item.quantity.ceil();
+        for (int i = 1; i <= itemQty; i++) {
+          globalCurrentIndex++;
+          allLabelsQueue.add(LabelData(
+            item: item,
+            tableName: tableName,
+            createdAt: createdAt,
+            dailySeq: dailySeq,
+            copyIndex: globalCurrentIndex,
+            totalCopies: grandTotalQty,
+          ));
+        }
+      }
 
-      // --- LOGIC CHO MOBILE IN QUA LAN (SOCKET GIỮ KẾT NỐI) ---
       if (!isDesktop && labelPrinter.physicalPrinter.type == PrinterType.network) {
         final String ip = labelPrinter.physicalPrinter.device.address!;
-        debugPrint(">>> [DEBUG] Bắt đầu chuỗi in liên tục tới $ip. Tổng tem: $grandTotalQty. Seq: #$dailySeq");
-
         Socket? socket;
         try {
           socket = await Socket.connect(ip, 9100, timeout: const Duration(seconds: 5));
           List<int> totalCommands = [];
 
-          // Duyệt qua từng món
-          for (var itemData in items) {
-            final item = OrderItem.fromMap(itemData);
-            final int itemQty = item.quantity.ceil();
-
-            // Duyệt qua số lượng của từng món
-            for (int i = 1; i <= itemQty; i++) {
-              // Tăng biến đếm toàn cục (VD: Tem 1/5, Tem 2/5...)
-              globalCurrentIndex++;
-
-              final pdfBytes = await LabelPrintingService.generateLabelPdf(
-                item: item,
-                tableName: tableName,
-                createdAt: createdAt,
-                widthMm: width,
-                heightMm: height,
-                dailySeq: dailySeq, // Sử dụng số thứ tự chung
-
-                copyIndex: globalCurrentIndex,
-                totalCopies: grandTotalQty,
-
-                forceWhiteBackground: false,
-              );
-
-              final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, width, height);
-              if (commands.isNotEmpty) {
-                totalCommands.addAll(commands);
+          for (int i = 0; i < allLabelsQueue.length; i += columns) {
+            List<LabelData> batch = [];
+            for (int c = 0; c < columns; c++) {
+              if (i + c < allLabelsQueue.length) {
+                batch.add(allLabelsQueue[i + c]);
               }
             }
+
+            final pdfBytes = await LabelPrintingService.generateLabelPdf(
+              labelsOnPage: batch,
+              pageWidthMm: printWidth,
+              pageHeightMm: printHeight,
+              settings: settings,
+              isRetailMode: isRetailMode, // <--- 2. TRUYỀN VÀO ĐÂY
+              forceWhiteBackground: false,
+            );
+
+            final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, printWidth, printHeight);
+            totalCommands.addAll(commands);
           }
 
+          // ... (Phần gửi socket giữ nguyên) ...
           if (totalCommands.isNotEmpty) {
             const int chunkSize = 4096;
             for (var j = 0; j < totalCommands.length; j += chunkSize) {
@@ -1529,59 +1543,49 @@ class PrintingService {
             }
             await socket.flush();
           }
-
           await Future.delayed(const Duration(seconds: 2));
           socket.destroy();
           return true;
 
         } catch (e) {
-          debugPrint(">>> [ERROR] Lỗi in LAN liên tục: $e");
           try { socket?.destroy(); } catch (_) {}
           return false;
         }
-      }
-
-      // --- LOGIC CHO DESKTOP / KHÁC ---
-      else {
-        for (var itemData in items) {
-          final item = OrderItem.fromMap(itemData);
-          final int itemQty = item.quantity.ceil();
-
-          for (int i = 1; i <= itemQty; i++) {
-            // Tăng biến đếm toàn cục
-            globalCurrentIndex++;
-
-            final pdfBytes = await LabelPrintingService.generateLabelPdf(
-              item: item,
-              tableName: tableName,
-              createdAt: createdAt,
-              widthMm: width,
-              heightMm: height,
-              dailySeq: dailySeq, // Sử dụng số thứ tự chung
-
-              copyIndex: globalCurrentIndex,
-              totalCopies: grandTotalQty,
-
-              forceWhiteBackground: isDesktop,
-            );
-
-            if (isDesktop) {
-              await _printRawData(
-                labelPrinter.physicalPrinter.device,
-                labelPrinter.physicalPrinter.type,
-                pdfBytes: pdfBytes,
-              );
-            } else {
-              await _printLabelRawTSPL(
-                labelPrinter.physicalPrinter.device,
-                labelPrinter.physicalPrinter.type,
-                pdfBytes: pdfBytes,
-                labelWidthMm: width,
-                labelHeightMm: height,
-              );
+      } else {
+        // Logic Desktop/Khác
+        for (int i = 0; i < allLabelsQueue.length; i += columns) {
+          List<LabelData> batch = [];
+          for (int c = 0; c < columns; c++) {
+            if (i + c < allLabelsQueue.length) {
+              batch.add(allLabelsQueue[i + c]);
             }
-            await Future.delayed(const Duration(milliseconds: 300));
           }
+
+          final pdfBytes = await LabelPrintingService.generateLabelPdf(
+            labelsOnPage: batch,
+            pageWidthMm: printWidth,
+            pageHeightMm: printHeight,
+            settings: settings,
+            isRetailMode: isRetailMode, // <--- 3. TRUYỀN VÀO ĐÂY
+            forceWhiteBackground: isDesktop,
+          );
+
+          if (isDesktop) {
+            await _printRawData(
+              labelPrinter.physicalPrinter.device,
+              labelPrinter.physicalPrinter.type,
+              pdfBytes: pdfBytes,
+            );
+          } else {
+            await _printLabelRawTSPL(
+              labelPrinter.physicalPrinter.device,
+              labelPrinter.physicalPrinter.type,
+              pdfBytes: pdfBytes,
+              labelWidthMm: printWidth,
+              labelHeightMm: printHeight,
+            );
+          }
+          await Future.delayed(const Duration(milliseconds: 300));
         }
         return true;
       }

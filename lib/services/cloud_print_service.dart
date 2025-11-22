@@ -658,6 +658,7 @@ class CloudPrintService {
           createdAt = DateTime.now();
         }
 
+        final bool isRetail = data['isRetailMode'] ?? false;
         final success = await printingService.printLabels(
           items: normalizedItems,
           tableName: tableName,
@@ -665,6 +666,7 @@ class CloudPrintService {
           configuredPrinters: configuredPrinters,
           width: (data['labelWidth'] as num?)?.toDouble() ?? 50.0,
           height: (data['labelHeight'] as num?)?.toDouble() ?? 30.0,
+          isRetailMode: isRetail,
         );
 
         return success ? Response.ok('OK') : Response.internalServerError(body: 'In Tem thất bại');
