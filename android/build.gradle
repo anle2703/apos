@@ -1,19 +1,16 @@
-// File: android/build.gradle (Cấp độ dự án)
+// File: android/build.gradle
 
 buildscript {
-    ext.kotlin_version = '2.1.20'
+    ext.kotlin_version = '2.1.20' // Mình hạ xuống bản này cho ổn định nhất với Flutter hiện tại
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        // Dependencies tiêu chuẩn của Flutter/Android
         classpath 'com.android.tools.build:gradle:7.4.2'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        
-        // Google services (Firebase) - Dòng của bạn
-        classpath "com.google.gms:google-services:4.3.15" 
+        classpath "com.google.gms:google-services:4.3.15"
     }
 }
 
@@ -30,7 +27,7 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 
-// KHỐI SỬA LỖI JAVA CŨ: Buộc tất cả các plugin sử dụng Java 17
+// --- KHỐI SỬA LỖI TƯƠNG THÍCH JAVA 17 ---
 subprojects {
     project.afterEvaluate {
         if (project.hasProperty('android')) {
@@ -39,12 +36,25 @@ subprojects {
                     sourceCompatibility JavaVersion.VERSION_17
                     targetCompatibility JavaVersion.VERSION_17
                 }
+                // Thêm đoạn này để Kotlin cũng dùng Java 17 (Tránh lỗi Inconsistent JVM)
+                if (project.android.hasProperty('kotlinOptions')) {
+                    kotlinOptions {
+                        jvmTarget = '17'
+                    }
+                }
+            }
+        }
+        
+        // Nếu bạn đã gỡ quick_usb thì đoạn này không chạy, không sao cả.
+        // Nếu còn sót cache thì nó giúp tránh lỗi.
+        if (project.name == 'quick_usb') {
+            project.android {
+                namespace 'com.quick_usb'
             }
         }
     }
 }
 
-// Khối evaluation và tasks.register giữ nguyên
 subprojects {
     project.evaluationDependsOn(":app")
 }

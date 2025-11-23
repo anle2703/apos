@@ -1,5 +1,3 @@
-// File: lib/services/printing_service.dart
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -25,6 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
 import '../models/label_template_model.dart';
+import '../../services/native_printer_service.dart';
 
 class PrintingService {
   final String tableName;
@@ -36,10 +35,7 @@ class PrintingService {
   static pw.Font? _boldFont;
   static pw.Font? _italicFont;
 
-  static Future<pw.Font> loadFont({
-    bool isBold = false,
-    bool isItalic = false,
-  }) async {
+  static Future<pw.Font> loadFont({bool isBold = false, bool isItalic = false}) async {
     if (isItalic) {
       if (_italicFont != null) return _italicFont!;
       final fontData = await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
@@ -52,21 +48,11 @@ class PrintingService {
       _boldFont = pw.Font.ttf(fontData);
       return _boldFont!;
     }
-
     if (_font != null) return _font!;
     final fontData = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
     _font = pw.Font.ttf(fontData);
     return _font!;
   }
-
-  final Map<String, String> _keysToLabels = const {
-    'cashier_printer': 'Máy in Thu ngân',
-    'kitchen_printer_a': 'Máy in A',
-    'kitchen_printer_b': 'Máy in B',
-    'kitchen_printer_c': 'Máy in C',
-    'kitchen_printer_d': 'Máy in D',
-    'label_printer': 'Máy in Tem',
-  };
 
   Future<void> _ensureFontsLoaded() async {
     if (_font != null && _boldFont != null && _italicFont != null) return;
@@ -78,36 +64,463 @@ class PrintingService {
     _italicFont = pw.Font.ttf(italicFontData);
   }
 
-  Future<bool> printTableManagementNotification({
+  final Map<String, String> _keysToLabels = const {
+    'cashier_printer': 'Máy in Thu ngân',
+    'kitchen_printer_a': 'Máy in A',
+    'kitchen_printer_b': 'Máy in B',
+    'kitchen_printer_c': 'Máy in C',
+    'kitchen_printer_d': 'Máy in D',
+    'label_printer': 'Máy in Tem',
+  };
+
+  Future<bool> printProvisionalBill({
     required Map<String, String> storeInfo,
-    required String actionTitle,
-    required String message,
-    required String userName,
-    required DateTime timestamp,
+    required List<OrderItem> items,
+    required Map<String, dynamic> summary,
+    required bool showPrices,
+    required List<ConfiguredPrinter> configuredPrinters,
+    bool useDetailedLayout = false,
+  }) async {
+    try {
+      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
+      Uint8List pdfBytes;
+      if (useDetailedLayout) {
+        pdfBytes = await generateReceiptPdf(title: 'TẠM TÍNH', storeInfo: storeInfo, items: items.where((i) => i.quantity > 0).toList(), summary: summary);
+      } else {
+        pdfBytes = await _generateBillPdf(title: showPrices ? 'TẠM TÍNH' : 'KIỂM MÓN', storeInfo: storeInfo, items: items.where((i) => i.quantity > 0).toList(), totalAmount: (summary['subtotal'] as num?)?.toDouble() ?? 0.0, showPrices: showPrices, summary: summary);
+      }
+      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) {
+      debugPrint('Lỗi in tạm tính: $e');
+      rethrow;
+    }
+  }
+
+  Future<bool> printReceiptBill({
+    required Map<String, String> storeInfo,
+    required List<OrderItem> items,
+    required Map<String, dynamic> summary,
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
     try {
-      final cashierPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == 'cashier_printer',
-        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
+      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
+      final pdfBytes = await generateReceiptPdf(title: 'HÓA ĐƠN', storeInfo: storeInfo, items: items.where((i) => i.quantity > 0).toList(), summary: summary);
+      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) {
+      debugPrint('Lỗi in hóa đơn: $e');
+      rethrow;
+    }
+  }
+
+  Future<bool> printKitchenTicket({required List<OrderItem> itemsToPrint, required String targetPrinterRole, required List<ConfiguredPrinter> configuredPrinters, String? customerName}) async {
+    if (itemsToPrint.isEmpty) return true;
+    try {
+      final targetPrinter = configuredPrinters.firstWhere((p) => p.logicalName == targetPrinterRole, orElse: () => throw Exception('${_keysToLabels[targetPrinterRole] ?? targetPrinterRole} chưa được gán.'));
+      final pdfBytes = await _generateKitchenPdf(title: 'BÁO BẾP', items: itemsToPrint, isCancelTicket: false, customerName: customerName);
+      return await _printBillRaw(targetPrinter.physicalPrinter.device, targetPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) { rethrow; }
+  }
+
+  Future<bool> printCancelTicket({required List<OrderItem> itemsToCancel, required String targetPrinterRole, required List<ConfiguredPrinter> configuredPrinters}) async {
+    if (itemsToCancel.isEmpty) return true;
+    try {
+      final targetPrinter = configuredPrinters.firstWhere((p) => p.logicalName == targetPrinterRole, orElse: () => throw Exception('Máy in chưa được gán.'));
+      final pdfBytes = await _generateKitchenPdf(title: 'HỦY MÓN', items: itemsToCancel, isCancelTicket: true);
+      return await _printBillRaw(targetPrinter.physicalPrinter.device, targetPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) { rethrow; }
+  }
+
+  Future<bool> printEndOfDayReport({required Map<String, String> storeInfo, required Map<String, dynamic> totalReportData, required List<Map<String, dynamic>> shiftReportsData, required List<ConfiguredPrinter> configuredPrinters}) async {
+    await _ensureFontsLoaded();
+    try {
+      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
+      final pdfBytes = await EndOfDayReportPrintingHelper.generatePdf(storeInfo: storeInfo, totalReportData: totalReportData, shiftReportsData: shiftReportsData);
+      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) { rethrow; }
+  }
+
+  Future<bool> printCashFlowTicket({required Map<String, String> storeInfo, required CashFlowTransaction transaction, required double? openingDebt, required double? closingDebt, required List<ConfiguredPrinter> configuredPrinters}) async {
+    try {
+      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
+      final pdfBytes = await CashFlowPrintingHelper.generatePdf(tx: transaction, storeInfo: storeInfo, openingDebt: openingDebt, closingDebt: closingDebt);
+      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) { rethrow; }
+  }
+
+  Future<bool> printTableManagementNotification({required Map<String, String> storeInfo, required String actionTitle, required String message, required String userName, required DateTime timestamp, required List<ConfiguredPrinter> configuredPrinters}) async {
+    try {
+      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
+      final pdfBytes = await _generateTableManagementPdf(storeInfo: storeInfo, actionTitle: actionTitle, message: message, userName: userName, timestamp: timestamp);
+      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+    } catch (e) { rethrow; }
+  }
+
+  Future<bool> printLabels({
+    required List<Map<String, dynamic>> items,
+    required String tableName,
+    required DateTime createdAt,
+    required List<ConfiguredPrinter> configuredPrinters,
+    required double width,
+    required double height,
+    bool isRetailMode = false,
+  }) async {
+    try {
+      final labelPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'label_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Tem".'),
       );
 
-      final pdfBytes = await _generateTableManagementPdf(
-        storeInfo: storeInfo,
-        actionTitle: actionTitle,
-        message: message,
-        userName: userName,
-        timestamp: timestamp,
-      );
+      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
-      return await _printRawData(
-        cashierPrinter.physicalPrinter.device,
-        cashierPrinter.physicalPrinter.type,
-        pdfBytes: pdfBytes,
+      final prefs = await SharedPreferences.getInstance();
+      LabelTemplateModel settings = LabelTemplateModel();
+      final jsonStr = prefs.getString('label_template_settings');
+      if (jsonStr != null) {
+        settings = LabelTemplateModel.fromJson(jsonStr);
+      } else {
+        settings.labelWidth = width;
+        settings.labelHeight = height;
+        settings.labelColumns = (width >= 65) ? 2 : 1;
+      }
+
+      final double printWidth = settings.labelWidth;
+      final double printHeight = settings.labelHeight;
+      final int columns = settings.labelColumns;
+
+      List<LabelData> allLabelsQueue = [];
+      int grandTotalQty = items.fold(0, (tong, item) => tong + (OrderItem.fromMap(item).quantity).ceil());
+      final int dailySeq = await _getNextLabelSequence();
+      int globalCurrentIndex = 0;
+
+      for (var itemData in items) {
+        final item = OrderItem.fromMap(itemData);
+        final int itemQty = item.quantity.ceil();
+        for (int i = 1; i <= itemQty; i++) {
+          globalCurrentIndex++;
+          allLabelsQueue.add(LabelData(item: item, tableName: tableName, createdAt: createdAt, dailySeq: dailySeq, copyIndex: globalCurrentIndex, totalCopies: grandTotalQty));
+        }
+      }
+
+      // --- LOGIC IN TEM (BATCH) ---
+
+      if (isDesktop) {
+        // WINDOWS (Driver)
+        for (int i = 0; i < allLabelsQueue.length; i += columns) {
+          List<LabelData> batch = [];
+          for (int c = 0; c < columns; c++) {
+            if (i + c < allLabelsQueue.length) batch.add(allLabelsQueue[i + c]);
+          }
+          final pdfBytes = await LabelPrintingService.generateLabelPdf(
+            labelsOnPage: batch, pageWidthMm: printWidth, pageHeightMm: printHeight, settings: settings, isRetailMode: isRetailMode, forceWhiteBackground: true,
+          );
+          await _printLabelDesktop(labelPrinter.physicalPrinter.device, pdfBytes);
+        }
+        return true;
+
+      } else {
+        // MOBILE (Android)
+
+        // A. NẾU LÀ MẠNG LAN
+        if (labelPrinter.physicalPrinter.type == PrinterType.network) {
+          final String ip = labelPrinter.physicalPrinter.device.address!;
+          List<int> totalTsplCommands = [];
+
+          for (int i = 0; i < allLabelsQueue.length; i += columns) {
+            List<LabelData> batch = [];
+            for (int c = 0; c < columns; c++) {
+              if (i + c < allLabelsQueue.length) batch.add(allLabelsQueue[i + c]);
+            }
+
+            final pdfBytes = await LabelPrintingService.generateLabelPdf(
+              labelsOnPage: batch, pageWidthMm: printWidth, pageHeightMm: printHeight, settings: settings, isRetailMode: isRetailMode, forceWhiteBackground: false,
+            );
+
+            final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, printWidth, printHeight);
+            totalTsplCommands.addAll(commands);
+          }
+
+          if (totalTsplCommands.isNotEmpty) {
+            return await _sendBytesViaSocket(ip, totalTsplCommands);
+          }
+          return true;
+
+        } else {
+          // B. NẾU LÀ USB (Dùng QuickUsb - RawUsbService)
+          debugPrint(">>> IN TEM USB (QUICK_USB)...");
+
+          List<int> totalTsplCommands = [];
+          for (int i = 0; i < allLabelsQueue.length; i += columns) {
+            List<LabelData> batch = [];
+            for (int c = 0; c < columns; c++) {
+              if (i + c < allLabelsQueue.length) batch.add(allLabelsQueue[i + c]);
+            }
+
+            final pdfBytes = await LabelPrintingService.generateLabelPdf(
+              labelsOnPage: batch, pageWidthMm: printWidth, pageHeightMm: printHeight, settings: settings, isRetailMode: isRetailMode, forceWhiteBackground: false,
+            );
+
+            final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, printWidth, printHeight);
+            totalTsplCommands.addAll(commands);
+          }
+
+          if (totalTsplCommands.isNotEmpty) {
+            final String? deviceId = labelPrinter.physicalPrinter.device.address;
+
+            if (deviceId != null && deviceId.isNotEmpty) {
+              final nativeService = NativePrinterService();
+              return await nativeService.print(deviceId, Uint8List.fromList(totalTsplCommands));
+            } else {
+              debugPrint("Lỗi In Tem: Address null");
+              return false;
+            }
+          }
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Lỗi in tem: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _printBillRaw(PrinterDevice printer, PrinterType type, {required Uint8List pdfBytes}) async {
+    debugPrint(">>> IN BILL: ${printer.name} (${type.name})");
+
+    // 1. WINDOWS / MACOS
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS)) {
+      return await _printLabelDesktop(printer, pdfBytes);
+    }
+
+    // 2. ANDROID USB (Dùng QuickUsb)
+    if (!kIsWeb && Platform.isAndroid && type == PrinterType.usb) {
+      debugPrint(">>> IN BILL USB (NATIVE)...");
+      try {
+        final profile = await CapabilityProfile.load(name: 'default');
+        final generator = Generator(PaperSize.mm80, profile);
+        List<int> totalBytes = [];
+
+        // Render PDF thành ảnh ESC/POS
+        await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
+          final ui.Image uiImage = await page.toImage();
+          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+          if (byteData != null) {
+            final rawBytes = byteData.buffer.asUint8List();
+            final decoded = img.decodeImage(rawBytes);
+            if (decoded != null) {
+              final resized = img.copyResize(decoded, width: 576);
+              totalBytes += generator.image(resized);
+              totalBytes += generator.cut();
+            }
+          }
+        }
+
+        final String? deviceId = printer.address;
+
+        if (deviceId != null && deviceId.isNotEmpty) {
+          final nativeService = NativePrinterService();
+          // Gọi hàm print của Native Service
+          return await nativeService.print(deviceId, Uint8List.fromList(totalBytes));
+        } else {
+          debugPrint("Lỗi In Bill: Address null");
+          return false;
+        }
+      } catch (e) {
+        debugPrint("Lỗi Native Print Bill: $e");
+        return false;
+      }
+    }
+
+    // 3. CÁC TRƯỜNG HỢP CÒN LẠI (LAN Mobile, Bluetooth...) - Giữ nguyên logic cũ
+    final printerManager = PrinterManager.instance;
+    final profile = await CapabilityProfile.load(name: 'default');
+    final generator = Generator(PaperSize.mm80, profile);
+
+    // Khai báo lại totalBytes cho scope này (scope cũ đã đóng ở trên)
+    List<int> totalBytes = [];
+    final model = _getPrinterModel(printer, type);
+
+    try {
+      await printerManager.disconnect(type: type);
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      final result = await printerManager.connect(type: type, model: model);
+      if (result == true) {
+        await Future.delayed(const Duration(milliseconds: 400));
+
+        await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
+          final ui.Image uiImage = await page.toImage();
+          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+          if (byteData != null) {
+            final rawBytes = byteData.buffer.asUint8List();
+            final decoded = img.decodeImage(rawBytes);
+            if (decoded != null) {
+              final resized = img.copyResize(decoded, width: 576);
+              totalBytes += generator.image(resized);
+              totalBytes += generator.cut();
+            }
+          }
+        }
+
+        await _sendBytesInChunks(printerManager, type, totalBytes, delayMs: 5);
+        await Future.delayed(const Duration(seconds: 1));
+        await printerManager.disconnect(type: type);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint("Lỗi In Bill Raw (PrinterManager): $e");
+      try { await printerManager.disconnect(type: type); } catch (_) {}
+      return false;
+    }
+  }
+
+  Future<bool> _printLabelDesktop(PrinterDevice printer, Uint8List pdfBytes) async {
+    try {
+      debugPrint(">>> IN WINDOWS DRIVER: ${printer.name}");
+      final printers = await printing_lib.Printing.listPrinters();
+      final targetPrinter = printers.firstWhere(
+            (p) => p.name == printer.name,
+        orElse: () => printing_lib.Printer(url: printer.name, name: printer.name),
+      );
+      return await printing_lib.Printing.directPrintPdf(
+        printer: targetPrinter,
+        onLayout: (format) async => pdfBytes,
+        usePrinterSettings: true,
       );
     } catch (e) {
-      debugPrint('Lỗi in thông báo quản lý bàn: $e');
-      rethrow;
+      debugPrint("Lỗi In Driver Windows: $e");
+      return false;
+    }
+  }
+
+  Future<bool> _sendBytesViaSocket(String ipAddress, List<int> bytes) async {
+    try {
+      debugPrint(">>> Socket Connecting to $ipAddress:9100... Total bytes: ${bytes.length}");
+      final socket = await Socket.connect(ipAddress, 9100, timeout: const Duration(seconds: 5));
+
+      const int chunkSize = 4096;
+      for (var i = 0; i < bytes.length; i += chunkSize) {
+        var end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
+        socket.add(bytes.sublist(i, end));
+        // Delay nhẹ để tránh tràn buffer máy in
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+      await socket.flush();
+      await socket.close();
+      debugPrint(">>> Socket Sent OK!");
+      return true;
+    } catch (e) {
+      debugPrint(">>> Lỗi Socket LAN: $e");
+      return false;
+    }
+  }
+
+  Future<void> _sendBytesInChunks(PrinterManager pm, PrinterType type, List<int> bytes, {int delayMs = 5}) async {
+    if (bytes.isEmpty) return;
+    const int chunkSize = 4096;
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+      var end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
+      List<int> chunk = bytes.sublist(i, end);
+      await pm.send(type: type, bytes: chunk);
+      await Future.delayed(Duration(milliseconds: delayMs));
+    }
+  }
+
+  Future<List<int>> _getTsplCommandsFromPdf(Uint8List pdfBytes, double width, double height) async {
+    List<int> allCommands = [];
+    await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
+      final ui.Image uiImage = await page.toImage();
+      final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData != null) {
+        final rawBytes = byteData.buffer.asUint8List();
+        var decodedImage = img.decodeImage(rawBytes);
+        if (decodedImage != null) {
+          final whiteBgImage = img.Image(width: decodedImage.width, height: decodedImage.height);
+          img.fill(whiteBgImage, color: img.ColorRgb8(255, 255, 255));
+          img.compositeImage(whiteBgImage, decodedImage);
+          allCommands.addAll(_generateTSPL(whiteBgImage, width, height));
+        }
+      }
+    }
+    return allCommands;
+  }
+
+  List<int> _generateTSPL(img.Image image, double widthMm, double heightMm) {
+    List<int> commands = [];
+    int w = widthMm.toInt();
+    int h = heightMm.toInt();
+
+    String cmd = 'SIZE $w mm, $h mm\r\n';
+    cmd += 'GAP 2 mm, 0 mm\r\n';
+    cmd += 'DIRECTION 1\r\n';
+    cmd += 'CLS\r\n';
+    commands.addAll(utf8.encode(cmd));
+
+    int widthPx = image.width;
+    int heightPx = image.height;
+    int widthBytes = (widthPx + 7) ~/ 8;
+    String bitmapHeader = 'BITMAP 0,0,$widthBytes,$heightPx,0,';
+    commands.addAll(utf8.encode(bitmapHeader));
+
+    List<int> bitmapData = [];
+    for (int y = 0; y < heightPx; y++) {
+      for (int i = 0; i < widthBytes; i++) {
+        int byte = 0xFF;
+        for (int j = 0; j < 8; j++) {
+          int x = i * 8 + j;
+          if (x < widthPx) {
+            final pixel = image.getPixel(x, y);
+            if (pixel.a > 0 && pixel.luminance < 128) {
+              byte &= ~(1 << (7 - j));
+            }
+          }
+        }
+        bitmapData.add(byte);
+      }
+    }
+    commands.addAll(bitmapData);
+    commands.addAll(utf8.encode('\r\n'));
+    commands.addAll(utf8.encode('PRINT 1,1\r\n'));
+    return commands;
+  }
+
+  Future<int> _getNextLabelSequence() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String todayStr = DateFormat('yyyyMMdd').format(DateTime.now());
+    final String lastDate = prefs.getString('label_seq_date') ?? '';
+    int currentSeq = prefs.getInt('label_seq_num') ?? 0;
+    if (lastDate != todayStr) {
+      currentSeq = 1;
+      await prefs.setString('label_seq_date', todayStr);
+    } else {
+      currentSeq++;
+    }
+    await prefs.setInt('label_seq_num', currentSeq);
+    return currentSeq;
+  }
+
+  Future<void> disconnectPrinter(PrinterType type) async {
+    final printerManager = PrinterManager.instance;
+    await printerManager.disconnect(type: type);
+  }
+
+  BasePrinterInput _getPrinterModel(PrinterDevice printer, PrinterType type) {
+    switch (type) {
+      case PrinterType.network:
+        return TcpPrinterInput(ipAddress: printer.address!, port: 9100);
+      case PrinterType.bluetooth:
+        return BluetoothPrinterInput(
+            name: printer.name,
+            address: printer.address!,
+            isBle: false,
+            autoConnect: true);
+      case PrinterType.usb:
+        return UsbPrinterInput(
+          name: printer.name,
+          vendorId: printer.vendorId,
+          productId: printer.productId,
+          // ĐÃ XÓA: deviceId: printer.address
+        );
     }
   }
 
@@ -162,111 +575,6 @@ class PrintingService {
       ),
     );
     return pdf.save();
-  }
-
-  Future<bool> printKitchenTicket({
-    required List<OrderItem> itemsToPrint,
-    required String targetPrinterRole,
-    required List<ConfiguredPrinter> configuredPrinters,
-    String? customerName,
-  }) async {
-    if (itemsToPrint.isEmpty) return true;
-    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
-
-    try {
-      final targetPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == targetPrinterRole,
-        orElse: () => throw Exception(
-            '${_keysToLabels[targetPrinterRole] ?? targetPrinterRole} chưa được gán trong Cài đặt.'),
-      );
-
-      final pdfBytes = await _generateKitchenPdf(
-        title: 'BÁO BẾP',
-        items: itemsToPrint,
-        isCancelTicket: false,
-        customerName: customerName,
-      );
-
-      return await _printRawData(targetPrinter.physicalPrinter.device,
-          targetPrinter.physicalPrinter.type,
-          pdfBytes: pdfBytes);
-    } catch (e) {
-      debugPrint('Lỗi khi in cho máy "$targetPrinterRole": $e');
-      rethrow;
-    }
-  }
-
-  Future<bool> printProvisionalBill({
-    required Map<String, String> storeInfo,
-    required List<OrderItem> items,
-    required Map<String, dynamic> summary,
-    required bool showPrices,
-    required List<ConfiguredPrinter> configuredPrinters,
-    bool useDetailedLayout = false,
-  }) async {
-    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == 'cashier_printer',
-        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
-      );
-
-      if (useDetailedLayout) {
-        final pdfBytes = await generateReceiptPdf(
-          title: 'TẠM TÍNH',
-          storeInfo: storeInfo,
-          items: items.where((i) => i.quantity > 0).toList(),
-          summary: summary,
-        );
-        return await _printRawData(cashierPrinter.physicalPrinter.device,
-            cashierPrinter.physicalPrinter.type,
-            pdfBytes: pdfBytes);
-      } else {
-        final pdfBytes = await _generateBillPdf(
-          title: showPrices ? 'TẠM TÍNH' : 'KIỂM MÓN',
-          storeInfo: storeInfo,
-          items: items.where((i) => i.quantity > 0).toList(),
-          totalAmount: (summary['subtotal'] as num?)?.toDouble() ?? 0.0,
-          showPrices: showPrices,
-          summary: summary,
-        );
-        return await _printRawData(cashierPrinter.physicalPrinter.device,
-            cashierPrinter.physicalPrinter.type,
-            pdfBytes: pdfBytes);
-      }
-    } catch (e) {
-      debugPrint('Lỗi in hóa đơn tạm tính: $e');
-      rethrow;
-    }
-  }
-
-  Future<bool> printCancelTicket({
-    required List<OrderItem> itemsToCancel,
-    required String targetPrinterRole,
-    required List<ConfiguredPrinter> configuredPrinters,
-  }) async {
-    if (itemsToCancel.isEmpty) return true;
-    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
-
-    try {
-      final targetPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == targetPrinterRole,
-        orElse: () => throw Exception(
-            'Máy in "${_keysToLabels[targetPrinterRole] ?? targetPrinterRole}" chưa được gán trong Cài đặt.'),
-      );
-
-      final pdfBytes = await _generateKitchenPdf(
-        title: 'HỦY MÓN',
-        items: itemsToCancel,
-        isCancelTicket: true,
-      );
-      return await _printRawData(targetPrinter.physicalPrinter.device,
-          targetPrinter.physicalPrinter.type,
-          pdfBytes: pdfBytes);
-    } catch (e) {
-      debugPrint('Lỗi khi in phiếu hủy: $e');
-      rethrow;
-    }
   }
 
   Future<Uint8List> _generateKitchenPdf({
@@ -421,37 +729,6 @@ class PrintingService {
       ),
     );
     return pdf.save();
-  }
-
-  Future<bool> printReceiptBill({
-    required Map<String, String> storeInfo,
-    required List<OrderItem> items,
-    required Map<String, dynamic> summary,
-    required List<ConfiguredPrinter> configuredPrinters,
-  }) async {
-    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == 'cashier_printer',
-        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
-      );
-
-      final pdfBytes = await generateReceiptPdf(
-        title: 'HÓA ĐƠN',
-        storeInfo: storeInfo,
-        items: items.where((i) => i.quantity > 0).toList(),
-        summary: summary,
-      );
-
-      return await _printRawData(
-        cashierPrinter.physicalPrinter.device,
-        cashierPrinter.physicalPrinter.type,
-        pdfBytes: pdfBytes,
-      );
-    } catch (e) {
-      debugPrint('Lỗi in hóa đơn: $e');
-      rethrow;
-    }
   }
 
   Future<Uint8List> _generateBillPdf({
@@ -1178,70 +1455,6 @@ class PrintingService {
     return pdf.save();
   }
 
-  Future<bool> printCashFlowTicket({
-    required Map<String, String> storeInfo,
-    required CashFlowTransaction transaction,
-    required double? openingDebt,
-    required double? closingDebt,
-    required List<ConfiguredPrinter> configuredPrinters,
-  }) async {
-    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == 'cashier_printer',
-        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
-      );
-
-      final pdfBytes = await CashFlowPrintingHelper.generatePdf(
-        tx: transaction,
-        storeInfo: storeInfo,
-        openingDebt: openingDebt,
-        closingDebt: closingDebt,
-      );
-
-      return await _printRawData(
-        cashierPrinter.physicalPrinter.device,
-        cashierPrinter.physicalPrinter.type,
-        pdfBytes: pdfBytes,
-      );
-    } catch (e) {
-      debugPrint('Lỗi in phiếu thu/chi: $e');
-      rethrow;
-    }
-  }
-
-  Future<bool> printEndOfDayReport({
-    required Map<String, String> storeInfo,
-    required Map<String, dynamic> totalReportData,
-    required List<Map<String, dynamic>> shiftReportsData,
-    required List<ConfiguredPrinter> configuredPrinters,
-  }) async {
-    await _ensureFontsLoaded();
-    // **ĐÃ XÓA**: await PermissionService.ensurePermissions();
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == 'cashier_printer',
-        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
-      );
-
-      // Sử dụng helper PDF mới tạo
-      final pdfBytes = await EndOfDayReportPrintingHelper.generatePdf(
-        storeInfo: storeInfo,
-        totalReportData: totalReportData,
-        shiftReportsData: shiftReportsData,
-      );
-
-      return await _printRawData(
-        cashierPrinter.physicalPrinter.device,
-        cashierPrinter.physicalPrinter.type,
-        pdfBytes: pdfBytes,
-      );
-    } catch (e) {
-      debugPrint('Lỗi in Báo Cáo Tổng Kết: $e');
-      rethrow;
-    }
-  }
-
   pw.Widget _kvRow(
       String key,
       String value, {
@@ -1272,134 +1485,6 @@ class PrintingService {
             )),
       ],
     );
-  }
-
-  Future<bool> _printRawData(
-      PrinterDevice printer,
-      PrinterType type, {
-        required Uint8List pdfBytes,
-      }) async {
-
-    debugPrint(">>> KIỂM TRA MÁY IN: Name='${printer.name}', Address='${printer.address}', VendorId='${printer.vendorId}'");
-
-    bool shouldUseWindowsDriver = (printer.vendorId == 'DRIVER_WINDOWS') ||
-        (printer.name == printer.address);
-
-    if (shouldUseWindowsDriver) {
-      try {
-        debugPrint(">>> [MODE 1] ĐANG IN QUA WINDOWS DRIVER (PDF Mode)...");
-
-        final printers = await printing_lib.Printing.listPrinters();
-        final targetPrinter = printers.firstWhere(
-              (p) => p.name == printer.name,
-          orElse: () {
-            debugPrint(">>> Cảnh báo: Không tìm thấy driver '${printer.name}' trong hệ thống. Thử dùng tên làm URL.");
-            return printing_lib.Printer(url: printer.name, name: printer.name);
-          },
-        );
-
-        // In trực tiếp PDF qua Driver
-        return await printing_lib.Printing.directPrintPdf(
-          printer: targetPrinter,
-          onLayout: (format) async => pdfBytes,
-          usePrinterSettings: true,
-        );
-      } catch (e) {
-        debugPrint(">>> LỖI IN DRIVER: $e");
-        return false;
-      }
-    }
-
-    debugPrint(">>> [MODE 2] ĐANG IN QUA RAW BYTES (PrinterManager)...");
-
-    final printerManager = PrinterManager.instance;
-    final profile = await CapabilityProfile.load(name: 'default');
-    final generator = Generator(PaperSize.mm80, profile);
-    List<int> totalBytes = [];
-    final model = _getPrinterModel(printer, type);
-
-    try {
-      await printerManager.disconnect(type: type);
-    } catch (_) {}
-
-    if (type == PrinterType.usb) {
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
-
-    final result = await printerManager.connect(type: type, model: model);
-
-    if (result == true) {
-      try {
-        if (type == PrinterType.network || type == PrinterType.usb) {
-          await Future.delayed(const Duration(milliseconds: 100));
-        }
-
-        await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-          final ui.Image uiImage = await page.toImage();
-          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData != null) {
-            final rawBytes = byteData.buffer.asUint8List();
-            final decoded = img.decodeImage(rawBytes);
-            if (decoded != null) {
-              final resized = img.copyResize(decoded, width: 576);
-              totalBytes += generator.image(resized);
-            }
-          }
-        }
-
-        await printerManager.send(type: type, bytes: Uint8List.fromList(totalBytes));
-        await printerManager.disconnect(type: type);
-        return true;
-      } catch (e) {
-        debugPrint("Lỗi Raw Send: $e");
-        await printerManager.disconnect(type: type);
-        return false;
-      }
-    } else {
-      throw Exception('Không thể kết nối đến máy in (Raw Mode).');
-    }
-  }
-
-  Future<int> _getNextLabelSequence() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String todayStr = DateFormat('yyyyMMdd').format(DateTime.now());
-
-    final String lastDate = prefs.getString('label_seq_date') ?? '';
-    int currentSeq = prefs.getInt('label_seq_num') ?? 0;
-
-    if (lastDate != todayStr) {
-      currentSeq = 1;
-      await prefs.setString('label_seq_date', todayStr);
-    } else {
-      currentSeq++;
-    }
-
-    await prefs.setInt('label_seq_num', currentSeq);
-    return currentSeq;
-  }
-
-  Future<void> disconnectPrinter(PrinterType type) async {
-    final printerManager = PrinterManager.instance;
-    await printerManager.disconnect(type: type);
-    debugPrint("Đã disconnect máy in khi thoát app.");
-  }
-
-  BasePrinterInput _getPrinterModel(PrinterDevice printer, PrinterType type) {
-    switch (type) {
-      case PrinterType.network:
-        return TcpPrinterInput(ipAddress: printer.address!, port: 9100);
-      case PrinterType.bluetooth:
-        return BluetoothPrinterInput(
-            name: printer.name,
-            address: printer.address!,
-            isBle: false,
-            autoConnect: true);
-      case PrinterType.usb:
-        return UsbPrinterInput(
-            name: printer.name,
-            vendorId: printer.vendorId,
-            productId: printer.productId);
-    }
   }
 
   pw.Widget _buildTimeBasedItemDetails(
@@ -1448,300 +1533,5 @@ class PrintingService {
         }).toList(),
       ),
     );
-  }
-
-  Future<bool> printLabels({
-    required List<Map<String, dynamic>> items,
-    required String tableName,
-    required DateTime createdAt,
-    required List<ConfiguredPrinter> configuredPrinters,
-    required double width,
-    required double height,
-    bool isRetailMode = false,
-  }) async {
-    try {
-      final labelPrinter = configuredPrinters.firstWhere(
-            (p) => p.logicalName == 'label_printer',
-        orElse: () => throw Exception('Chưa cấu hình "Máy in Tem".'),
-      );
-
-      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
-
-      final prefs = await SharedPreferences.getInstance();
-      LabelTemplateModel settings = LabelTemplateModel();
-      final jsonStr = prefs.getString('label_template_settings');
-      if (jsonStr != null) {
-        settings = LabelTemplateModel.fromJson(jsonStr);
-      } else {
-        settings.labelWidth = width;
-        settings.labelHeight = height;
-        settings.labelColumns = (width >= 65) ? 2 : 1;
-      }
-
-      final double printWidth = settings.labelWidth;
-      final double printHeight = settings.labelHeight;
-      final int columns = settings.labelColumns;
-
-      List<LabelData> allLabelsQueue = [];
-      int grandTotalQty = 0;
-      for (var itemData in items) {
-        grandTotalQty += (OrderItem.fromMap(itemData).quantity).ceil();
-      }
-      final int dailySeq = await _getNextLabelSequence();
-      int globalCurrentIndex = 0;
-      for (var itemData in items) {
-        final item = OrderItem.fromMap(itemData);
-        final int itemQty = item.quantity.ceil();
-        for (int i = 1; i <= itemQty; i++) {
-          globalCurrentIndex++;
-          allLabelsQueue.add(LabelData(
-            item: item,
-            tableName: tableName,
-            createdAt: createdAt,
-            dailySeq: dailySeq,
-            copyIndex: globalCurrentIndex,
-            totalCopies: grandTotalQty,
-          ));
-        }
-      }
-
-      if (!isDesktop && labelPrinter.physicalPrinter.type == PrinterType.network) {
-        final String ip = labelPrinter.physicalPrinter.device.address!;
-        Socket? socket;
-        try {
-          socket = await Socket.connect(ip, 9100, timeout: const Duration(seconds: 5));
-          List<int> totalCommands = [];
-
-          for (int i = 0; i < allLabelsQueue.length; i += columns) {
-            List<LabelData> batch = [];
-            for (int c = 0; c < columns; c++) {
-              if (i + c < allLabelsQueue.length) {
-                batch.add(allLabelsQueue[i + c]);
-              }
-            }
-
-            final pdfBytes = await LabelPrintingService.generateLabelPdf(
-              labelsOnPage: batch,
-              pageWidthMm: printWidth,
-              pageHeightMm: printHeight,
-              settings: settings,
-              isRetailMode: isRetailMode, // <--- 2. TRUYỀN VÀO ĐÂY
-              forceWhiteBackground: false,
-            );
-
-            final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, printWidth, printHeight);
-            totalCommands.addAll(commands);
-          }
-
-          // ... (Phần gửi socket giữ nguyên) ...
-          if (totalCommands.isNotEmpty) {
-            const int chunkSize = 4096;
-            for (var j = 0; j < totalCommands.length; j += chunkSize) {
-              var end = (j + chunkSize < totalCommands.length) ? j + chunkSize : totalCommands.length;
-              socket.add(totalCommands.sublist(j, end));
-              await Future.delayed(const Duration(milliseconds: 5));
-            }
-            await socket.flush();
-          }
-          await Future.delayed(const Duration(seconds: 2));
-          socket.destroy();
-          return true;
-
-        } catch (e) {
-          try { socket?.destroy(); } catch (_) {}
-          return false;
-        }
-      } else {
-        // Logic Desktop/Khác
-        for (int i = 0; i < allLabelsQueue.length; i += columns) {
-          List<LabelData> batch = [];
-          for (int c = 0; c < columns; c++) {
-            if (i + c < allLabelsQueue.length) {
-              batch.add(allLabelsQueue[i + c]);
-            }
-          }
-
-          final pdfBytes = await LabelPrintingService.generateLabelPdf(
-            labelsOnPage: batch,
-            pageWidthMm: printWidth,
-            pageHeightMm: printHeight,
-            settings: settings,
-            isRetailMode: isRetailMode, // <--- 3. TRUYỀN VÀO ĐÂY
-            forceWhiteBackground: isDesktop,
-          );
-
-          if (isDesktop) {
-            await _printRawData(
-              labelPrinter.physicalPrinter.device,
-              labelPrinter.physicalPrinter.type,
-              pdfBytes: pdfBytes,
-            );
-          } else {
-            await _printLabelRawTSPL(
-              labelPrinter.physicalPrinter.device,
-              labelPrinter.physicalPrinter.type,
-              pdfBytes: pdfBytes,
-              labelWidthMm: printWidth,
-              labelHeightMm: printHeight,
-            );
-          }
-          await Future.delayed(const Duration(milliseconds: 300));
-        }
-        return true;
-      }
-    } catch (e) {
-      debugPrint('Lỗi in tem: $e');
-      return false;
-    }
-  }
-
-  Future<List<int>> _getTsplCommandsFromPdf(Uint8List pdfBytes, double width, double height) async {
-    List<int> allCommands = [];
-
-    await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-      final ui.Image uiImage = await page.toImage();
-      final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-
-      if (byteData != null) {
-        final rawBytes = byteData.buffer.asUint8List();
-        var decodedImage = img.decodeImage(rawBytes);
-
-        if (decodedImage != null) {
-          // --- XỬ LÝ NỀN TRẮNG (Fix lỗi nền đen) ---
-          final whiteBgImage = img.Image(width: decodedImage.width, height: decodedImage.height);
-          img.fill(whiteBgImage, color: img.ColorRgb8(255, 255, 255));
-          img.compositeImage(whiteBgImage, decodedImage);
-
-          // Sinh lệnh TSPL (Dùng hàm _generateTSPL chuẩn đã sửa ở bước trước)
-          allCommands.addAll(_generateTSPL(whiteBgImage, width, height));
-        }
-      }
-    }
-    return allCommands;
-  }
-
-  List<int> _generateTSPL(img.Image image, double widthMm, double heightMm) {
-    List<int> commands = [];
-
-    int w = widthMm.toInt();
-    int h = heightMm.toInt();
-
-    // 1. SETUP
-    // Khai báo kích thước tem vật lý
-    String cmd = 'SIZE $w mm, $h mm\r\n';
-    cmd += 'GAP 2 mm, 0 mm\r\n';
-    cmd += 'DIRECTION 1\r\n';
-    cmd += 'CLS\r\n';
-    commands.addAll(utf8.encode(cmd));
-
-    // 2. BITMAP
-    // Lưu ý: widthPx là chiều rộng thực tế của ảnh (có thể nhỏ hơn w vật lý)
-    int widthPx = image.width;
-    int heightPx = image.height;
-
-    // Tính số byte cho mỗi dòng (làm tròn lên)
-    int widthBytes = (widthPx + 7) ~/ 8;
-
-    String bitmapHeader = 'BITMAP 0,0,$widthBytes,$heightPx,0,';
-    commands.addAll(utf8.encode(bitmapHeader));
-
-    List<int> bitmapData = [];
-    for (int y = 0; y < heightPx; y++) {
-      for (int i = 0; i < widthBytes; i++) {
-
-        // --- THAY ĐỔI QUAN TRỌNG Ở ĐÂY ---
-        // Khởi tạo byte là 0xFF (11111111) -> Tương ứng toàn màu TRẮNG
-        // Điều này đảm bảo các bit thừa (padding) luôn là trắng -> Hết bị kẻ dọc
-        int byte = 0xFF;
-
-        for (int j = 0; j < 8; j++) {
-          int x = i * 8 + j;
-          if (x < widthPx) {
-            final pixel = image.getPixel(x, y);
-
-            // LOGIC MỚI: TÌM ĐIỂM ĐEN ĐỂ "ĐỤC LỖ" TRÊN NỀN TRẮNG
-
-            // 1. Kiểm tra có nội dung không (Alpha > 0)
-            bool hasContent = pixel.a > 0;
-
-            if (hasContent) {
-              // 2. Kiểm tra độ tối (Luminance < 128 là màu tối/đen)
-              // Nếu là màu tối -> Gán bit thành 0 (Set bit to 0)
-              if (pixel.luminance < 128) {
-                // Phép toán bit: Đảo bit 1 thành 0 tại vị trí j
-                byte &= ~(1 << (7 - j));
-              }
-            }
-            // Nếu là màu sáng hoặc trong suốt, byte vẫn giữ nguyên là 1 (Trắng)
-          }
-        }
-        bitmapData.add(byte);
-      }
-    }
-    commands.addAll(bitmapData);
-    commands.addAll(utf8.encode('\r\n'));
-
-    // 3. PRINT
-    commands.addAll(utf8.encode('PRINT 1,1\r\n'));
-
-    return commands;
-  }
-
-  Future<bool> _printLabelRawTSPL(
-      PrinterDevice printer,
-      PrinterType type, {
-        required Uint8List pdfBytes,
-        required double labelWidthMm,
-        required double labelHeightMm,
-      }) async {
-    final printerManager = PrinterManager.instance;
-    try {
-      await printerManager.disconnect(type: type);
-      if (type == PrinterType.network) await Future.delayed(const Duration(milliseconds: 200));
-      final model = _getPrinterModel(printer, type);
-      bool connected = await printerManager.connect(type: type, model: model).timeout(const Duration(seconds: 3), onTimeout: () => false);
-      if (!connected) return false;
-
-      List<int> tsplCommands = [];
-      await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-        final ui.Image uiImage = await page.toImage();
-        final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData != null) {
-          final rawBytes = byteData.buffer.asUint8List();
-          var decodedImage = img.decodeImage(rawBytes);
-          if (decodedImage != null) {
-            // SỬA LỖI API IMAGE v4 tại đây tương tự hàm trên
-
-            // 1. Tạo ảnh nền trắng
-            var whiteBgImage = img.Image(width: decodedImage.width, height: decodedImage.height);
-
-            // 2. Fill màu trắng
-            img.fill(whiteBgImage, color: img.ColorRgb8(255, 255, 255));
-
-            // 3. Merge ảnh
-            img.compositeImage(whiteBgImage, decodedImage);
-
-            tsplCommands.addAll(_generateTSPL(whiteBgImage, labelWidthMm, labelHeightMm));
-          }
-        }
-      }
-
-      if (tsplCommands.isNotEmpty) {
-        const int chunkSize = 1024;
-        for (var i = 0; i < tsplCommands.length; i += chunkSize) {
-          var end = (i + chunkSize < tsplCommands.length) ? i + chunkSize : tsplCommands.length;
-          await printerManager.send(type: type, bytes: Uint8List.fromList(tsplCommands.sublist(i, end)));
-          await Future.delayed(const Duration(milliseconds: 5));
-        }
-      }
-      await Future.delayed(const Duration(milliseconds: 500));
-      await printerManager.disconnect(type: type);
-      return true;
-
-    } catch (e) {
-      debugPrint(">>> Lỗi _printLabelRawTSPL: $e");
-      try { await printerManager.disconnect(type: type); } catch (_) {}
-      return false;
-    }
   }
 }

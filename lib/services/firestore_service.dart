@@ -681,19 +681,73 @@ class FirestoreService {
   }
 
   Future<CustomerModel> addCustomer(Map<String, dynamic> customerData) async {
-    final formattedData = Map<String, dynamic>.from(customerData);
-    formattedData['name'] = _toTitleCase(customerData['name']);
-    formattedData['address'] = _toTitleCase(customerData['address']);
-    formattedData['companyName'] = _toTitleCase(customerData['companyName']);
-    formattedData['companyAddress'] = _toTitleCase(customerData['companyAddress']);
-    if (customerData['customerGroup'] != null && customerData['customerGroup'].isNotEmpty) {
-      formattedData['customerGroup'] = _toTitleCase(customerData['customerGroup']);
+    try {
+      final formattedData = Map<String, dynamic>.from(customerData);
+      debugPrint(">>> DEBUG: Dữ liệu GỐC nhận từ Dialog: $customerData");
+
+      // 1. CHUẨN HÓA VÀ ÉP KIỂU AN TOÀN (Làm cho các trường trống trở thành null)
+      String? safeTitleCase(dynamic value) {
+        final String? str = value as String?;
+        if (str == null || str.trim().isEmpty) return null;
+        // Lưu ý: Đảm bảo rằng hàm _toTitleCase() được định nghĩa trong class này.
+        return _toTitleCase(str);
+      }
+
+      String? safeValue(dynamic value) {
+        final String? str = value as String?;
+        return (str == null || str.trim().isEmpty) ? null : str;
+      }
+
+      formattedData['name'] = safeTitleCase(customerData['name']);
+      formattedData['address'] = safeTitleCase(customerData['address']);
+      formattedData['companyName'] = safeTitleCase(customerData['companyName']);
+      formattedData['companyAddress'] = safeTitleCase(customerData['companyAddress']);
+
+      // Các trường không cần TitleCase nhưng cần đảm bảo là null nếu rỗng
+      formattedData['email'] = safeValue(customerData['email']);
+      formattedData['citizenId'] = safeValue(customerData['citizenId']);
+      formattedData['taxId'] = safeValue(customerData['taxId']);
+
+      // Xử lý customerGroupName
+      if (customerData['customerGroupName'] != null) {
+        formattedData['customerGroupName'] = safeTitleCase(customerData['customerGroupName']);
+      }
+
+      // Xóa các trường null để Firestore không lưu
+      // Lưu ý: Các trường số (0 hoặc 0.0) không bị xóa ở đây.
+      formattedData.removeWhere((key, value) => value == null);
+      debugPrint(">>> DEBUG: Dữ liệu ĐÃ CHUẨN HÓA trước khi gửi DB: $formattedData");
+      formattedData['createdAt'] = FieldValue.serverTimestamp();
+
+      // 2. Thêm vào Firestore
+      final docRef = await _db.collection('customers').add(formattedData);
+      debugPrint(">>> DEBUG: ID khách hàng mới: ${docRef.id}");
+
+      // 3. Cập nhật và trả về Model
+      formattedData['id'] = docRef.id;
+
+      // Khôi phục lại các giá trị bắt buộc/default nếu bị xóa (chắc chắn phải có)
+      formattedData['phone'] ??= '';
+      formattedData['storeId'] ??= '';
+      formattedData['searchKeys'] ??= [];
+
+      // THÊM: Đảm bảo các trường số có giá trị mặc định cho CustomerModel.fromMap
+      // Việc này đảm bảo CustomerModel.fromMap không gặp lỗi ép kiểu từ null sang num
+      formattedData['points'] ??= 0;
+      formattedData['debt'] ??= 0.0; // debt là nullable trong Model, nhưng gán 0.0 nếu chưa có vẫn an toàn
+      formattedData['totalSpent'] ??= 0.0;
+
+      // Cần Timestamp thay vì FieldValue khi tạo model cục bộ
+      formattedData['createdAt'] = Timestamp.now();
+      debugPrint(">>> DEBUG: Dữ liệu CUỐI CÙNG đưa vào Model: $formattedData");
+
+      // Tạo và trả về Model
+      return CustomerModel.fromMap(formattedData);
+    } catch (e) {
+      debugPrint(">>> DEBUG (LỖI GỐC): Xảy ra lỗi khi tạo Model: $e");
+      // Ném lại Exception để hàm _saveForm bắt được và hiển thị lỗi.
+      throw Exception('Lỗi xử lý dữ liệu khách hàng: $e');
     }
-    formattedData['createdAt'] = FieldValue.serverTimestamp();
-    final docRef = await _db.collection('customers').add(formattedData);
-    formattedData['id'] = docRef.id;
-    formattedData['createdAt'] = Timestamp.now();
-    return CustomerModel.fromMap(formattedData);
   }
 
   Future<void> updateCustomer(String customerId, Map<String, dynamic> data) async {

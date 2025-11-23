@@ -141,7 +141,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
   }
 
   Future<void> showAddCustomerDialog({CustomerModel? customer}) async {
-    final result = await showDialog<Map<String, dynamic>>(
+    // 1. SỬA LỖI GỐC: Khai báo kiểu trả về chính xác là CustomerModel.
+    final result = await showDialog<CustomerModel>(
       context: context,
       barrierDismissible: false,
       builder: (_) => AddEditCustomerDialog(
@@ -151,28 +152,29 @@ class _CustomerListTabState extends State<CustomerListTab> {
       ),
     );
 
+    // result là CustomerModel (đã lưu vào DB) hoặc null (nếu bấm Hủy).
     if (result == null || !mounted) return;
 
+    // 2. LOẠI BỎ logic lưu DB dư thừa và lỗi đọc Map.
     try {
-      final bool isEdit = result['isEdit'] as bool;
-      final customerData = result['data'] as Map<String, dynamic>;
-      final bool newGroupCreated = result['newGroupCreated'] as bool? ?? false;
+      // Xác định thông báo dựa trên việc thêm mới hay cập nhật
+      final String message = (customer != null)
+          ? 'Cập nhật thành công!'
+          : 'Thêm mới thành công!';
 
-      if (isEdit) {
-        await _firestoreService.updateCustomer(customer!.id, customerData);
-        ToastService().show(message: 'Cập nhật thành công!', type: ToastType.success);
-        if (newGroupCreated) {
-          await _loadCustomerGroups();
-        }
-      } else {
-        await _firestoreService.addCustomer(customerData);
-        ToastService().show(message: 'Thêm mới thành công!', type: ToastType.success);
-      }
-      if (newGroupCreated) {
+      ToastService().show(message: message, type: ToastType.success);
+
+      // Dùng result.customerGroupId để kiểm tra sự thay đổi nhóm (thay cho newGroupCreated)
+      // Nếu ID nhóm hiện tại khác ID nhóm ban đầu (hoặc là ID mới), reload nhóm.
+      if (result.customerGroupId != customer?.customerGroupId) {
         await _loadCustomerGroups();
       }
+
+      // Cập nhật trạng thái UI (ví dụ: danh sách khách hàng)
       setState(() {});
+
     } catch (e) {
+      // Bắt lỗi nếu có vấn đề về UI/Toast sau khi lưu
       ToastService().show(message: "Lưu khách hàng thất bại: $e", type: ToastType.error);
     }
   }

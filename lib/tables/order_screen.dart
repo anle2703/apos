@@ -91,8 +91,7 @@ class _OrderScreenState extends State<OrderScreen> {
     return false;
   }
   bool _suppressInitialToast = false;
-  bool get isDesktop =>
-      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+  bool get isDesktop => MediaQuery.of(context).size.width >= 1100;
   bool _allowProvisionalBill = true;
   bool _printBillAfterPayment = true;
   bool _notifyKitchenAfterPayment = false;
@@ -191,8 +190,11 @@ class _OrderScreenState extends State<OrderScreen> {
     // 1. Kiểm tra màn hình hiện tại có hợp lệ không
     if (!mounted || ModalRoute.of(context)?.isCurrent != true) return false;
 
-    // 2. Kiểm tra xem người dùng có đang nhập liệu ở ô khác (ví dụ dialog ghi chú) không?
-    // Nếu đang nhập ở ô khác thì KHÔNG CAN THIỆP.
+    // --- SỬA Ở ĐÂY: Nếu đang ở màn hình thanh toán (bên phải), không can thiệp phím tắt ---
+    if (_isPaymentView) return false;
+    // --------------------------------------------------------------------------------------
+
+    // 2. Kiểm tra xem người dùng có đang nhập liệu ở ô khác...
     final currentFocus = FocusManager.instance.primaryFocus;
     if (currentFocus != null &&
         currentFocus.context != null &&
@@ -277,10 +279,12 @@ class _OrderScreenState extends State<OrderScreen> {
 
   void _handleBarcodeScan(String value) async {
     if (value.trim().isEmpty) {
-      // Nếu gọi từ TextField mà rỗng thì focus lại
-      if (!_searchFocusNode.hasFocus) _searchFocusNode.requestFocus();
+      if (!_isPaymentView && !_searchFocusNode.hasFocus) {
+        _searchFocusNode.requestFocus();
+      }
       return;
     }
+
     final query = value.trim();
 
     final foundProduct = _menuProducts.firstWhereOrNull((p) =>
@@ -293,14 +297,13 @@ class _OrderScreenState extends State<OrderScreen> {
     if (foundProduct != null) {
       await _addItemToCart(foundProduct);
 
-      // Nếu đang dùng TextField thì xóa text đi
       if (_searchController.text.isNotEmpty) {
         _searchController.clear();
       }
 
-      // Tùy chọn: Luôn focus lại ô tìm kiếm sau khi quét thành công (để đẹp giao diện)
-      // Nhưng với Listener toàn cục thì không bắt buộc dòng này nữa.
-      _searchFocusNode.requestFocus();
+      if (!_isPaymentView) {
+        _searchFocusNode.requestFocus();
+      }
 
       ToastService().show(
           message: "Đã thêm: ${foundProduct.productName}",
@@ -312,10 +315,9 @@ class _OrderScreenState extends State<OrderScreen> {
           message: "Không tìm thấy mã: $query",
           type: ToastType.warning
       );
-      if (_searchController.text.isNotEmpty) {
-        _searchController.clear();
+      if (!_isPaymentView) {
+        _searchFocusNode.requestFocus();
       }
-      _searchFocusNode.requestFocus();
     }
   }
 
@@ -833,54 +835,76 @@ class _OrderScreenState extends State<OrderScreen> {
     if (performPrint) {
       final bool isOnlineOrder = widget.table.id.startsWith('ship_') || widget.table.id.startsWith('schedule_');
 
-      // --- LOGIC 1: IN PHIẾU BẾP (A, B, C...) ---
-      if (!_skipKitchenPrint) {
-        if (addItems.isNotEmpty) {
-          final Map<String, dynamic> payload = {
-            'storeId': widget.currentUser.storeId,
-            'tableName': _currentOrder!.tableName,
-            'userName': widget.currentUser.name ?? 'Unknown',
-            'items': addItems,
-            'printType': 'add'
-          };
-          if (isOnlineOrder && _customerNameFromOrder != null && _customerNameFromOrder!.isNotEmpty) {
-            payload['customerName'] = _customerNameFromOrder;
-          }
-          PrintQueueService().addJob(PrintJobType.kitchen, payload);
-        }
+      // 1. CHUẨN BỊ DỮ LIỆU (Payload)
+      Map<String, dynamic>? kitchenPayload;
+      Map<String, dynamic>? cancelPayload;
+      Map<String, dynamic>? labelPayload;
 
-        if (cancelItems.isNotEmpty) {
-          PrintQueueService().addJob(PrintJobType.cancel, {
-            'storeId': widget.currentUser.storeId,
-            'tableName': _currentOrder!.tableName,
-            'userName': widget.currentUser.name ?? 'Unknown',
-            'items': cancelItems,
-            'printType': 'cancel'
-          });
+      // Payload Bếp (Thêm món)
+      if (!_skipKitchenPrint && addItems.isNotEmpty) {
+        kitchenPayload = {
+          'storeId': widget.currentUser.storeId,
+          'tableName': _currentOrder!.tableName,
+          'userName': widget.currentUser.name ?? 'Unknown',
+          'items': addItems,
+          'printType': 'add'
+        };
+        if (isOnlineOrder && _customerNameFromOrder != null) {
+          kitchenPayload['customerName'] = _customerNameFromOrder;
         }
       }
 
-      // --- LOGIC 2: IN TEM (LABEL) ---
-      // Dùng biến trực tiếp thay vì SharedPreferences để đảm bảo đồng bộ
-      if (addItems.isNotEmpty) {
-        debugPrint(">>> [DEBUG] Checking Label Print: Setting=$_printLabelOnKitchen");
-
-        if (_printLabelOnKitchen) {
-          debugPrint(">>> [DEBUG] Tạo lệnh in Tem...");
-          PrintQueueService().addJob(PrintJobType.label, {
-            'storeId': widget.currentUser.storeId,
-            'tableName': _currentOrder!.tableName,
-            'items': addItems,
-            'labelWidth': _labelWidth,
-            'labelHeight': _labelHeight,
-          });
-        }
+      // Payload Bếp (Hủy món)
+      if (!_skipKitchenPrint && cancelItems.isNotEmpty) {
+        cancelPayload = {
+          'storeId': widget.currentUser.storeId,
+          'tableName': _currentOrder!.tableName,
+          'userName': widget.currentUser.name ?? 'Unknown',
+          'items': cancelItems,
+          'printType': 'cancel'
+        };
       }
 
+      // Payload Tem (Label)
+      if (_printLabelOnKitchen && addItems.isNotEmpty) {
+        labelPayload = {
+          'storeId': widget.currentUser.storeId,
+          'tableName': _currentOrder!.tableName,
+          'items': addItems,
+          'labelWidth': _labelWidth,
+          'labelHeight': _labelHeight,
+        };
+      }
+
+      // 2. BẮN LỆNH IN (CÓ DELAY)
+
+      // ƯU TIÊN 1: IN TEM (Nhẹ, Nhanh)
+      if (labelPayload != null) {
+        debugPrint(">>> [ORDER] Bắn lệnh Tem trước");
+        PrintQueueService().addJob(PrintJobType.label, labelPayload);
+
+        // --- QUAN TRỌNG: Nghỉ 100ms để lệnh Tem chui lọt xuống Android trước ---
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      // ƯU TIÊN 2: IN BẾP (Nặng do render PDF)
+      if (kitchenPayload != null) {
+        debugPrint(">>> [ORDER] Bắn lệnh Bếp");
+        PrintQueueService().addJob(PrintJobType.kitchen, kitchenPayload);
+      }
+
+      // ƯU TIÊN 3: IN HỦY
+      if (cancelPayload != null) {
+        // Nếu có cả lệnh Bếp và Hủy, cũng nên delay xíu cho chắc
+        if (kitchenPayload != null) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+        PrintQueueService().addJob(PrintJobType.cancel, cancelPayload);
+      }
+
+      // Thông báo UI
       if (addItems.isEmpty && cancelItems.isEmpty) {
-        ToastService().show(
-            message: "Không có thay đổi số lượng để báo bếp.",
-            type: ToastType.warning);
+        ToastService().show(message: "Không có thay đổi để báo bếp.", type: ToastType.warning);
       } else {
         String msg = "Đã gửi báo chế biến.";
         if (_skipKitchenPrint) msg += " (Không in phiếu bếp)";
@@ -1754,25 +1778,33 @@ class _OrderScreenState extends State<OrderScreen> {
         ),
 
         LayoutBuilder(
-            builder: (context, constraints) { // Dùng LayoutBuilder để lấy chiều rộng
+            builder: (context, constraints) {
               return Builder(
                 builder: (context) {
-                  final guestName = _customerNameFromOrder;
-                  final guestPhone = _customerPhoneFromOrder;
-                  final guestAddress = _customerAddressFromOrder; // Address or Time
-                  final guestNote = _customerNoteFromOrder;
+                  // PHẢI DÙNG var ĐỂ CÓ THỂ THAY ĐỔI GIÁ TRỊ SAU
+                  var guestName = _customerNameFromOrder;
+                  var guestPhone = _customerPhoneFromOrder;
+                  var guestAddress = _customerAddressFromOrder;
+                  final guestNote = _customerNoteFromOrder; // Note vẫn giữ nguyên
 
                   final bool isShipOrder = widget.table.id.startsWith('ship_');
                   final bool isScheduleOrder = widget.table.id.startsWith('schedule_');
                   final bool isOnlineOrder = isShipOrder || isScheduleOrder;
 
-                  // 1. Không hiển thị tên cho đơn online (đã có ở trên)
-                  final bool showName = (guestName != null && guestName.isNotEmpty) && !isOnlineOrder;
-                  final bool showPhone = (guestPhone != null && guestPhone.isNotEmpty);
+                  // --- SỬA LỖI LOGIC: Chỉ giữ lại Name/Phone/Address nếu là đơn ONLINE ---
+                  if (!isOnlineOrder) {
+                    // Nếu là bàn thường, loại bỏ thông tin khách hàng chi tiết
+                    guestName = null;
+                    guestPhone = null;
+                    guestAddress = null;
+                  }
+                  // -----------------------------------------------------------------------
 
+                  // 1. Không hiển thị tên cho đơn online (Đã bị loại bỏ bởi logic trên)
+                  final bool showName = (guestName != null && guestName.isNotEmpty);
+                  final bool showPhone = (guestPhone != null && guestPhone.isNotEmpty);
                   // 2. Đổi icon cho đơn đặt lịch
                   final bool showAddressOrTime = (guestAddress != null && guestAddress.isNotEmpty);
-                  final IconData addressIcon = isScheduleOrder ? Icons.calendar_month_outlined : Icons.location_on_outlined;
 
                   // 3. Hiển thị ghi chú
                   final bool showNote = (guestNote != null && guestNote.isNotEmpty);
@@ -1820,21 +1852,25 @@ class _OrderScreenState extends State<OrderScreen> {
                                   ),
 
                                 if (showAddressOrTime)
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.center,
-                                    children: [
-                                      Icon(addressIcon, size: 16, color: Colors.grey.shade700), // Icon động
-                                      const SizedBox(width: 8),
-                                      Flexible(
-                                        child: ConstrainedBox(
-                                          constraints: BoxConstraints(maxWidth: constraints.maxWidth - 60),
-                                          child: Text(guestAddress, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
-                                        ),
-                                      )
-                                    ],
+                                  Builder(
+                                      builder: (context) {
+                                        final IconData addressIcon = isScheduleOrder ? Icons.calendar_month_outlined : Icons.location_on_outlined;
+                                        return Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
+                                            Icon(addressIcon, size: 16, color: Colors.grey.shade700), // Không còn lỗi Undefined
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: ConstrainedBox(
+                                                constraints: BoxConstraints(maxWidth: constraints.maxWidth - 60),
+                                                child: Text(guestAddress!, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                              ),
+                                            )
+                                          ],
+                                        );
+                                      }
                                   ),
-
                                 if (showNote)
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -2029,17 +2065,14 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _buildSearchBar() {
+    final bool shouldAutoFocus = !_isPaymentView && !Platform.isAndroid && !Platform.isIOS;
+
     return TextField(
       controller: _searchController,
-
-      // --- THÊM DÒNG NÀY ---
       focusNode: _searchFocusNode,
-      // ---------------------
+      autofocus: shouldAutoFocus,
 
-      autofocus: true,
       textInputAction: TextInputAction.done,
-
-      // Khi nhấn Enter (hoặc máy quét bắn ký tự kết thúc), gọi hàm xử lý
       onSubmitted: (value) => _handleBarcodeScan(value),
 
       decoration: InputDecoration(

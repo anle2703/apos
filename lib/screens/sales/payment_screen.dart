@@ -455,7 +455,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         : discountInput;
   }
 
-  (double, double) _getCalculatedTaxes() {
+  (double, double) _getCalculatedTaxes(double totalDistributableDiscount) {
     if (_storeTaxSettings == null) {
       return (0.0, 0.0);
     }
@@ -466,34 +466,54 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     final rateMap = isDeduction ? kDeductionRates : kDirectRates;
     final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
 
+    // Tổng doanh thu chịu thuế (Giá trị hàng hóa chưa chiết khấu tổng đơn)
+    final double totalRevenue = widget.subtotal;
+
+    if (totalRevenue <= 0) {
+      return (0.0, 0.0);
+    }
+
     for (final item in widget.order.items) {
       final productMap = (item['product'] as Map<String, dynamic>?) ?? {};
       final productId = productMap['id'] as String?;
 
       String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
-
       if (!rateMap.containsKey(taxKey)) {
         taxKey = defaultTaxKey;
       }
 
+      // itemSubtotal là giá trị đã trừ chiết khấu cấp sản phẩm (nếu có)
       final double itemSubtotal = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
-      final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
-      totalTax += (itemSubtotal * rate);
+      // taxRate là tỷ lệ % thuế (ví dụ: 0.1 cho 10%)
+      final double taxRate = rateMap[taxKey]?['rate'] ?? 0.0;
+
+      // 1. Tính Tỷ lệ doanh thu của sản phẩm này trên tổng doanh thu
+      final double itemRatio = itemSubtotal / totalRevenue;
+
+      // 2. Phân bổ phần Chiết khấu tổng đơn cho sản phẩm này
+      final double allocatedDiscount = totalDistributableDiscount * itemRatio;
+
+      // 3. Tính Doanh thu chịu thuế cuối cùng (Giá đã giảm)
+      final double taxableRevenue = itemSubtotal - allocatedDiscount;
+
+      // 4. Tính Thuế VAT mới
+      final double itemTaxAmount = taxableRevenue * taxRate;
+
+      totalTax += itemTaxAmount;
     }
 
+    // Chỉ trả về tổng thuế (VAT) đã điều chỉnh
     return (totalTax.roundToDouble(), 0.0);
   }
 
   void _calculateTotal({bool initialLoad = false}) {
-    if (!initialLoad && (!_settingsLoaded || !_methodsLoaded || _storeTaxSettings == null)) return;
+    if (!initialLoad && (!_settingsLoaded || !_methodsLoaded)) return;
 
-    final (newVatAmount, newTncnAmount) = _getCalculatedTaxes();
-    final subtotal = widget.subtotal;
+    // 1. Tính tổng các loại chiết khấu/giảm giá áp dụng cho giá trị hàng hóa
     final discountAmount = _calculateDiscount();
     final int maxPoints = widget.customer?.points ?? 0;
 
     int pointsUsed = parseVN(_pointsController.text).toInt();
-
     if (pointsUsed > maxPoints) {
       pointsUsed = maxPoints;
       if (!initialLoad) {
@@ -502,10 +522,22 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     }
 
     final double pointsValue = pointsUsed * _redeemRate;
+
+    // Tổng chiết khấu CẦN PHÂN BỔ (Chiết khấu nhập tay + Điểm + Voucher)
+    final double totalDistributableDiscount = discountAmount + pointsValue + _voucherDiscountValue;
+
+    // 2. Tính thuế dựa trên tổng chiết khấu cần phân bổ
+    final (newVatAmount, newTncnAmount) = _getCalculatedTaxes(totalDistributableDiscount);
+
+    final subtotal = widget.subtotal;
     final totalSurcharge = _calculateTotalSurcharge();
 
-    double taxToAdd = newVatAmount + newTncnAmount;
-    final double finalTotal = (subtotal - discountAmount - pointsValue - _voucherDiscountValue + totalSurcharge + taxToAdd);
+    // 3. Tính tổng tiền phải trả:
+    // (Giá trị hàng hóa TRƯỚC THUẾ) - (Tổng Chiết Khấu) + (Phụ Thu) + (Tổng Thuế Mới)
+    final double finalTotalBase = subtotal - totalDistributableDiscount;
+    final double taxToAdd = newVatAmount + newTncnAmount;
+    final double finalTotal = finalTotalBase + totalSurcharge + taxToAdd;
+
     final newTotalPayable = finalTotal > 0 ? finalTotal.roundToDouble() : 0.0;
 
     double newChange = 0;
@@ -531,7 +563,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         _calculatedVatAmount = newVatAmount;
         _calculatedTncnAmount = newTncnAmount;
         _pointsMonetaryValue = pointsValue;
-        _totalPayable = newTotalPayable; // Cập nhật biến tổng tiền
+        _totalPayable = newTotalPayable;
         if (!initialLoad) {
           _changeAmount = newChange;
           _debtAmount = newDebt;
@@ -1063,89 +1095,68 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     required EInvoiceResult? eInvoiceResult,
     required String newBillId,
   }) async {
-    debugPrint(">>> [DEBUG PAYMENT] Bắt đầu quy trình In sau thanh toán...");
+    debugPrint(">>> [DEBUG PAYMENT] Chuẩn bị in song song...");
 
-    // 1. LOGIC IN HÓA ĐƠN (RECEIPT)
-    if (widget.printBillAfterPayment && _printReceipt) {
-      debugPrint(">>> [DEBUG PAYMENT] Điều kiện in Hóa đơn: THỎA MÃN. Đang tạo lệnh...");
-      try {
-        final storeInfo = await firestore.getStoreDetails(widget.currentUser.storeId);
-
-        if (storeInfo == null) {
-          debugPrint(">>> [DEBUG PAYMENT] Lỗi: Không lấy được storeInfo.");
-        } else {
-          final receiptPayload = _buildReceiptPayload(
-            storeInfo: storeInfo,
-            billItems: billItems,
-            result: result,
-            billData: billData,
-            eInvoiceResult: eInvoiceResult,
-            newBillId: newBillId,
-          );
-
-          PrintQueueService().addJob(PrintJobType.receipt, receiptPayload);
-          ToastService().show(message: 'Đã gửi lệnh in hóa đơn', type: ToastType.success);
-        }
-      } catch (e) {
-        debugPrint('>>> [DEBUG PAYMENT] Lỗi in hóa đơn: $e');
-      }
-    } else {
-      debugPrint(">>> [DEBUG PAYMENT] Bỏ qua in Hóa đơn (Cài đặt tắt hoặc User bỏ chọn).");
-    }
-
-    // 2. LOGIC IN TEM (LABEL) - CHECK TRỰC TIẾP TỪ SERVER (OWNER SETTINGS)
     try {
-      // Xác định ID của chủ cửa hàng để lấy cài đặt gốc
       final String ownerUid = widget.currentUser.role == 'owner'
           ? widget.currentUser.uid
           : (widget.currentUser.ownerUid ?? widget.currentUser.uid);
 
-      debugPrint(">>> [DEBUG PAYMENT] Đang lấy cài đặt từ Owner UID: $ownerUid");
+      final results = await Future.wait([
+        firestore.getStoreDetails(widget.currentUser.storeId),
+        SettingsService().getStoreSettings(ownerUid),
+      ]);
 
-      // Gọi SettingsService để lấy dữ liệu mới nhất từ Firestore
-      final settings = await SettingsService().getStoreSettings(ownerUid);
+      final storeInfo = results[0] as Map<String, String>?;
+      final settings = results[1] as dynamic;
 
-      // Lấy giá trị cài đặt (Mặc định là false nếu null)
+      // --- 1. IN TEM TRƯỚC (VÌ NÓ NHANH GỌN) ---
       final bool shouldPrintLabel = settings.printLabelOnPayment ?? false;
-
-      debugPrint(">>> [DEBUG PAYMENT] Kết quả Check Cài đặt 'printLabelOnPayment': $shouldPrintLabel");
-
       if (shouldPrintLabel) {
-        final double w = settings.labelWidth ?? 50.0;
-        final double h = settings.labelHeight ?? 30.0;
-
-        // Lấy Bill Code
-        final String billCode = newBillId.split('_').last;
-
-        // --- SỬA: Lọc bỏ dịch vụ tính giờ khỏi danh sách in tem ---
         final labelItems = billItems.where((item) {
           final product = item['product'] as Map<String, dynamic>? ?? {};
           final serviceSetup = product['serviceSetup'] as Map<String, dynamic>?;
-          // Giữ lại nếu KHÔNG phải là tính giờ
           return serviceSetup?['isTimeBased'] != true;
         }).toList();
 
         if (labelItems.isNotEmpty) {
-          debugPrint(">>> [DEBUG PAYMENT] Đang tạo lệnh in Tem. Size: ${w}x$h, BillCode: $billCode");
+          final double w = settings.labelWidth ?? 50.0;
+          final double h = settings.labelHeight ?? 30.0;
+          final String billCode = newBillId.split('_').last;
 
           PrintQueueService().addJob(PrintJobType.label, {
             'storeId': widget.currentUser.storeId,
             'tableName': billCode,
-            'items': labelItems, // Sử dụng danh sách đã lọc
+            'items': labelItems,
             'labelWidth': w,
             'labelHeight': h,
           });
-
-          ToastService().show(message: "Đã gửi lệnh in tem.", type: ToastType.success);
-        } else {
-          debugPrint(">>> [DEBUG PAYMENT] Không có món cần in tem (chỉ có dịch vụ tính giờ).");
+          debugPrint(">>> [DEBUG PAYMENT] Đã bắn lệnh In Tem (Ưu tiên 1)");
         }
-      } else {
-        debugPrint(">>> [DEBUG PAYMENT] KHÔNG in tem vì cài đặt của Chủ cửa hàng đang TẮT.");
       }
-    } catch (e, st) {
-      debugPrint(">>> [DEBUG PAYMENT] Lỗi khi kiểm tra in tem: $e");
-      debugPrint(st.toString());
+
+      if (shouldPrintLabel) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      // --- 2. IN BILL SAU (VÌ NÓ CẦN RENDER ẢNH LÂU HƠN) ---
+      if (widget.printBillAfterPayment && _printReceipt && storeInfo != null) {
+        final receiptPayload = _buildReceiptPayload(
+          storeInfo: storeInfo,
+          billItems: billItems,
+          result: result,
+          billData: billData,
+          eInvoiceResult: eInvoiceResult,
+          newBillId: newBillId,
+        );
+        PrintQueueService().addJob(PrintJobType.receipt, receiptPayload);
+        debugPrint(">>> [DEBUG PAYMENT] Đã bắn lệnh In Bill (Ưu tiên 2)");
+      }
+
+      ToastService().show(message: "Đã gửi lệnh in.", type: ToastType.success);
+
+    } catch (e) {
+      debugPrint(">>> [DEBUG PAYMENT] Lỗi quy trình in: $e");
     }
   }
 
@@ -2211,8 +2222,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   Widget _buildActionButtons() {
-    final isMobile = Theme.of(context).platform == TargetPlatform.android ||
-        Theme.of(context).platform == TargetPlatform.iOS;
+    final bool isMobile = MediaQuery.of(context).size.width < 800;
     return Container(
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(

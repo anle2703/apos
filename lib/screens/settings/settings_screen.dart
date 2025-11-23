@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart'
-    as pos_printer;
+as pos_printer;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:collection/collection.dart';
 import '../../models/configured_printer_model.dart';
@@ -15,12 +15,12 @@ import '../../services/toast_service.dart';
 import '../../theme/app_theme.dart';
 import '../../services/cloud_print_service.dart';
 import '../../services/settings_service.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 import '../../widgets/app_dropdown.dart';
 import 'dart:io';
 import '../../widgets/custom_text_form_field.dart';
 import 'package:printing/printing.dart';
 import 'label_setup_screen.dart';
+import '../../services/native_printer_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -47,7 +47,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _isThisDeviceTheServer = false;
   bool _showPricesOnBill = false;
-  bool _isSunmiDevice = false;
   bool _isScanning = false;
   bool _isSaving = false;
   bool _printBillAfterPayment = true;
@@ -68,7 +67,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _deviceIp = 'Đang tìm IP...';
   String _clientPrintMode = 'direct';
   bool _skipKitchenPrint = false;
-
   final List<String> _printerRoles = const [
     'cashier_printer',
     'kitchen_printer_a',
@@ -92,7 +90,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _serverIpController.text = '192.168.1.';
     _settingsService = SettingsService();
     _loadAllSettings();
-    _checkDeviceType();
   }
 
   @override
@@ -131,17 +128,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _deviceIp = ipAddress;
       });
-    }
-  }
-
-  Future<void> _checkDeviceType() async {
-    if (Platform.isAndroid) {
-      final androidInfo = await DeviceInfoPlugin().androidInfo;
-      if (androidInfo.manufacturer.toLowerCase() == 'sunmi') {
-        setState(() {
-          _isSunmiDevice = true;
-        });
-      }
     }
   }
 
@@ -207,7 +193,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() {
           final assignments =
-              jsonList.map((json) => ConfiguredPrinter.fromJson(json)).toList();
+          jsonList.map((json) => ConfiguredPrinter.fromJson(json)).toList();
           _printerAssignments = {for (var v in assignments) v.logicalName: v};
 
           _printerAssignments.values.where((p) => p != null).forEach((p) {
@@ -318,79 +304,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _isScanning = true;
+      _scannedPrinters.clear(); // Xóa sạch danh sách cũ
     });
-
-    final Set<ScannedPrinter> tempPrinters = {};
 
     debugPrint(">>> BẮT ĐẦU QUÉT MÁY IN...");
 
+    // 1. NẾU LÀ WINDOWS (Giữ nguyên)
     if (isDesktop) {
       try {
         final systemPrinters = await Printing.listPrinters();
-        debugPrint(">>> WINDOWS TRẢ VỀ ${systemPrinters.length} MÁY IN:");
         for (var p in systemPrinters) {
-          tempPrinters.add(ScannedPrinter(
-            device: pos_printer.PrinterDevice(
-              name: p.name,
-              address: p.name,
-              vendorId: 'DRIVER_WINDOWS',
-            ),
+          _scannedPrinters.add(ScannedPrinter(
+            device: pos_printer.PrinterDevice(name: p.name, address: p.name, vendorId: 'DRIVER_WINDOWS'),
             type: pos_printer.PrinterType.usb,
           ));
         }
       } catch (e) {
-        debugPrint(">>> LỖI KHI ĐỌC DRIVER WINDOWS: $e");
-        ToastService()
-            .show(message: "Lỗi đọc Driver Windows: $e", type: ToastType.error);
+        debugPrint("Lỗi Windows: $e");
       }
     }
 
-    if (_isSunmiDevice) {
-      tempPrinters.add(ScannedPrinter(
-        device: pos_printer.PrinterDevice(
-          name: 'Máy in Sunmi Tích hợp',
-          address: 'sunmi_internal',
-          vendorId: 'SUNMI',
-        ),
-        type: pos_printer.PrinterType.usb,
-      ));
-    }
-
-    if (mounted) {
-      setState(() {
-        _scannedPrinters.clear();
-        _scannedPrinters.addAll(tempPrinters);
-      });
-    }
-
-    // Chỉ lắng nghe USB/Network nếu không phải Desktop hoặc cần thiết
-    // Lưu ý: Trên mobile, discovery có thể gây lag nếu setState quá nhiều lần liên tục
+    // 2. NẾU LÀ ANDROID (Dùng QuickUsb thay thế hoàn toàn cho USB)
     if (!isDesktop) {
-      _printerManager
-          .discovery(type: pos_printer.PrinterType.usb)
-          .listen((printer) {
-        final scanned =
-        ScannedPrinter(device: printer, type: pos_printer.PrinterType.usb);
-        // Kiểm tra kỹ trước khi setState để giảm tải UI
-        if (!_scannedPrinters.any((p) =>
-        p.device.name == printer.name &&
-            p.device.address == printer.address)) {
-          if (mounted) setState(() => _scannedPrinters.add(scanned));
-        }
-      });
+      final nativeService = NativePrinterService();
 
-      _printerManager
-          .discovery(type: pos_printer.PrinterType.network)
-          .listen((printer) {
-        final scanned = ScannedPrinter(
-            device: printer, type: pos_printer.PrinterType.network);
-        if (!_scannedPrinters.any((p) => p.device.address == printer.address)) {
-          if (mounted) setState(() => _scannedPrinters.add(scanned));
+      try {
+        // Gọi xuống Native Kotlin để lấy danh sách
+        final devices = await nativeService.getPrinters();
+
+        for (var device in devices) {
+          // device.identifier chính là đường dẫn thực: /dev/bus/usb/001/002...
+          final String realId = device.identifier;
+          final String displayName = "${device.name} (ID: $realId)";
+
+          final p = pos_printer.PrinterDevice(
+            name: displayName,
+            address: realId, // Lưu đường dẫn thực vào address
+            vendorId: device.vendorId.toString(),
+            productId: device.productId.toString(),
+          );
+
+          final scanned = ScannedPrinter(
+              device: p,
+              type: pos_printer.PrinterType.usb
+          );
+
+          if (mounted) {
+            setState(() {
+              // Kiểm tra trùng lặp
+              if (!_scannedPrinters.any((p) => p.device.address == realId)) {
+                _scannedPrinters.add(scanned);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint("Lỗi quét Native: $e");
+      }
+
+      // Quét mạng LAN (Giữ nguyên)
+      _printerManager.discovery(type: pos_printer.PrinterType.network).listen((printer) {
+        if (mounted) {
+          setState(() {
+            if (!_scannedPrinters.any((p) => p.device.address == printer.address)) {
+              _scannedPrinters.add(ScannedPrinter(device: printer, type: pos_printer.PrinterType.network));
+            }
+          });
         }
       });
     }
 
-    Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 2), () {
       if (mounted) setState(() => _isScanning = false);
       debugPrint(">>> KẾT THÚC QUÉT.");
     });
@@ -424,7 +408,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (ip != null && ip.isNotEmpty) {
       final newPrinterDevice =
-          pos_printer.PrinterDevice(name: 'LAN Printer ($ip)', address: ip);
+      pos_printer.PrinterDevice(name: 'LAN Printer ($ip)', address: ip);
       final newScannedPrinter = ScannedPrinter(
           device: newPrinterDevice, type: pos_printer.PrinterType.network);
 
@@ -442,7 +426,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _getPrinterUniqueId(ScannedPrinter printer) {
-    return '${printer.device.name}|${printer.device.address ?? ''}|${printer.device.vendorId ?? ''}|${printer.device.productId ?? ''}';
+    return '${printer.device.name}|${printer.device.vendorId ?? ''}|${printer.device.productId ?? ''}';
   }
 
   @override
@@ -485,7 +469,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               CustomTextFormField(
                   controller: _storePhoneController,
                   decoration:
-                      const InputDecoration(labelText: 'Số điện thoại')),
+                  const InputDecoration(labelText: 'Số điện thoại')),
               const SizedBox(height: 16),
               CustomTextFormField(
                   controller: _storeAddressController,
@@ -539,7 +523,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               SwitchListTile(
                 title:
-                    const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
+                const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
                 subtitle: const Text('Tắt để chuyển sang in phiếu kiểm món.'),
                 value: _showPricesOnBill,
                 onChanged: (bool value) =>
@@ -602,7 +586,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                   selected: {_serverListenModeOnDevice},
                   onSelectionChanged: (newSelection) => setState(
-                      () => _serverListenModeOnDevice = newSelection.first),
+                          () => _serverListenModeOnDevice = newSelection.first),
                 ),
               ),
             ],
@@ -631,7 +615,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : 'Internet (Cloud)';
                       ToastService().show(
                         message:
-                            'Máy chủ đang hoạt động ở chế độ "$serverModeText". Bạn không thể chọn chế độ khác.',
+                        'Máy chủ đang hoạt động ở chế độ "$serverModeText". Bạn không thể chọn chế độ khác.',
                         type: ToastType.error,
                       );
                       return;
@@ -672,9 +656,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   TextButton.icon(
                     icon: _isScanning
                         ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.refresh),
                     label: Text(_isScanning ? 'Đang quét...' : 'Quét máy in'),
                     onPressed: _isScanning ? null : _discoverPrinters,
@@ -698,25 +682,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildPrinterAssignments() {
+    // 1. Xác định ID của máy in đang được gán làm "Máy in Tem"
+    String? assignedLabelPrinterId;
+    final labelConfig = _printerAssignments['label_printer'];
+    if (labelConfig != null) {
+      assignedLabelPrinterId = _getPrinterUniqueId(labelConfig.physicalPrinter);
+    }
+
+    // 2. Xác định danh sách ID của các máy in đang làm nhiệm vụ "In Bill" (Thu ngân + Các Bếp)
+    // (Trừ máy in Tem ra)
+    final Set<String> assignedBillPrinterIds = {};
+    _printerAssignments.forEach((key, value) {
+      if (key != 'label_printer' && value != null) {
+        assignedBillPrinterIds.add(_getPrinterUniqueId(value.physicalPrinter));
+      }
+    });
+
     return Column(
       children: _printerRoles.map((roleKey) {
         final assignedPrinterConfig = _printerAssignments[roleKey];
-        final selectedPrinterId = assignedPrinterConfig != null
+        final currentSelectedId = assignedPrinterConfig != null
             ? _getPrinterUniqueId(assignedPrinterConfig.physicalPrinter)
             : null;
 
-        // Kiểm tra xem máy in đã lưu có còn tồn tại trong danh sách quét không
-        final bool isPrinterAvailable = _scannedPrinters
-            .any((p) => _getPrinterUniqueId(p) == selectedPrinterId);
+        // --- LOGIC LỌC DANH SÁCH MÁY IN (SỬA MỚI) ---
+        final availablePrinters = _scannedPrinters.where((p) {
+          final pId = _getPrinterUniqueId(p);
 
-        final validValue = isPrinterAvailable ? selectedPrinterId : null;
+          // 1. Luôn hiển thị máy in đang được chọn cho dòng này (để không bị mất hiển thị)
+          if (pId == currentSelectedId) return true;
+
+          if (roleKey == 'label_printer') {
+            // A. Nếu đang chọn MÁY IN TEM:
+            // -> Phải ẨN tất cả các máy đã được gán làm Thu ngân hoặc Bếp
+            // (Vì máy in Bill không hiểu lệnh in Tem -> Gây lỗi rác)
+            if (assignedBillPrinterIds.contains(pId)) return false;
+          } else {
+            // B. Nếu đang chọn THU NGÂN hoặc BẾP (Máy in Bill):
+            // -> Chỉ cần ẨN máy đang làm Máy in Tem.
+            if (pId == assignedLabelPrinterId) return false;
+
+            // -> CHO PHÉP hiện các máy in Bill khác.
+            // (Ví dụ: Máy 031 đang làm Thu ngân, vẫn hiện ở dòng Bếp A để chọn chung)
+          }
+
+          return true;
+        }).toList();
+
+        // Kiểm tra xem máy in đã lưu có còn hợp lệ (đang kết nối) không
+        final bool isPrinterAvailable = _scannedPrinters
+            .any((p) => _getPrinterUniqueId(p) == currentSelectedId);
+
+        final validValue = isPrinterAvailable ? currentSelectedId : null;
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Dòng 1: Chọn máy in + Nút xóa
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -724,19 +747,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: AppDropdown(
                       labelText: _printerRoleLabels[roleKey] ?? roleKey,
                       value: validValue,
-                      items: _scannedPrinters.map((p) {
+                      items: availablePrinters.map((p) {
                         return DropdownMenuItem(
                           value: _getPrinterUniqueId(p),
                           child: Text(
-                            p.device.name,
+                            p.device.name, // Tên đã bao gồm ID (VD: USB ID: 29...)
                             overflow: TextOverflow.ellipsis,
                           ),
                         );
                       }).toList(),
                       onChanged: (newValueId) {
                         if (newValueId == null) return;
-                        final selectedPrinter =
-                        _scannedPrinters.firstWhereOrNull(
+                        final selectedPrinter = _scannedPrinters.firstWhereOrNull(
                                 (p) => _getPrinterUniqueId(p) == newValueId);
 
                         if (selectedPrinter != null) {
@@ -750,7 +772,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       },
                     ),
                   ),
-                  // Nút Xóa
                   IconButton(
                     icon: const Icon(Icons.clear, color: Colors.grey),
                     onPressed: () {
@@ -762,13 +783,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
 
-              // --- NÚT THIẾT LẬP MẪU TEM ---
+              // Nút thiết lập mẫu tem (Giữ nguyên)
               if (roleKey == 'label_printer') ...[
                 const SizedBox(height: 16),
-
                 Row(
                   children: [
-                    // Dùng Expanded để chiếm chiều ngang bằng với Dropdown ở trên
                     Expanded(
                       child: InkWell(
                         onTap: () {
@@ -777,26 +796,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
                           );
                         },
-                        borderRadius: BorderRadius.circular(12), // Bo góc 12 cho hiệu ứng
+                        borderRadius: BorderRadius.circular(12),
                         child: InputDecorator(
                           decoration: InputDecoration(
                             labelText: 'Thiết kế mẫu tem',
                             labelStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
                               color: Colors.grey[600],
                             ),
-                            // Bỏ prefixIcon theo yêu cầu
                             prefixIcon: null,
                             suffixIcon: const Padding(
                               padding: EdgeInsets.only(right: 12.0),
                               child: Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.primaryColor),
                             ),
                             contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
-                            // Viền thường
                             enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12), // Bo góc 12
-                              borderSide: BorderSide(color: Colors.grey.shade300), // Màu nhạt cho giống Dropdown
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.grey.shade300),
                             ),
-                            // Viền khi focus (nếu có)
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                               borderSide: const BorderSide(color: Colors.grey),
@@ -813,7 +829,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
-
                     IconButton(
                       icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.grey),
                       onPressed: () {
@@ -826,7 +841,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ],
-              // ----------------------------------------------------------
             ],
           ),
         );

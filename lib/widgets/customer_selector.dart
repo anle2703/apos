@@ -36,7 +36,7 @@ class CustomerSelector extends StatelessWidget {
 
     if (result is CustomerModel) {
       onCustomerSelected(result);
-    } else if (result == false) {
+    } else if (result is bool && result == false) {
       onCustomerSelected(null);
     }
   }
@@ -102,25 +102,17 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
     super.dispose();
   }
 
+
   Future<void> _addNewCustomer() async {
-    final dialogResult = await showDialog<Map<String, dynamic>>(
+    final CustomerModel? newCustomer = await showDialog<CustomerModel>(
       context: context,
       builder: (_) => AddEditCustomerDialog(
         firestoreService: widget.firestoreService,
         storeId: widget.storeId,
       ),
     );
-    if (dialogResult != null && mounted) {
-      final newCustomerData = dialogResult['data'] as Map<String, dynamic>?;
-      final bool isEdit = dialogResult['isEdit'] as bool? ?? false;
-
-      if (newCustomerData != null && !isEdit) {
-        final newCustomer = await widget.firestoreService.addCustomer(newCustomerData);
-        if (mounted) {
-          Navigator.of(context).pop(newCustomer);
-        }
-      }
-    }
+    if (newCustomer == null || !mounted) return;
+    Navigator.of(context).pop(newCustomer);
   }
 
   @override
