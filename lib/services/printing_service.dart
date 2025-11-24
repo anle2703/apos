@@ -286,12 +286,12 @@ class PrintingService {
   Future<bool> _printBillRaw(PrinterDevice printer, PrinterType type, {required Uint8List pdfBytes}) async {
     debugPrint(">>> IN BILL: ${printer.name} (${type.name})");
 
-    // 1. WINDOWS / MACOS
-    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS)) {
+    // 1. WINDOWS / MACOS / LINUX (Driver Print)
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       return await _printLabelDesktop(printer, pdfBytes);
     }
 
-    // 2. ANDROID USB (Dùng QuickUsb)
+    // 2. ANDROID USB (NativePrinterService) - KHÔNG THAY ĐỔI
     if (!kIsWeb && Platform.isAndroid && type == PrinterType.usb) {
       debugPrint(">>> IN BILL USB (NATIVE)...");
       try {
@@ -330,45 +330,78 @@ class PrintingService {
       }
     }
 
-    // 3. CÁC TRƯỜNG HỢP CÒN LẠI (LAN Mobile, Bluetooth...) - Giữ nguyên logic cũ
+    // 3. CÁC TRƯỜNG HỢP CÒN LẠI (iOS LAN, Android LAN, Bluetooth...) - ÁP DỤNG LOGIC FIX LAN
     final printerManager = PrinterManager.instance;
     final profile = await CapabilityProfile.load(name: 'default');
     final generator = Generator(PaperSize.mm80, profile);
 
-    // Khai báo lại totalBytes cho scope này (scope cũ đã đóng ở trên)
     List<int> totalBytes = [];
-    final model = _getPrinterModel(printer, type);
+    final model = _getPrinterModel(printer, type); // Dùng cho Bluetooth
 
     try {
-      await printerManager.disconnect(type: type);
-      await Future.delayed(const Duration(milliseconds: 200));
+      // 3.1. Ngắt kết nối cũ
+      try {
+        await printerManager.disconnect(type: type);
+      } catch (_) {}
 
-      final result = await printerManager.connect(type: type, model: model);
-      if (result == true) {
-        await Future.delayed(const Duration(milliseconds: 400));
+      // Delay nhỏ cho USB (đặc thù)
+      if (type == PrinterType.usb) {
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
 
-        await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-          final ui.Image uiImage = await page.toImage();
-          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData != null) {
-            final rawBytes = byteData.buffer.asUint8List();
-            final decoded = img.decodeImage(rawBytes);
-            if (decoded != null) {
-              final resized = img.copyResize(decoded, width: 576);
-              totalBytes += generator.image(resized);
-              totalBytes += generator.cut();
-            }
+      debugPrint(">>> BẮT ĐẦU KẾT NỐI: ${printer.name} (${printer.address}) - Type: $type");
+
+      // 3.2. KẾT NỐI (LAN sử dụng TcpPrinterInput trực tiếp)
+      bool isConnected;
+      if (type == PrinterType.network) {
+        final String ip = (printer.address ?? '').trim();
+        if (ip.isEmpty) throw Exception("Địa chỉ IP máy in LAN trống.");
+
+        isConnected = await printerManager.connect(
+            type: type,
+            model: TcpPrinterInput(ipAddress: ip, port: 9100)
+        );
+      } else {
+        // Bluetooth / USB (Dùng model cũ đã tạo)
+        isConnected = await printerManager.connect(type: type, model: model);
+      }
+
+      if (!isConnected) {
+        throw Exception("Kết nối máy in thất bại (connect = false). Kiểm tra IP/Dây cáp.");
+      }
+
+      // 3.3. Gửi dữ liệu in
+      if (type == PrinterType.network || type == PrinterType.usb) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      // ... (Phần chuyển PDF sang ESC/POS Image)
+      await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
+        final ui.Image uiImage = await page.toImage();
+        final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData != null) {
+          final rawBytes = byteData.buffer.asUint8List();
+          final decoded = img.decodeImage(rawBytes);
+          if (decoded != null) {
+            final resized = img.copyResize(decoded, width: 576);
+            totalBytes += generator.image(resized);
           }
         }
-
-        await _sendBytesInChunks(printerManager, type, totalBytes, delayMs: 5);
-        await Future.delayed(const Duration(seconds: 1));
-        await printerManager.disconnect(type: type);
-        return true;
       }
-      return false;
+      totalBytes += generator.feed(1);
+      totalBytes += generator.cut();
+
+      debugPrint(">>> Đang gửi ${totalBytes.length} bytes dữ liệu...");
+      await printerManager.send(type: type, bytes: Uint8List.fromList(totalBytes));
+
+      // 3.4. Ngắt kết nối sau khi in xong
+      await Future.delayed(const Duration(milliseconds: 500));
+      await printerManager.disconnect(type: type);
+
+      debugPrint(">>> IN THÀNH CÔNG!");
+      return true;
     } catch (e) {
-      debugPrint("Lỗi In Bill Raw (PrinterManager): $e");
+      debugPrint("Lỗi In Bill Raw (ÁP DỤNG FIX): $e");
       try { await printerManager.disconnect(type: type); } catch (_) {}
       return false;
     }
