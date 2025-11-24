@@ -448,17 +448,6 @@ class PrintingService {
     }
   }
 
-  Future<void> _sendBytesInChunks(PrinterManager pm, PrinterType type, List<int> bytes, {int delayMs = 5}) async {
-    if (bytes.isEmpty) return;
-    const int chunkSize = 4096;
-    for (var i = 0; i < bytes.length; i += chunkSize) {
-      var end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
-      List<int> chunk = bytes.sublist(i, end);
-      await pm.send(type: type, bytes: chunk);
-      await Future.delayed(Duration(milliseconds: delayMs));
-    }
-  }
-
   Future<List<int>> _getTsplCommandsFromPdf(Uint8List pdfBytes, double width, double height) async {
     List<int> allCommands = [];
     await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
