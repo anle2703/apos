@@ -786,7 +786,7 @@ class _TableCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isOccupied ? (mergeColor ?? occupiedColorBase) : Colors.grey,
+                    color: isOccupied ? (mergeColor ?? occupiedColorBase) : Colors.grey.shade400,
                     borderRadius: const BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
                   ),
                   child: Text(
@@ -828,7 +828,7 @@ class _TableCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.grey.withAlpha((255 * 0.1).round()),
+                      color: Colors.grey.withAlpha((25).round()),
                       borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14)),
                     ),
                     child: Row(

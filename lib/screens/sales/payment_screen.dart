@@ -2487,40 +2487,42 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
                   fontSize: 18),
             ),
             const SizedBox(height: 16),
-            Flexible(
+            SizedBox(
+              // Chiều cao an toàn: 300px cho Desktop (3 cột), 250px cho Mobile (2 cột)
+              height: isDesktop ? 300 : 250,
               child: isDesktop
                   ? GridView.builder(
-                      shrinkWrap: true,
-                      itemCount: denominations.length,
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 2,
-                      ),
-                      itemBuilder: (context, index) {
-                        final den = denominations[index];
-                        final qty = _quantities[den] ?? 0;
-                        return _denominationCell(den, qty);
-                      },
-                    )
+                // Xóa shrinkWrap: true (vì chiều cao đã được cố định)
+                itemCount: denominations.length,
+                gridDelegate:
+                const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 2,
+                ),
+                itemBuilder: (context, index) {
+                  final den = denominations[index];
+                  final qty = _quantities[den] ?? 0;
+                  return _denominationCell(den, qty);
+                },
+              )
                   : GridView.builder(
-                      shrinkWrap: true,
-                      itemCount: denominations.length,
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 2.2,
-                      ),
-                      itemBuilder: (context, index) {
-                        final den = denominations[index];
-                        final qty = _quantities[den] ?? 0;
-                        return _denominationCell(den, qty);
-                      },
-                    ),
+                // Xóa shrinkWrap: true
+                itemCount: denominations.length,
+                gridDelegate:
+                const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 2.2,
+                ),
+                itemBuilder: (context, index) {
+                  final den = denominations[index];
+                  final qty = _quantities[den] ?? 0;
+                  return _denominationCell(den, qty);
+                },
+              ),
             ),
           ],
         ),
@@ -2530,7 +2532,6 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
           onPressed: _reset,
           child: const Text('Reset'),
         ),
-        const Spacer(),
         TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Hủy')),
