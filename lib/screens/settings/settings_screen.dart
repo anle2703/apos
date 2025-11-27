@@ -21,6 +21,7 @@ import '../../widgets/custom_text_form_field.dart';
 import 'package:printing/printing.dart';
 import 'label_setup_screen.dart';
 import '../../services/native_printer_service.dart';
+import 'receipt_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -84,11 +85,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'label_printer': 'Máy in Tem',
   };
 
+  // --- NEW STATE FOR DESKTOP VIEW ---
+  String _selectedCategory = 'printer_connection'; // Default category
+
   @override
   void initState() {
     super.initState();
     _serverIpController.text = '192.168.1.';
     _settingsService = SettingsService();
+    // Set default category based on role
+    if (widget.currentUser.role == 'owner') {
+      _selectedCategory = 'store_info';
+    } else {
+      _selectedCategory = 'print_options';
+    }
     _loadAllSettings();
   }
 
@@ -234,7 +244,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       final settingsService = SettingsService();
 
-      // Logic tính kích thước tem
       if (_labelWidth == 50 && _labelHeight == 30) {
         _selectedLabelSizeOption = '50x30';
       } else if (_labelWidth == 70 && _labelHeight == 22) {
@@ -304,18 +313,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _isScanning = true;
-      _scannedPrinters.clear(); // Xóa sạch danh sách cũ
+      _scannedPrinters.clear();
     });
 
     debugPrint(">>> BẮT ĐẦU QUÉT MÁY IN...");
 
-    // 1. NẾU LÀ WINDOWS (Giữ nguyên)
     if (isDesktop) {
       try {
         final systemPrinters = await Printing.listPrinters();
         for (var p in systemPrinters) {
           _scannedPrinters.add(ScannedPrinter(
-            device: pos_printer.PrinterDevice(name: p.name, address: p.name, vendorId: 'DRIVER_WINDOWS'),
+            device: pos_printer.PrinterDevice(
+                name: p.name, address: p.name, vendorId: 'DRIVER_WINDOWS'),
             type: pos_printer.PrinterType.usb,
           ));
         }
@@ -324,34 +333,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
 
-    // 2. NẾU LÀ ANDROID (Dùng QuickUsb thay thế hoàn toàn cho USB)
     if (!isDesktop) {
       final nativeService = NativePrinterService();
 
       try {
-        // Gọi xuống Native Kotlin để lấy danh sách
         final devices = await nativeService.getPrinters();
-
         for (var device in devices) {
-          // device.identifier chính là đường dẫn thực: /dev/bus/usb/001/002...
           final String realId = device.identifier;
           final String displayName = "${device.name} (ID: $realId)";
 
           final p = pos_printer.PrinterDevice(
             name: displayName,
-            address: realId, // Lưu đường dẫn thực vào address
+            address: realId,
             vendorId: device.vendorId.toString(),
             productId: device.productId.toString(),
           );
 
-          final scanned = ScannedPrinter(
-              device: p,
-              type: pos_printer.PrinterType.usb
-          );
+          final scanned = ScannedPrinter(device: p, type: pos_printer.PrinterType.usb);
 
           if (mounted) {
             setState(() {
-              // Kiểm tra trùng lặp
               if (!_scannedPrinters.any((p) => p.device.address == realId)) {
                 _scannedPrinters.add(scanned);
               }
@@ -362,12 +363,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         debugPrint("Lỗi quét Native: $e");
       }
 
-      // Quét mạng LAN (Giữ nguyên)
-      _printerManager.discovery(type: pos_printer.PrinterType.network).listen((printer) {
+      _printerManager
+          .discovery(type: pos_printer.PrinterType.network)
+          .listen((printer) {
         if (mounted) {
           setState(() {
-            if (!_scannedPrinters.any((p) => p.device.address == printer.address)) {
-              _scannedPrinters.add(ScannedPrinter(device: printer, type: pos_printer.PrinterType.network));
+            if (!_scannedPrinters
+                .any((p) => p.device.address == printer.address)) {
+              _scannedPrinters.add(ScannedPrinter(
+                  device: printer, type: pos_printer.PrinterType.network));
             }
           });
         }
@@ -429,10 +433,361 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return '${printer.device.name}|${printer.device.vendorId ?? ''}|${printer.device.productId ?? ''}';
   }
 
+  // --- CONTENT BUILDER METHODS (Reused for both Mobile and Desktop) ---
+
+  Widget _buildStoreInfoContent() {
+    if (widget.currentUser.role != 'owner') {
+      return const Center(child: Text("Chỉ chủ cửa hàng mới được truy cập mục này."));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Thông tin Cửa hàng'),
+        CustomTextFormField(
+            controller: _storeNameController,
+            decoration: const InputDecoration(labelText: 'Tên cửa hàng')),
+        const SizedBox(height: 16),
+        CustomTextFormField(
+            controller: _storePhoneController,
+            decoration: const InputDecoration(labelText: 'Số điện thoại')),
+        const SizedBox(height: 16),
+        CustomTextFormField(
+            controller: _storeAddressController,
+            decoration: const InputDecoration(labelText: 'Địa chỉ')),
+      ],
+    );
+  }
+
+  Widget _buildPrintOptionsContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Tùy chọn in'),
+        SwitchListTile(
+          title: const Text('In hóa đơn sau khi Thanh toán'),
+          value: _printBillAfterPayment,
+          onChanged: (bool value) =>
+              setState(() => _printBillAfterPayment = value),
+          secondary: const Icon(Icons.print_outlined),
+        ),
+        SwitchListTile(
+          title: const Text('In tem sau khi Thanh toán'),
+          value: _printLabelOnPayment,
+          onChanged: (val) => setState(() => _printLabelOnPayment = val),
+          secondary: const Icon(Icons.new_label_outlined),
+        ),
+        SwitchListTile(
+          title: const Text('In tem khi báo Chế biến'),
+          value: _printLabelOnKitchen,
+          onChanged: (val) => setState(() => _printLabelOnKitchen = val),
+          secondary: const Icon(Icons.label_outline),
+        ),
+        SwitchListTile(
+          title: const Text('In báo chế biến trước khi thanh toán'),
+          value: _notifyKitchenAfterPayment,
+          onChanged: (bool value) =>
+              setState(() => _notifyKitchenAfterPayment = value),
+          secondary: const Icon(Icons.fastfood_outlined),
+        ),
+        SwitchListTile(
+          title: const Text('Không in báo chế biến khi gởi món'),
+          subtitle: const Text(
+              'Nếu bật sẽ không in báo chế biến từ các máy in A B C D.'),
+          value: _skipKitchenPrint,
+          onChanged: (bool value) => setState(() => _skipKitchenPrint = value),
+          secondary: const Icon(Icons.print_disabled_outlined),
+        ),
+        SwitchListTile(
+          title: const Text('Cho phép in tạm tính nhanh hoặc kiểm món'),
+          value: _allowProvisionalBill,
+          onChanged: (bool value) =>
+              setState(() => _allowProvisionalBill = value),
+          secondary: const Icon(Icons.receipt_outlined),
+        ),
+        SwitchListTile(
+          title: const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
+          subtitle: const Text('Tắt để chuyển sang in phiếu kiểm món.'),
+          value: _showPricesOnBill,
+          onChanged: (bool value) => setState(() => _showPricesOnBill = value),
+          secondary: const Icon(Icons.price_change_outlined),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGeneralSettingsContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Thiết lập chung'),
+        SwitchListTile(
+          title: const Text('Yêu cầu thu ngân phải xác nhận mệnh giá tiền mặt'),
+          value: _promptForCash,
+          onChanged: (bool value) => setState(() => _promptForCash = value),
+          secondary: const Icon(Icons.calculate_outlined),
+        ),
+        ListTile(
+          isThreeLine: true,
+          leading: const Icon(Icons.access_time),
+          title: const Text('Giờ chốt sổ báo cáo hàng ngày'),
+          subtitle: Text(
+              'Báo cáo hàng ngày chỉ áp dụng từ thời đểm thay đổi cài đặt giờ chốt sổ trở về sau.'),
+          trailing: Text(
+            _reportCutoffTime.format(context),
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(color: AppTheme.primaryColor, fontSize: 20),
+          ),
+          onTap: _selectReportCutoffTime,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPrinterConnectionContent() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Kết nối & Thiết bị'),
+        ListTile(
+          leading: const Icon(Icons.lan_outlined),
+          title: const Text('IP của thiết bị này'),
+          subtitle: Text(_deviceIp),
+        ),
+        SwitchListTile(
+          title: const Text('Kích hoạt chế độ máy chủ'),
+          subtitle: const Text('Bật để nhận lệnh in từ các thiết bị khác.'),
+          value: _isThisDeviceTheServer,
+          onChanged: (bool value) =>
+              setState(() => _isThisDeviceTheServer = value),
+          secondary: const Icon(Icons.connected_tv),
+        ),
+        if (_isThisDeviceTheServer) ...[
+          _buildSectionTitle('Chọn chế độ cho phép kết nối'),
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'server', label: Text('Nội bộ (LAN)')),
+                ButtonSegment(
+                    value: 'internet', label: Text('Internet (Cloud)')),
+              ],
+              selected: {_serverListenModeOnDevice},
+              onSelectionChanged: (newSelection) => setState(
+                      () => _serverListenModeOnDevice = newSelection.first),
+            ),
+          ),
+        ],
+        if (!_isThisDeviceTheServer) ...[
+          _buildSectionTitle('Chế độ in:'),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'direct', label: Text('Trực tiếp')),
+              ButtonSegment(value: 'server', label: Text('LAN')),
+              ButtonSegment(value: 'internet', label: Text('Internet')),
+            ],
+            selected: {_clientPrintMode},
+            onSelectionChanged: (newSelection) {
+              final mode = newSelection.first;
+              if (mode == 'server' || mode == 'internet') {
+                if (_activeServerListenMode == null) {
+                  ToastService().show(
+                    message: 'Chưa có máy chủ nào được cấu hình.',
+                    type: ToastType.warning,
+                  );
+                  return;
+                }
+                if (mode != _activeServerListenMode) {
+                  final serverModeText = _activeServerListenMode == 'server'
+                      ? 'Nội bộ (LAN)'
+                      : 'Internet (Cloud)';
+                  ToastService().show(
+                    message:
+                    'Máy chủ đang hoạt động ở chế độ "$serverModeText". Bạn không thể chọn chế độ khác.',
+                    type: ToastType.error,
+                  );
+                  return;
+                }
+              }
+              setState(() => _clientPrintMode = mode);
+            },
+          ),
+          const SizedBox(height: 16),
+          if (_clientPrintMode == 'server')
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CustomTextFormField(
+                  controller: _serverIpController,
+                  keyboardType: TextInputType.text,
+                  decoration: const InputDecoration(
+                    labelText: 'Địa chỉ IP của Máy chủ Nội bộ',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Chỉ những thiết bị có kết nối chung mạng wifi với máy chủ mới có thể gởi lệnh in!',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: Colors.red),
+                ),
+              ],
+            ),
+        ],
+        const SizedBox(height: 16),
+        if (_isThisDeviceTheServer || _clientPrintMode == 'direct') ...[
+          _buildSectionTitle('Gán máy in'),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton.icon(
+                icon: _isScanning
+                    ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.refresh),
+                label: Text(_isScanning ? 'Đang quét...' : 'Quét máy in'),
+                onPressed: _isScanning ? null : _discoverPrinters,
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.add, size: 20),
+                label: const Text('Thêm máy in LAN'),
+                onPressed: _addManualPrinter,
+                style:
+                TextButton.styleFrom(foregroundColor: AppTheme.primaryColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _buildPrinterAssignments(),
+        ]
+      ],
+    );
+  }
+
+  // --- LAYOUT METHODS ---
+
+  Widget _buildMobileLayout() {
+    final role = widget.currentUser.role;
+    return ListView(
+      padding: const EdgeInsets.all(16.0),
+      children: [
+        if (role == 'owner') ...[
+          _buildStoreInfoContent(),
+          const SizedBox(height: 16),
+          const Divider(height: 2, thickness: 0.5, color: Colors.grey),
+        ],
+        if (role == 'owner' || role == 'manager') ...[
+          _buildPrintOptionsContent(),
+          const SizedBox(height: 16),
+          const Divider(height: 2, thickness: 0.5, color: Colors.grey),
+          _buildGeneralSettingsContent(),
+        ],
+        const SizedBox(height: 16),
+        const Divider(height: 8, thickness: 0.5, color: Colors.grey),
+        _buildPrinterConnectionContent(),
+      ],
+    );
+  }
+
+  Widget _buildDesktopLayout() {
+    final role = widget.currentUser.role;
+    final isOwner = role == 'owner';
+    final isManager = role == 'manager';
+    final canAccessSettings = isOwner || isManager;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // LEFT MENU
+        SizedBox(
+          width: 280,
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            children: [
+              if (isOwner)
+                _buildMenuTile('store_info', 'Thông tin cửa hàng', Icons.store),
+              if (canAccessSettings) ...[
+                _buildMenuTile(
+                    'print_options', 'Tùy chọn in', Icons.print_outlined),
+                _buildMenuTile(
+                    'general_settings', 'Thiết lập chung', Icons.settings),
+              ],
+              _buildMenuTile('printer_connection', 'Kết nối máy in',
+                  Icons.compare_arrows),
+            ],
+          ),
+        ),
+
+        Expanded(
+          child: Container(
+            color: Colors.grey.shade50,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Card(
+                elevation: 0, // Flat look or change as needed
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: _buildRightPanelContent(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMenuTile(String key, String title, IconData icon) {
+    final isSelected = _selectedCategory == key;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isSelected ? AppTheme.primaryColor.withAlpha(25) : null,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ListTile(
+        leading: Icon(icon,
+            color: isSelected ? AppTheme.primaryColor : Colors.grey[700]),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: isSelected ? AppTheme.primaryColor : Colors.black87,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        onTap: () {
+          setState(() {
+            _selectedCategory = key;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildRightPanelContent() {
+    switch (_selectedCategory) {
+      case 'store_info':
+        return _buildStoreInfoContent();
+      case 'print_options':
+        return _buildPrintOptionsContent();
+      case 'general_settings':
+        return _buildGeneralSettingsContent();
+      case 'printer_connection':
+        return _buildPrinterConnectionContent();
+      default:
+        return _buildPrinterConnectionContent();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final role = widget.currentUser.role;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Cài đặt'), actions: [
         if (_isSaving)
@@ -457,225 +812,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ]),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
-        child: ListView(
-          padding: const EdgeInsets.all(16.0),
-          children: [
-            if (role == 'owner') ...[
-              _buildSectionTitle('Thông tin Cửa hàng'),
-              CustomTextFormField(
-                  controller: _storeNameController,
-                  decoration: const InputDecoration(labelText: 'Tên cửa hàng')),
-              const SizedBox(height: 16),
-              CustomTextFormField(
-                  controller: _storePhoneController,
-                  decoration:
-                  const InputDecoration(labelText: 'Số điện thoại')),
-              const SizedBox(height: 16),
-              CustomTextFormField(
-                  controller: _storeAddressController,
-                  decoration: const InputDecoration(labelText: 'Địa chỉ')),
-            ],
-            if (role == 'owner' || role == 'manager') ...[
-              const SizedBox(height: 16),
-              const Divider(height: 2, thickness: 0.5, color: Colors.grey),
-              _buildSectionTitle('Tùy chọn in:'),
-              SwitchListTile(
-                title: const Text('In hóa đơn sau khi Thanh toán'),
-                value: _printBillAfterPayment,
-                onChanged: (bool value) =>
-                    setState(() => _printBillAfterPayment = value),
-                secondary: const Icon(Icons.print_outlined),
-              ),
-              SwitchListTile(
-                title: const Text('In tem sau khi Thanh toán'),
-                value: _printLabelOnPayment,
-                onChanged: (val) => setState(() => _printLabelOnPayment = val),
-                secondary: const Icon(Icons.new_label_outlined),
-              ),
-              SwitchListTile(
-                title: const Text('In tem khi báo Chế biến'),
-                value: _printLabelOnKitchen,
-                onChanged: (val) => setState(() => _printLabelOnKitchen = val),
-                secondary: const Icon(Icons.label_outline),
-              ),
-              SwitchListTile(
-                title: const Text('In báo chế biến trước khi thanh toán'),
-                value: _notifyKitchenAfterPayment,
-                onChanged: (bool value) =>
-                    setState(() => _notifyKitchenAfterPayment = value),
-                secondary: const Icon(Icons.fastfood_outlined),
-              ),
-              SwitchListTile(
-                title: const Text('Không in báo chế biến khi gởi món'),
-                subtitle: const Text(
-                    'Nếu bật sẽ không in báo chế biến từ các máy in A B C D.'),
-                value: _skipKitchenPrint,
-                onChanged: (bool value) =>
-                    setState(() => _skipKitchenPrint = value),
-                secondary: const Icon(Icons.print_disabled_outlined),
-              ),
-              SwitchListTile(
-                title: const Text('Cho phép in tạm tính nhanh hoặc kiểm món'),
-                value: _allowProvisionalBill,
-                onChanged: (bool value) =>
-                    setState(() => _allowProvisionalBill = value),
-                secondary: const Icon(Icons.receipt_outlined),
-              ),
-              SwitchListTile(
-                title:
-                const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
-                subtitle: const Text('Tắt để chuyển sang in phiếu kiểm món.'),
-                value: _showPricesOnBill,
-                onChanged: (bool value) =>
-                    setState(() => _showPricesOnBill = value),
-                secondary: const Icon(Icons.price_change_outlined),
-              ),
-              const SizedBox(height: 16),
-              const Divider(height: 2, thickness: 0.5, color: Colors.grey),
-              _buildSectionTitle('Thiết lập:'),
-              SwitchListTile(
-                title: const Text(
-                    'Yêu cầu thu ngân phải xác nhận mệnh giá tiền mặt'),
-                value: _promptForCash,
-                onChanged: (bool value) =>
-                    setState(() => _promptForCash = value),
-                secondary: const Icon(Icons.calculate_outlined),
-              ),
-              ListTile(
-                isThreeLine: true,
-                leading: const Icon(Icons.access_time),
-                title: const Text('Giờ chốt sổ báo cáo hàng ngày'),
-                subtitle: Text(
-                    'Báo cáo hàng ngày chỉ áp dụng từ thời đểm thay đổi cài đặt giờ chốt sổ trở về sau.'),
-                trailing: Text(
-                  _reportCutoffTime.format(context),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(color: AppTheme.primaryColor, fontSize: 20),
-                ),
-                onTap: _selectReportCutoffTime,
-              ),
-            ],
-            const SizedBox(width: 16),
-            const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
-            _buildSectionTitle('Kết nối máy in:'),
-            ListTile(
-              leading: const Icon(Icons.lan_outlined),
-              title: const Text('IP của thiết bị này'),
-              subtitle: Text(_deviceIp),
-            ),
-            SwitchListTile(
-              title: const Text('Kích hoạt chế độ máy chủ'),
-              subtitle: const Text(
-                  'Bật để nhận lệnh in từ các thiết bị khác.'),
-              value: _isThisDeviceTheServer,
-              onChanged: (bool value) =>
-                  setState(() => _isThisDeviceTheServer = value),
-              secondary: const Icon(Icons.connected_tv),
-            ),
-            if (_isThisDeviceTheServer) ...[
-              _buildSectionTitle('Chọn chế độ cho phép kết nối'),
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'server', label: Text('Nội bộ (LAN)')),
-                    ButtonSegment(
-                        value: 'internet', label: Text('Internet (Cloud)')),
-                  ],
-                  selected: {_serverListenModeOnDevice},
-                  onSelectionChanged: (newSelection) => setState(
-                          () => _serverListenModeOnDevice = newSelection.first),
-                ),
-              ),
-            ],
-            if (!_isThisDeviceTheServer) ...[
-              _buildSectionTitle('Chế độ in:'),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'direct', label: Text('Trực tiếp')),
-                  ButtonSegment(value: 'server', label: Text('LAN')),
-                  ButtonSegment(value: 'internet', label: Text('Internet')),
-                ],
-                selected: {_clientPrintMode},
-                onSelectionChanged: (newSelection) {
-                  final mode = newSelection.first;
-                  if (mode == 'server' || mode == 'internet') {
-                    if (_activeServerListenMode == null) {
-                      ToastService().show(
-                        message: 'Chưa có máy chủ nào được cấu hình.',
-                        type: ToastType.warning,
-                      );
-                      return;
-                    }
-                    if (mode != _activeServerListenMode) {
-                      final serverModeText = _activeServerListenMode == 'server'
-                          ? 'Nội bộ (LAN)'
-                          : 'Internet (Cloud)';
-                      ToastService().show(
-                        message:
-                        'Máy chủ đang hoạt động ở chế độ "$serverModeText". Bạn không thể chọn chế độ khác.',
-                        type: ToastType.error,
-                      );
-                      return;
-                    }
-                  }
-                  setState(() => _clientPrintMode = mode);
-                },
-              ),
-              const SizedBox(height: 16),
-              if (_clientPrintMode == 'server')
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CustomTextFormField(
-                      controller: _serverIpController,
-                      keyboardType: TextInputType.text,
-                      decoration: const InputDecoration(
-                        labelText: 'Địa chỉ IP của Máy chủ Nội bộ',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Chỉ những thiết bị có kết nối chung mạng wifi với máy chủ mới có thể gởi lệnh in!',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(color: Colors.red),
-                    ),
-                  ],
-                ),
-            ],
-            const SizedBox(height: 16),
-            if (_isThisDeviceTheServer || _clientPrintMode == 'direct') ...[
-              _buildSectionTitle('Gán máy in'),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton.icon(
-                    icon: _isScanning
-                        ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.refresh),
-                    label: Text(_isScanning ? 'Đang quét...' : 'Quét máy in'),
-                    onPressed: _isScanning ? null : _discoverPrinters,
-                  ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.add, size: 20),
-                    label: const Text('Thêm máy in LAN'),
-                    onPressed: _addManualPrinter,
-                    style: TextButton.styleFrom(
-                        foregroundColor: AppTheme.primaryColor),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _buildPrinterAssignments(),
-            ]
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth > 1000) {
+              return _buildDesktopLayout();
+            } else {
+              return _buildMobileLayout();
+            }
+          },
         ),
       ),
     );
@@ -705,31 +849,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ? _getPrinterUniqueId(assignedPrinterConfig.physicalPrinter)
             : null;
 
-        // --- LOGIC LỌC DANH SÁCH MÁY IN (SỬA MỚI) ---
         final availablePrinters = _scannedPrinters.where((p) {
           final pId = _getPrinterUniqueId(p);
 
-          // 1. Luôn hiển thị máy in đang được chọn cho dòng này (để không bị mất hiển thị)
           if (pId == currentSelectedId) return true;
 
           if (roleKey == 'label_printer') {
-            // A. Nếu đang chọn MÁY IN TEM:
-            // -> Phải ẨN tất cả các máy đã được gán làm Thu ngân hoặc Bếp
-            // (Vì máy in Bill không hiểu lệnh in Tem -> Gây lỗi rác)
             if (assignedBillPrinterIds.contains(pId)) return false;
           } else {
-            // B. Nếu đang chọn THU NGÂN hoặc BẾP (Máy in Bill):
-            // -> Chỉ cần ẨN máy đang làm Máy in Tem.
             if (pId == assignedLabelPrinterId) return false;
-
-            // -> CHO PHÉP hiện các máy in Bill khác.
-            // (Ví dụ: Máy 031 đang làm Thu ngân, vẫn hiện ở dòng Bếp A để chọn chung)
           }
 
           return true;
         }).toList();
 
-        // Kiểm tra xem máy in đã lưu có còn hợp lệ (đang kết nối) không
         final bool isPrinterAvailable = _scannedPrinters
             .any((p) => _getPrinterUniqueId(p) == currentSelectedId);
 
@@ -751,14 +884,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         return DropdownMenuItem(
                           value: _getPrinterUniqueId(p),
                           child: Text(
-                            p.device.name, // Tên đã bao gồm ID (VD: USB ID: 29...)
+                            p.device.name,
                             overflow: TextOverflow.ellipsis,
                           ),
                         );
                       }).toList(),
                       onChanged: (newValueId) {
                         if (newValueId == null) return;
-                        final selectedPrinter = _scannedPrinters.firstWhereOrNull(
+                        final selectedPrinter = _scannedPrinters
+                            .firstWhereOrNull(
                                 (p) => _getPrinterUniqueId(p) == newValueId);
 
                         if (selectedPrinter != null) {
@@ -782,10 +916,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ],
               ),
-
-              // Nút thiết lập mẫu tem (Giữ nguyên)
-              if (roleKey == 'label_printer') ...[
-                const SizedBox(height: 16),
+              if (roleKey == 'cashier_printer') ...[
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
@@ -793,25 +925,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onTap: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                                builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
+                                builder: (context) => ReceiptSetupScreen(
+                                    currentUser: widget.currentUser)),
                           );
                         },
                         borderRadius: BorderRadius.circular(12),
                         child: InputDecorator(
                           decoration: InputDecoration(
-                            labelText: 'Thiết kế mẫu tem',
-                            labelStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            labelText: 'Cấu hình mẫu in',
+                            labelStyle: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
                               color: Colors.grey[600],
                             ),
-                            prefixIcon: null,
                             suffixIcon: const Padding(
                               padding: EdgeInsets.only(right: 12.0),
-                              child: Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.primaryColor),
+                              child: Icon(Icons.arrow_forward_ios,
+                                  size: 16, color: AppTheme.primaryColor),
                             ),
-                            contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
+                            contentPadding:
+                            const EdgeInsets.fromLTRB(12, 16, 12, 16),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.grey.shade300),
+                              borderSide:
+                              BorderSide(color: Colors.grey.shade300),
                             ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -819,8 +957,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                           child: Text(
-                            "Tùy chỉnh Kích thước & Bố cục",
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            "Tùy chỉnh cỡ chữ Bill & Bếp",
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
                               fontWeight: FontWeight.w500,
                             ),
                             maxLines: 1,
@@ -830,11 +971,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.grey),
+                      icon: const Icon(Icons.settings_suggest_outlined,
+                          color: Colors.grey),
                       onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                              builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
+                              builder: (context) => ReceiptSetupScreen(
+                                  currentUser: widget.currentUser)),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ],
+              if (roleKey == 'label_printer') ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (context) => LabelSetupScreen(
+                                    currentUser: widget.currentUser)),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: 'Thiết kế mẫu tem',
+                            labelStyle: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                            prefixIcon: null,
+                            suffixIcon: const Padding(
+                              padding: EdgeInsets.only(right: 12.0),
+                              child: Icon(Icons.arrow_forward_ios,
+                                  size: 16, color: AppTheme.primaryColor),
+                            ),
+                            contentPadding:
+                            const EdgeInsets.fromLTRB(12, 16, 12, 16),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                              BorderSide(color: Colors.grey.shade300),
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.grey),
+                            ),
+                          ),
+                          child: Text(
+                            "Tùy chỉnh Kích thước & Bố cục",
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.picture_as_pdf_outlined,
+                          color: Colors.grey),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (context) => LabelSetupScreen(
+                                  currentUser: widget.currentUser)),
                         );
                       },
                     ),

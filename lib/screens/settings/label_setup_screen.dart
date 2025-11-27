@@ -1,11 +1,8 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:app_4cash/theme/app_theme.dart';
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/label_template_model.dart';
-import '../../services/label_printing_service.dart';
 import '../../models/order_item_model.dart';
 import '../../models/product_model.dart';
 import '../../models/user_model.dart';
@@ -15,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/toast_service.dart';
 import '../../widgets/app_dropdown.dart';
 import '../../widgets/custom_text_form_field.dart';
+import '../../widgets/label_widget.dart';
 
 class LabelSetupScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -30,7 +28,7 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
   bool _isRetailMode = false;
   bool _isLoading = true;
   bool _isPrinting = false;
-  String _selectedSizeOption = '50x30'; // Biến tạm để quản lý dropdown
+  String _selectedSizeOption = '50x30';
 
   @override
   void initState() {
@@ -48,8 +46,7 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
         _settings = LabelTemplateModel.fromJson(jsonStr);
         _syncDropdownWithSize();
       } else {
-        // Mặc định ban đầu
-        _settings = LabelTemplateModel();
+        _settings = LabelTemplateModel(labelWidth: 50, labelHeight: 30);
         _syncDropdownWithSize();
       }
       _isLoading = false;
@@ -69,7 +66,6 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
   Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('label_template_settings', json.encode(_settings.toMap()));
-
     await prefs.setDouble('label_width_setting', _settings.labelWidth);
     await prefs.setDouble('label_height_setting', _settings.labelHeight);
 
@@ -80,13 +76,11 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
 
   Future<void> _resetToSmartDefaults() async {
     setState(() {
-      _settings = LabelTemplateModel();
+      _settings = LabelTemplateModel(labelWidth: 50, labelHeight: 30, labelColumns: 1);
       _syncDropdownWithSize();
     });
     ToastService().show(message: "Đã khôi phục mặc định", type: ToastType.success);
   }
-
-  // Tìm và thay thế hàm _testPrint trong file label_setup_screen.dart
 
   Future<void> _testPrint() async {
     if (_isPrinting) return;
@@ -100,15 +94,12 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
       final List<dynamic> jsonList = jsonDecode(jsonString);
       final configuredPrinters = jsonList.map((j) => ConfiguredPrinter.fromJson(j)).toList();
 
-      // 1. Lưu cài đặt hiện tại xuống bộ nhớ để Service đọc được kích thước mới nhất
       await _saveSettings();
 
-      // 2. Tạo dữ liệu giả ĐÚNG bằng số lượng tem trên 1 hàng
-      // Nếu tem đôi (2 cột) -> Tạo 2 item. Tem 3 -> 3 item.
       final dummyItem = _createDummyItem();
       final List<Map<String, dynamic>> dummyItemsMap = [];
 
-      // Vòng lặp tạo đúng số lượng tem cần thiết để lấp đầy 1 hàng ngang
+      // Tạo đúng số lượng tem trên 1 hàng để test in đủ khổ
       for (int i = 0; i < _settings.labelColumns; i++) {
         dummyItemsMap.add(dummyItem.toMap());
       }
@@ -118,11 +109,11 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
       await printService.printLabels(
         items: dummyItemsMap,
         tableName: _isRetailMode ? "Bán lẻ" : "Bàn Test",
+        billCode: "HD001",
         createdAt: DateTime.now(),
         configuredPrinters: configuredPrinters,
         width: _settings.labelWidth,
         height: _settings.labelHeight,
-        // QUAN TRỌNG: Truyền tham số này để ép kiểu in đúng layout
         isRetailMode: _isRetailMode,
       );
 
@@ -177,68 +168,30 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
+          // Responsive layout
           if (constraints.maxWidth > 800) {
             return Row(
               children: [
                 Expanded(
                   flex: 5,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _buildPaperSettings(),
-                      _buildDivider(),
-                      _buildCommonMargins(),
-                      _buildDivider(),
-                      _isRetailMode ? _buildRetailSettings() : _buildFnBSettings(),
-                    ],
-                  ),
+                  child: _buildPreviewPanel(),
                 ),
                 Expanded(
                   flex: 5,
-                  child: Container(
-                    color: Colors.grey[300],
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.all(40),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 400),
-                        child: AspectRatio(
-                          aspectRatio: _settings.labelWidth / _settings.labelHeight,
-                          child: _buildPreviewWidget(),
-                        ),
-                      ),
-                    ),
-                  ),
+                  child: _buildSettingsPanel(),
                 ),
               ],
             );
           } else {
             return Column(
               children: [
-                Container(
-                  width: double.infinity,
-                  color: Colors.grey[300],
-                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 40),
-                  alignment: Alignment.center,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 200),
-                    child: AspectRatio(
-                      aspectRatio: _settings.labelWidth / _settings.labelHeight,
-                      child: _buildPreviewWidget(),
-                    ),
-                  ),
+                Expanded(
+                  flex: 4, // Preview chiếm 40% màn hình mobile
+                  child: _buildPreviewPanel(),
                 ),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _buildPaperSettings(),
-                      _buildDivider(),
-                      _buildCommonMargins(),
-                      _buildDivider(),
-                      _isRetailMode ? _buildRetailSettings() : _buildFnBSettings(),
-                    ],
-                  ),
+                  flex: 6, // Settings chiếm 60%
+                  child: _buildSettingsPanel(),
                 ),
               ],
             );
@@ -248,59 +201,88 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
     );
   }
 
-  Widget _buildPreviewWidget() {
+  // Panel Cài đặt (Bên trái hoặc Bên dưới)
+  Widget _buildSettingsPanel() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _buildPaperSettings(),
+        _buildCommonMargins(),
+        _isRetailMode ? _buildRetailSettings() : _buildFnBSettings(),
+      ],
+    );
+  }
+
+  // Panel Xem trước (Bên phải hoặc Bên trên) - Dùng Widget thật
+  Widget _buildPreviewPanel() {
     return Container(
-      decoration: BoxDecoration(
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(75), blurRadius: 8, offset: const Offset(0, 4))],
-      ),
-      child: PdfPreview(
-        build: (format) => _generatePreviewData(),
-        useActions: false,
-        canChangeOrientation: false,
-        canChangePageFormat: false,
-        dpi: 300,
-        scrollViewDecoration: const BoxDecoration(color: Colors.transparent),
-        pdfPreviewPageDecoration: const BoxDecoration(color: Colors.white),
+      color: Colors.grey[300], // Màu nền xám để nổi bật tem trắng
+      width: double.infinity,
+      height: double.infinity,
+      alignment: Alignment.center,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal, // Cho phép cuộn ngang nếu tem quá dài
+        child: SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("Xem trước (Tỉ lệ thực tế)", style: TextStyle(color: Colors.grey[700], fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+
+                // HIỂN THỊ WIDGET THẬT (Giống hệt lúc in)
+                // Bọc trong Container có shadow để giống tờ giấy
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))],
+                  ),
+                  child: _buildLivePreview(),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Future<Uint8List> _generatePreviewData() async {
+  // Hàm tạo Widget xem trước (Sử dụng LabelRowWidget)
+  Widget _buildLivePreview() {
     final dummyItem = _createDummyItem();
-    final dummyData = LabelData(
-      item: dummyItem,
-      tableName: _isRetailMode ? "Bán lẻ" : "Bàn 5",
-      createdAt: DateTime.now(),
-      dailySeq: 101,
-      copyIndex: 1,
-      totalCopies: 1,
-    );
 
-    List<LabelData> previewList = [dummyData];
-    // Nếu > 1 cột thì thêm data giả để người dùng thấy layout nhiều cột
-    if (_settings.labelColumns > 1) {
-      previewList.add(dummyData);
-      if (_settings.labelColumns > 2) previewList.add(dummyData);
+    // Tạo dữ liệu giả giống PrintingService
+    List<LabelItemData?> previewItems = [];
+    for(int i=0; i< _settings.labelColumns; i++) {
+      previewItems.add(LabelItemData(
+          item: dummyItem,
+          headerTitle: _isRetailMode ? "HD001" : "Bàn 5",
+          index: i+1,
+          total: _settings.labelColumns,
+          dailySeq: 101
+      ));
     }
 
-    return await LabelPrintingService.generateLabelPdf(
-      labelsOnPage: previewList,
-      pageWidthMm: _settings.labelWidth,
-      pageHeightMm: _settings.labelHeight,
-      settings: _settings,
-      isRetailMode: _isRetailMode,
-      forceWhiteBackground: true,
+    // Tính toán kích thước pixel (8 dots/mm)
+    double targetWidthPx = _settings.labelWidth * 8.0;
+    double targetHeightPx = _settings.labelHeight * 8.0;
+
+    return SizedBox(
+      width: targetWidthPx,
+      height: targetHeightPx,
+      child: LabelRowWidget(
+        items: previewItems,
+        widthMm: _settings.labelWidth,
+        heightMm: _settings.labelHeight,
+        gapMm: 2.0,
+        isRetailMode: _isRetailMode,
+        settings: _settings,
+      ),
     );
   }
 
-  // --- WIDGETS ---
-
-  Widget _buildDivider() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 8.0),
-      child: Divider(height: 4, thickness: 0.5, color: Colors.grey),
-    );
-  }
 
   Widget _buildPaperSettings() {
     return Column(
@@ -315,8 +297,8 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
                 labelText: 'Khổ giấy',
                 value: _selectedSizeOption,
                 items: const [
-                  DropdownMenuItem(value: '50x30', child: Text('50x30 mm')),
-                  DropdownMenuItem(value: '70x22', child: Text('70x22 mm')),
+                  DropdownMenuItem(value: '50x30', child: Text('50x30 mm (1 tem)')),
+                  DropdownMenuItem(value: '70x22', child: Text('70x22 mm (2 tem)')),
                   DropdownMenuItem(value: 'custom', child: Text('Tùy chỉnh...')),
                 ],
                 onChanged: (val) {
@@ -329,7 +311,7 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
                     } else if (val == '70x22') {
                       _settings.labelWidth = 70;
                       _settings.labelHeight = 22;
-                      _settings.labelColumns = 2; // Mặc định 70x22 thường in 2 tem
+                      _settings.labelColumns = 2;
                     }
                   });
                 },
@@ -385,12 +367,12 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Căn lề (mm) - Max 20", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        const SizedBox(height: 8),
-        _buildSlider("Trên", _settings.marginTop, 0, 20, (v) => setState(() => _settings.marginTop = v)),
-        _buildSlider("Dưới", _settings.marginBottom, 0, 20, (v) => setState(() => _settings.marginBottom = v)),
-        _buildSlider("Trái", _settings.marginLeft, 0, 20, (v) => setState(() => _settings.marginLeft = v)),
-        _buildSlider("Phải", _settings.marginRight, 0, 20, (v) => setState(() => _settings.marginRight = v)),
+        const SizedBox(height: 12),
+        const Text("Căn lề (mm)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.primaryColor)),
+        _buildSlider("Trên", _settings.marginTop, 0, 10, (v) => setState(() => _settings.marginTop = v)),
+        _buildSlider("Dưới", _settings.marginBottom, 0, 10, (v) => setState(() => _settings.marginBottom = v)),
+        _buildSlider("Trái", _settings.marginLeft, 0, 10, (v) => setState(() => _settings.marginLeft = v)),
+        _buildSlider("Phải", _settings.marginRight, 0, 10, (v) => setState(() => _settings.marginRight = v)),
       ],
     );
   }
@@ -399,26 +381,21 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Cấu hình FnB", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
-        const SizedBox(height: 10),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 1: Tên bàn / Thời gian"),
         _buildSlider("Cỡ chữ Bàn", _settings.fnbHeaderSize, 5, 20, (v) => setState(() => _settings.fnbHeaderSize = v)),
         _buildSwitch("Bàn In đậm", _settings.fnbHeaderBold, (v) => setState(() => _settings.fnbHeaderBold = v)),
         _buildSlider("Cỡ chữ Giờ", _settings.fnbTimeSize, 5, 20, (v) => setState(() => _settings.fnbTimeSize = v)),
         _buildSwitch("Giờ In đậm", _settings.fnbTimeBold, (v) => setState(() => _settings.fnbTimeBold = v)),
-        _buildDivider(),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 2: Tên sản phẩm"),
         _buildSlider("Cỡ chữ", _settings.fnbProductSize, 5, 20, (v) => setState(() => _settings.fnbProductSize = v)),
         _buildSwitch("In đậm", _settings.fnbProductBold, (v) => setState(() => _settings.fnbProductBold = v)),
-        _buildDivider(),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 3: Topping & Ghi chú"),
         _buildSlider("Cỡ chữ", _settings.fnbNoteSize, 5, 20, (v) => setState(() => _settings.fnbNoteSize = v)),
         _buildSwitch("In đậm", _settings.fnbNoteBold, (v) => setState(() => _settings.fnbNoteBold = v)),
-        _buildDivider(),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 4: Giá & STT"),
         _buildSlider("Cỡ chữ", _settings.fnbFooterSize, 5, 20, (v) => setState(() => _settings.fnbFooterSize = v)),
         _buildSwitch("In đậm", _settings.fnbFooterBold, (v) => setState(() => _settings.fnbFooterBold = v)),
@@ -430,32 +407,26 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Cấu hình Bán lẻ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green)),
-        const SizedBox(height: 10),
-
         _buildSectionHeader("Hàng 1: Tên cửa hàng"),
         TextFormField(
           initialValue: _settings.retailStoreName,
           decoration: const InputDecoration(labelText: "Nội dung", border: OutlineInputBorder(), isDense: true),
           onChanged: (v) => setState(() => _settings.retailStoreName = v),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _buildSlider("Cỡ chữ", _settings.retailHeaderSize, 5, 20, (v) => setState(() => _settings.retailHeaderSize = v)),
         _buildSwitch("In đậm", _settings.retailHeaderBold, (v) => setState(() => _settings.retailHeaderBold = v)),
-        _buildDivider(),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 2: Tên sản phẩm"),
         _buildSlider("Cỡ chữ", _settings.retailProductSize, 5, 20, (v) => setState(() => _settings.retailProductSize = v)),
         _buildSwitch("In đậm", _settings.retailProductBold, (v) => setState(() => _settings.retailProductBold = v)),
-        _buildDivider(),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 3: Mã vạch & Mã SP"),
         _buildSlider("Cao Barcode", _settings.retailBarcodeHeight, 10, 40, (v) => setState(() => _settings.retailBarcodeHeight = v)),
         _buildSlider("Rộng Barcode", _settings.retailBarcodeWidth, 20, 120, (v) => setState(() => _settings.retailBarcodeWidth = v)),
         _buildSlider("Cỡ chữ Mã SP", _settings.retailCodeSize, 5, 20, (v) => setState(() => _settings.retailCodeSize = v)),
         _buildSwitch("Mã SP In đậm", _settings.retailCodeBold, (v) => setState(() => _settings.retailCodeBold = v)),
-        _buildDivider(),
-
+        const SizedBox(height: 12),
         _buildSectionHeader("Hàng 4: Giá & ĐVT"),
         _buildSlider("Cỡ chữ Giá", _settings.retailPriceSize, 5, 20, (v) => setState(() => _settings.retailPriceSize = v)),
         _buildSwitch("Giá In đậm", _settings.retailPriceBold, (v) => setState(() => _settings.retailPriceBold = v)),
@@ -467,7 +438,7 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.grey)),
+      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.primaryColor)),
     );
   }
 

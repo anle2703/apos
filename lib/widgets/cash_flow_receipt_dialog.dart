@@ -1,21 +1,25 @@
-// lib/screens/reports/tabs/cash_flow_receipt_dialog.dart
-
 import 'dart:typed_data';
-import 'package:app_4cash/models/cash_flow_transaction_model.dart';
-import 'package:app_4cash/services/toast_service.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
-import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:screenshot/screenshot.dart'; // Import Screenshot
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+
+import '../../../models/user_model.dart';
+import 'package:app_4cash/models/cash_flow_transaction_model.dart';
 import 'package:app_4cash/models/bill_model.dart';
 import 'package:app_4cash/models/purchase_order_model.dart';
-import '../../../models/user_model.dart';
-import 'cash_flow_printing_helper.dart';
-import 'package:app_4cash/models/print_job_model.dart';
+import 'package:app_4cash/services/toast_service.dart';
 import 'package:app_4cash/services/print_queue_service.dart';
+import 'package:app_4cash/models/print_job_model.dart';
 import 'package:app_4cash/services/cash_flow_service.dart';
+
+// QUAN TRỌNG: Import Widget mẫu in mới
+import '../widgets/cash_flow_ticket_widget.dart';
 
 class CashFlowReceiptDialog extends StatefulWidget {
   final CashFlowTransaction transaction;
@@ -38,38 +42,59 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
   Uint8List? _pdfBytes;
   bool _isLoading = true;
 
+  // Controller chụp ảnh
+  final ScreenshotController _screenshotController = ScreenshotController();
+
   double? _openingDebt;
   double? _closingDebt;
-  bool get _isDesktop =>
-      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   @override
   void initState() {
     super.initState();
-    // Đổi tên hàm _initialize thành hàm mới
-    _loadDataAndGeneratePdf();
+    _loadDataAndGenerateImage();
   }
 
-  Future<void> _loadDataAndGeneratePdf() async {
+  Future<void> _loadDataAndGenerateImage() async {
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      // Bước 1: Tính toán dư nợ (nếu có)
+      // Bước 1: Tính toán dư nợ (Logic cũ)
       await _calculateDebtHistory();
 
-      // Bước 2: Tạo PDF với thông tin nợ (nếu có)
-      final pdfBytes = await _generatePdfBytes();
+      // Bước 2: Tạo Widget mẫu in để chụp
+      final widgetToCapture = Container(
+        color: Colors.white,
+        child: CashFlowTicketWidget(
+          storeInfo: widget.storeInfo,
+          transaction: widget.transaction,
+          userName: widget.currentUser.name ?? 'Unknown',
+        ),
+      );
 
-      // Bước 3: Render ảnh từ PDF
-      final raster = await Printing.raster(pdfBytes, pages: [0], dpi: 203).first;
-      final image = await raster.toImage();
-      final pngBytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      // Bước 3: Chụp ảnh Widget
+      final Uint8List imageBytes = await _screenshotController.captureFromWidget(
+        widgetToCapture,
+        delay: const Duration(milliseconds: 50),
+        pixelRatio: 2.5,
+        targetSize: const Size(550, double.infinity),
+      );
+
+      // Bước 4: Bọc vào PDF để share/save
+      final pdf = pw.Document();
+      final image = pw.MemoryImage(imageBytes);
+      pdf.addPage(pw.Page(
+        pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 0),
+        build: (ctx) => pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
+      ));
+      final pdfBytes = await pdf.save();
 
       if (mounted) {
         setState(() {
           _pdfBytes = pdfBytes;
-          if (pngBytes != null) {
-            _imageProvider = MemoryImage(pngBytes.buffer.asUint8List());      }
+          if (imageBytes.isNotEmpty) {
+            _imageProvider = MemoryImage(imageBytes);
+          }
           _isLoading = false;
         });
       }
@@ -82,6 +107,7 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
     }
   }
 
+  // Logic tính nợ (Giữ nguyên như cũ vì không liên quan đến in ấn)
   Future<void> _calculateDebtHistory() async {
     final db = FirebaseFirestore.instance;
     final tx = widget.transaction;
@@ -89,13 +115,11 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
     double initialDebt = 0;
 
     try {
-      // --- TRƯỜNG HỢP 1: THU NỢ BÁN HÀNG ---
       if (tx.reason == "Thu nợ bán hàng" && tx.customerId != null) {
         final customer = await db.collection('customers').doc(tx.customerId).get();
         if (!customer.exists) return;
         initialDebt = (customer.data()?['debt'] as num?)?.toDouble() ?? 0.0;
 
-        // 1. Lấy hóa đơn bán hàng
         final billsSnap = await db
             .collection('bills')
             .where('storeId', isEqualTo: widget.currentUser.storeId)
@@ -103,7 +127,6 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
             .get();
         final bills = billsSnap.docs.map((doc) => BillModel.fromFirestore(doc)).toList();
 
-        // 2. Lấy phiếu thu nợ thủ công
         final manualTxsSnapshot = await db
             .collection('manual_cash_transactions')
             .where('storeId', isEqualTo: widget.currentUser.storeId)
@@ -116,19 +139,11 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
             .toList();
 
         allRawTransactions = [...bills, ...manualTxs];
-        allRawTransactions.sort((a, b) {
-          final dateA = a is BillModel ? a.createdAt : (a as CashFlowTransaction).date;
-          final dateB = b is BillModel ? b.createdAt : (b as CashFlowTransaction).date;
-          return dateA.compareTo(dateB); // Sắp xếp tăng dần
-        });
-
-        // --- TRƯỜNG HỢP 2: TRẢ NỢ NHẬP HÀNG ---
       } else if (tx.reason == "Trả nợ nhập hàng" && tx.supplierId != null) {
         final supplier = await db.collection('suppliers').doc(tx.supplierId).get();
         if (!supplier.exists) return;
         initialDebt = (supplier.data()?['debt'] as num?)?.toDouble() ?? 0.0;
 
-        // 1. Lấy phiếu nhập hàng
         final poSnap = await db
             .collection('purchase_orders')
             .where('storeId', isEqualTo: widget.currentUser.storeId)
@@ -136,7 +151,6 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
             .get();
         final purchaseOrders = poSnap.docs.map((doc) => PurchaseOrderModel.fromFirestore(doc)).toList();
 
-        // 2. Lấy phiếu chi trả nợ thủ công
         final manualTxsSnapshot = await db
             .collection('manual_cash_transactions')
             .where('storeId', isEqualTo: widget.currentUser.storeId)
@@ -149,18 +163,16 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
             .toList();
 
         allRawTransactions = [...purchaseOrders, ...manualTxs];
-        allRawTransactions.sort((a, b) {
-          final dateA = a is PurchaseOrderModel ? a.createdAt : (a as CashFlowTransaction).date;
-          final dateB = b is PurchaseOrderModel ? b.createdAt : (b as CashFlowTransaction).date;
-          return dateA.compareTo(dateB); // Sắp xếp tăng dần
-        });
-
       } else {
-        // Không phải phiếu nợ, không cần tính
         return;
       }
 
-      // --- BƯỚC TÍNH TOÁN (LẶP NGƯỢC) ---
+      allRawTransactions.sort((a, b) {
+        final dateA = a is BillModel ? a.createdAt : (a is PurchaseOrderModel ? a.createdAt : (a as CashFlowTransaction).date);
+        final dateB = b is BillModel ? b.createdAt : (b is PurchaseOrderModel ? b.createdAt : (b as CashFlowTransaction).date);
+        return dateA.compareTo(dateB);
+      });
+
       double currentDebt = initialDebt;
 
       for (int i = allRawTransactions.length - 1; i >= 0; i--) {
@@ -176,40 +188,24 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
           debtChange = currentTx.debtAmount;
           currentTxId = currentTx.id;
         } else if (currentTx is CashFlowTransaction) {
-          // Thu nợ (revenue) -> Giảm nợ (debtChange âm)
-          // Chi nợ (expense) -> Giảm nợ (debtChange âm)
           debtChange = -currentTx.amount;
           currentTxId = currentTx.id;
         }
 
         final double openingDebt = closingDebt - debtChange;
 
-        // --- CHÚNG TA TÌM THẤY PHIẾU HIỆN TẠI ---
         if (currentTxId == widget.transaction.id) {
           setState(() {
             _openingDebt = openingDebt;
             _closingDebt = closingDebt;
           });
-          return; // Dừng lại khi tìm thấy
+          return;
         }
-
-        currentDebt = openingDebt; // Cập nhật nợ cho vòng lặp tiếp theo
+        currentDebt = openingDebt;
       }
-
     } catch (e) {
       debugPrint("Lỗi nghiêm trọng khi tính toán nợ: $e");
-      // Không cần báo lỗi cho user, chỉ là không hiển thị nợ
     }
-  }
-
-  Future<Uint8List> _generatePdfBytes() async {
-    return CashFlowPrintingHelper.generatePdf(
-      tx: widget.transaction,
-      storeInfo: widget.storeInfo,
-      // --- SỬ DỤNG BIẾN STATE ---
-      openingDebt: _openingDebt,
-      closingDebt: _closingDebt,
-    );
   }
 
   Future<void> _handleCancel(BuildContext context) async {
@@ -235,20 +231,14 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
       },
     );
 
-    if (confirmed != true) {
-      return;
-    }
+    if (confirmed != true) return;
 
     try {
-      // --- SỬA Ở ĐÂY ---
-      // final firestoreService = FirestoreService(); // Bỏ dòng này
-      final cashFlowService = CashFlowService(); // Thêm dòng này
-
-      await cashFlowService.cancelManualTransaction( // Sửa dòng này
+      final cashFlowService = CashFlowService();
+      await cashFlowService.cancelManualTransaction(
         widget.transaction,
         widget.currentUser.name ?? widget.currentUser.phoneNumber,
       );
-      // --- KẾT THÚC SỬA ---
 
       ToastService().show(
           message: "Phiếu đã được hủy và hoàn tác công nợ",
@@ -290,9 +280,7 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
       },
     );
 
-    if (confirmed != true) {
-      return;
-    }
+    if (confirmed != true) return;
 
     try {
       final cashFlowService = CashFlowService();
@@ -316,19 +304,16 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
       'storeInfo': widget.storeInfo,
       'transaction': widget.transaction.toMap(),
       'transactionId': widget.transaction.id,
-      // --- SỬ DỤNG BIẾN STATE ---
       'openingDebt': _openingDebt,
       'closingDebt': _closingDebt,
     };
 
     await PrintQueueService().addJob(PrintJobType.cashFlow, jobData);
-
     ToastService()
         .show(message: "Đã gửi lại lệnh in", type: ToastType.success);
   }
 
   Future<void> _shareReceipt() async {
-    // (Giữ nguyên logic)
     if (_pdfBytes == null) return;
     final shortId = widget.transaction.id.split('_').last;
     await Printing.sharePdf(
@@ -336,7 +321,6 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
   }
 
   Future<void> _savePdf() async {
-    // (Giữ nguyên logic)
     if (_pdfBytes == null) return;
     try {
       final shortId = widget.transaction.id.split('_').last;
@@ -405,22 +389,14 @@ class _CashFlowReceiptDialogState extends State<CashFlowReceiptDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   if (isCancelled)
-                  // NÚT XÓA (KHI ĐÃ HỦY)
                     TextButton(
                       onPressed: () => _handleDelete(context),
-                      child: const Text(
-                        "Xóa phiếu",
-                        style: TextStyle(color: Colors.red),
-                      ),
+                      child: const Text("Xóa phiếu", style: TextStyle(color: Colors.red)),
                     )
                   else
-                  // NÚT HỦY (KHI CHƯA HỦY)
                     TextButton(
                       onPressed: () => _handleCancel(context),
-                      child: const Text(
-                        "Hủy phiếu",
-                        style: TextStyle(color: Colors.red),
-                      ),
+                      child: const Text("Hủy phiếu", style: TextStyle(color: Colors.red)),
                     ),
 
                   TextButton(

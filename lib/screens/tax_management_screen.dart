@@ -9,7 +9,7 @@ import '../../widgets/app_dropdown.dart';
 import '../../models/product_model.dart';
 import '../widgets/product_search_delegate.dart';
 import '../../theme/app_theme.dart';
-
+import 'sales/payment_screen.dart';
 // ===================================================================
 // 1. BẢNG THUẾ CHO PHƯƠNG PHÁP KHẤU TRỪ (VAT - Deduction)
 // ===================================================================
@@ -239,6 +239,8 @@ class _TaxSettingsTabState extends State<TaxSettingsTab> {
 
       await _firestoreService.updateStoreTaxSettings(
           widget.currentUser.storeId, settings);
+
+      PaymentScreen.clearCache();
 
       ToastService().show(message: "Đã lưu cấu hình thuế", type: ToastType.success);
     } catch (e) {

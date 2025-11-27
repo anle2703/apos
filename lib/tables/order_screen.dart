@@ -116,10 +116,14 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _printLabelOnKitchen = false;
   double _labelWidth = 50.0;
   double _labelHeight = 30.0;
+  bool _isPaymentLoading = false;
+  Map<String, dynamic>? _storeTaxSettings;
+  final Map<String, String> _productTaxMap = {};
 
   @override
   void initState() {
     super.initState();
+    _loadTaxSettings();
     _settingsService = SettingsService();
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     _settingsSub = _settingsService.watchStoreSettings(settingsId).listen((s) {
@@ -182,6 +186,60 @@ class _OrderScreenState extends State<OrderScreen> {
     _searchFocusNode.dispose();
     _priceUpdateTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadTaxSettings() async {
+    try {
+      final settings = await _firestoreService.getStoreTaxSettings(widget.currentUser.storeId);
+      if (mounted && settings != null) {
+        setState(() {
+          _storeTaxSettings = settings;
+          final rawMap = settings['taxAssignmentMap'] as Map<String, dynamic>? ?? {};
+          _productTaxMap.clear();
+          rawMap.forEach((taxKey, productIds) {
+            if (productIds is List) {
+              for (var pid in productIds) {
+                _productTaxMap[pid.toString()] = taxKey;
+              }
+            }
+          });
+        });
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải cấu hình thuế: $e");
+    }
+  }
+
+  // --- THÊM HÀM: Lấy chuỗi hiển thị thuế ---
+  String _getTaxDisplayString(ProductModel product) {
+    if (_storeTaxSettings == null) return '';
+
+    // 1. Xác định phương pháp tính (Trực tiếp hay Khấu trừ)
+    final String calcMethod = _storeTaxSettings!['calcMethod'] ?? 'direct'; // 'direct' hoặc 'deduction'
+    // 2. Lấy mã thuế của sản phẩm (nếu không có thì mặc định)
+    final String? taxKey = _productTaxMap[product.id];
+
+    if (taxKey == null) return '';
+
+    if (calcMethod == 'deduction') {
+      // Phương pháp Khấu trừ (VAT)
+      switch (taxKey) {
+        case 'VAT_10': return '(VAT 10%)';
+        case 'VAT_8': return '(VAT 8%)';
+        case 'VAT_5': return '(VAT 5%)';
+        case 'VAT_0': return '(VAT 0%)';
+        default: return '';
+      }
+    } else {
+      // Phương pháp Trực tiếp (LST - Lệ suất thuế / Tỷ lệ %)
+      switch (taxKey) {
+        case 'HKD_RETAIL': return '(LST 1.5%)';
+        case 'HKD_PRODUCTION': return '(LST 4.5%)';
+        case 'HKD_SERVICE': return '(LST 7%)';
+        case 'HKD_LEASING': return '(LST 10%)';
+        default: return '';
+      }
+    }
   }
 
   bool _handleKeyEvent(KeyEvent event) {
@@ -1018,59 +1076,96 @@ class _OrderScreenState extends State<OrderScreen> {
       return;
     }
 
-    bool saved = true;
-    if (_hasUnsentItems) {
-      saved = await _sendToKitchen(
-        popOnFinish: false,
-        navigateToCartViewOnSuccess: false,
-        performPrint: _notifyKitchenAfterPayment,
+    setState(() => _isPaymentLoading = true);
+
+    try {
+      // BƯỚC 1: ĐẢM BẢO CÓ ORDER ID
+      // Nếu là đơn mới tinh (chưa từng lưu), bắt buộc phải await để lấy ID từ Server.
+      // (Thao tác này thường rất nhanh, chỉ chậm khi mạng quá yếu).
+      if (_currentOrder == null) {
+        bool created = await _saveOrder();
+        if (!created || _currentOrder == null) {
+          ToastService().show(
+              message: "Không thể khởi tạo đơn hàng.", type: ToastType.error);
+          setState(() => _isPaymentLoading = false);
+          return;
+        }
+      }
+
+      // BƯỚC 2: XỬ LÝ LƯU NGẦM (BACKGROUND)
+      // Thay vì await (chờ đợi), ta gọi hàm và để nó tự chạy.
+      if (_hasUnsentItems) {
+        // Gọi lưu và báo bếp nhưng KHÔNG await kết quả
+        _sendToKitchen(
+          popOnFinish: false,
+          navigateToCartViewOnSuccess: false,
+          performPrint: _notifyKitchenAfterPayment,
+        ).then((success) {
+          if (success) {
+            debugPrint(">>> [BACKGROUND] Đã lưu và báo bếp thành công.");
+          } else {
+            debugPrint(">>> [BACKGROUND] Lưu ngầm thất bại (User đang ở màn thanh toán).");
+          }
+        }).catchError((e) {
+          debugPrint(">>> [BACKGROUND] Lỗi lưu ngầm: $e");
+        });
+      } else {
+        // Nếu không có món mới, chỉ gọi saveOrder nhẹ nhàng để sync
+        _saveOrder();
+      }
+
+      // BƯỚC 3: CHUẨN BỊ DỮ LIỆU THANH TOÁN TỪ LOCAL
+      // Chúng ta lấy dữ liệu trực tiếp từ _displayCart (trên máy) thay vì chờ tải lại từ Server.
+      // Điều này giúp màn hình thanh toán hiện ra NGAY LẬP TỨC.
+
+      final savedState = _currentOrder != null ? _paymentStateCache[_currentOrder!.id] : null;
+      _isFinalizingPayment = true;
+
+      final upToDateOrder = _currentOrder!.copyWith(
+        // Map lại items từ giỏ hàng hiện tại
+        items: _displayCart.values.map((item) {
+          // Mẹo: Gán sentQuantity = quantity để logic in bill coi như món đã chốt
+          return item.copyWith(sentQuantity: item.quantity).toMap();
+        }).toList(),
+        totalAmount: _totalAmount,
       );
-    } else {
-      saved = await _saveOrder();
-    }
 
-    if (!saved || _currentOrder == null) {
-      ToastService().show(
-          message: "Không thể chuẩn bị dữ liệu thanh toán.",
-          type: ToastType.error);
-      return;
-    }
-    if (!mounted) return;
-
-    final savedState = _paymentStateCache[_currentOrder!.id];
-    _isFinalizingPayment = true;
-
-    final upToDateOrder = _currentOrder!.copyWith(
-      items: _displayCart.values.map((item) => item.toMap()).toList(),
-      totalAmount: _totalAmount,
-    );
-
-    if (isDesktop) {
-      setState(() {
-        _isPaymentView = true;
-      });
-    } else {
-      final result = await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => PaymentScreen(
-            order: upToDateOrder,
-            currentUser: widget.currentUser,
-            subtotal: _totalAmount,
-            customer: _selectedCustomer,
-            customerAddress: _customerAddressFromOrder,
-            printBillAfterPayment: _printBillAfterPayment,
-            showPricesOnReceipt: _showPricesOnReceipt,
-            initialState: savedState,
-            promptForCash: _promptForCash,
+      // BƯỚC 4: ĐIỀU HƯỚNG NGAY LẬP TỨC
+      if (isDesktop) {
+        setState(() {
+          _isPaymentView = true;
+        });
+      } else {
+        final result = await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => PaymentScreen(
+              order: upToDateOrder,
+              currentUser: widget.currentUser,
+              subtotal: _totalAmount,
+              customer: _selectedCustomer,
+              customerAddress: _customerAddressFromOrder,
+              printBillAfterPayment: _printBillAfterPayment,
+              showPricesOnReceipt: _showPricesOnReceipt,
+              initialState: savedState,
+              promptForCash: _promptForCash,
+            ),
           ),
-        ),
-      );
+        );
 
-      _isFinalizingPayment = false;
-      if (result is PaymentState) {
-        _paymentStateCache[_currentOrder!.id] = result;
-      } else if (result == true) {
-        _paymentStateCache.remove(_currentOrder!.id);
+        _isFinalizingPayment = false;
+        if (result is PaymentState) {
+          if (_currentOrder != null) _paymentStateCache[_currentOrder!.id] = result;
+        } else if (result == true) {
+          if (_currentOrder != null) _paymentStateCache.remove(_currentOrder!.id);
+        }
+      }
+
+    } catch (e) {
+      debugPrint("Lỗi chuẩn bị thanh toán: $e");
+      ToastService().show(message: "Có lỗi xảy ra: $e", type: ToastType.error);
+    } finally {
+      if (mounted) {
+        setState(() => _isPaymentLoading = false);
       }
     }
   }
@@ -1978,7 +2073,16 @@ class _OrderScreenState extends State<OrderScreen> {
                       ),
                       onPressed:
                       _displayCart.isNotEmpty ? _handlePayment : null,
-                      child: const Text('Thanh Toán'),
+                      child: _isPaymentLoading
+                          ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2.5
+                          )
+                      )
+                          : const Text('Thanh Toán'),
                     ),
                   ),
                 ],
@@ -2986,7 +3090,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     final double basePriceForUnit = _getBasePriceForUnit(item.product, item.selectedUnit);
     final bool priceHasChanged = (item.price - basePriceForUnit).abs() > 0.01;
-
+    final String taxText = _getTaxDisplayString(item.product);
     return Card(
       child: InkWell(
         onTap: () => _showEditItemDialog(cartId, item),
@@ -3042,6 +3146,20 @@ class _OrderScreenState extends State<OrderScreen> {
                         if (item.selectedUnit.isNotEmpty)
                           TextSpan(
                             text: '(${item.selectedUnit}) ',
+                            style: textTheme.bodyMedium?.copyWith(
+                              color: isCancelled
+                                  ? Colors.grey
+                                  : Colors.grey.shade700,
+                              decoration: isCancelled
+                                  ? TextDecoration.lineThrough
+                                  : TextDecoration.none,
+                              decorationColor: Colors.grey,
+                              decorationThickness: 2.0,
+                            ),
+                          ),
+                        if (taxText.isNotEmpty)
+                          TextSpan(
+                            text: '$taxText ',
                             style: textTheme.bodyMedium?.copyWith(
                               color: isCancelled
                                   ? Colors.grey

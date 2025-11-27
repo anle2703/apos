@@ -170,28 +170,8 @@ class _ReportScreenState extends State<ReportScreen>
 
   List<Widget> _buildEndOfDayActions(BuildContext context) {
     final endOfDayState = _endOfDayReportKey.currentState;
-    final bool canPrint = endOfDayState?.isOwnerOrManager ?? false;
 
     return [
-      // --- THÊM LẠI NÚT IN (chỉ Owner/Manager thấy) ---
-      if (canPrint)
-        IconButton(
-          icon: _isEndOfDayLoading
-              ? const SizedBox(
-              width: 24, height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.print_outlined, // Icon in
-              color: AppTheme.primaryColor, size: 30),
-          tooltip: 'In tất cả Báo Cáo', // Tooltip mới
-          onPressed: _isEndOfDayLoading
-              ? null
-              : () {
-            // Gọi hàm tạo PDF tổng hợp trong EndOfDayReportTabState
-            endOfDayState?. generateCombinedPdfAndShowDialog(); // Gọi hàm đã tạo
-          },
-        ),
-      // --- KẾT THÚC THÊM NÚT IN ---
-
       // --- NÚT LỌC (Giữ nguyên) ---
       IconButton(
         icon: _isEndOfDayLoading

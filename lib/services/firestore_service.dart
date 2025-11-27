@@ -1522,4 +1522,13 @@ class FirestoreService {
       };
     }
   }
+
+  Future<void> updateBill(String billId, Map<String, dynamic> data) async {
+    await _firestore.collection('bills').doc(billId).update(data);
+  }
+
+  // 2. Hàm mới: Lưu Bill với ID tự tạo (thay vì add() tự sinh ID)
+  Future<void> setBill(String billId, Map<String, dynamic> data) async {
+    await _firestore.collection('bills').doc(billId).set(data);
+  }
 }

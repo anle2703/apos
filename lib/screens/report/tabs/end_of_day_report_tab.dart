@@ -8,7 +8,6 @@ import 'package:omni_datetime_picker/omni_datetime_picker.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
-import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import 'package:collection/collection.dart';
@@ -20,9 +19,12 @@ import '../../../theme/number_utils.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/app_dropdown.dart';
 import 'package:app_4cash/services/firestore_service.dart';
-import '../../../widgets/end_of_day_report_printing_helper.dart';
 import '../../../services/print_queue_service.dart';
 import '../../../models/print_job_model.dart';
+import '../../../widgets/end_of_day_report_widget.dart';
+import 'package:screenshot/screenshot.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 enum TimeRange {
   today,
@@ -1930,7 +1932,7 @@ class _EndOfDayReportDialogState extends State<_EndOfDayReportDialog> {
   Uint8List? _pdfBytes;
   bool _isLoading = true;
   Map<String, String>? _storeInfo;
-
+  final ScreenshotController _screenshotController = ScreenshotController();
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
@@ -1942,64 +1944,69 @@ class _EndOfDayReportDialogState extends State<_EndOfDayReportDialog> {
 
   Future<void> _initialize() async {
     try {
-      _storeInfo =
-      await FirestoreService().getStoreDetails(widget.currentUser.storeId);
+      _storeInfo = await FirestoreService().getStoreDetails(widget.currentUser.storeId);
       if (_storeInfo == null) {
         throw Exception('Không thể tải thông tin cửa hàng.');
       }
 
-      final pdfBytes = await EndOfDayReportPrintingHelper.generatePdf(
-        storeInfo: _storeInfo!,
-        totalReportData: widget.totalReportData ?? {},
-        shiftReportsData: widget.shiftReportsData ?? [],
-      );
-      if (!mounted) return;
+      Map<String, dynamic> dataToPrint;
+      List<Map<String, dynamic>> shiftDataList = [];
 
-      final List<ui.Image> pageImages = [];
-      await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-        pageImages.add(await page.toImage());
+      if (widget.totalReportData != null) {
+        // IN BÁO CÁO TỔNG
+        dataToPrint = widget.totalReportData!;
+        shiftDataList = widget.shiftReportsData ?? [];
+      } else if (widget.shiftReportsData != null && widget.shiftReportsData!.isNotEmpty) {
+        // IN BÁO CÁO CA
+        dataToPrint = widget.shiftReportsData!.first;
+        // Khi in ca lẻ, không cần danh sách ca con
+        shiftDataList = [];
+      } else {
+        dataToPrint = {};
       }
-      if (pageImages.isEmpty) {
-        throw Exception("Không thể rasterize PDF.");
-      }
-      final int totalWidth =
-      pageImages.map((img) => img.width).reduce((a, b) => a > b ? a : b);
-      final int totalHeight =
-      pageImages.map((img) => img.height).reduce((a, b) => a + b);
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(
-          recorder,
-          ui.Rect.fromLTWH(
-              0, 0, totalWidth.toDouble(), totalHeight.toDouble()));
-      canvas.drawRect(
-          ui.Rect.fromLTWH(0, 0, totalWidth.toDouble(), totalHeight.toDouble()),
-          ui.Paint()..color = const ui.Color(0xFFFFFFFF));
-      double currentY = 0.0;
-      for (final img in pageImages) {
-        canvas.drawImage(img, ui.Offset(0, currentY), ui.Paint());
-        currentY += img.height;
-        img.dispose();
-      }
-      final picture = recorder.endRecording();
-      final combinedImage = await picture.toImage(totalWidth, totalHeight);
-      final pngBytes =
-      await combinedImage.toByteData(format: ui.ImageByteFormat.png);
+
+      final widgetToCapture = Container(
+        color: Colors.white,
+        child: EndOfDayReportWidget(
+          storeInfo: _storeInfo!,
+          totalReportData: dataToPrint, // Truyền data đã chọn
+          shiftReportsData: shiftDataList,
+          userName: widget.currentUser.name ?? 'Unknown',
+        ),
+      );
+
+      // 3. Chụp ảnh Widget
+      final Uint8List imageBytes = await _screenshotController.captureFromWidget(
+        widgetToCapture,
+        delay: const Duration(milliseconds: 100),
+        pixelRatio: 2.5,
+        targetSize: const Size(550, double.infinity),
+      );
+
+      // 4. Tạo PDF bao bọc ảnh (để dùng cho tính năng Lưu PDF / Chia sẻ)
+      final pdf = pw.Document();
+      final image = pw.MemoryImage(imageBytes);
+
+      pdf.addPage(pw.Page(
+          pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 0),
+          build: (ctx) {
+            return pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain));
+          }
+      ));
+      final pdfData = await pdf.save();
 
       if (mounted) {
         setState(() {
-          _pdfBytes = pdfBytes;
-          if (pngBytes != null) {
-            _imageProvider = MemoryImage(pngBytes.buffer.asUint8List());
-          }
+          _pdfBytes = pdfData;
+          _imageProvider = MemoryImage(imageBytes); // Hiển thị ảnh preview ngay
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        debugPrint("Lỗi khi tạo ảnh báo cáo tổng hợp: $e");
-        ToastService()
-            .show(message: "Lỗi tạo ảnh báo cáo: $e", type: ToastType.error);
+        debugPrint("Lỗi tạo ảnh báo cáo: $e");
+        ToastService().show(message: "Lỗi tạo ảnh báo cáo: $e", type: ToastType.error);
       }
     }
   }

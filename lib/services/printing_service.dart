@@ -1,68 +1,39 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
-import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
-import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import '../models/configured_printer_model.dart';
-import '../models/order_item_model.dart';
-import 'package:image/image.dart' as img;
-import 'dart:ui' as ui;
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../theme/number_utils.dart';
-import '../widgets/cash_flow_printing_helper.dart';
-import '../models/cash_flow_transaction_model.dart';
-import '../widgets/end_of_day_report_printing_helper.dart';
-import '../theme/string_extensions.dart';
-import '../widgets/bank_list.dart';
-import 'label_printing_service.dart';
-import 'package:printing/printing.dart' as printing_lib;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:app_4cash/services/native_printer_service.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart';
+import 'package:image/image.dart' as img;
+import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart' as printing_lib;
+import 'package:screenshot/screenshot.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/cash_flow_transaction_model.dart';
+import '../models/configured_printer_model.dart';
 import '../models/label_template_model.dart';
-import '../../services/native_printer_service.dart';
+import '../models/order_item_model.dart';
+import '../models/receipt_template_model.dart';
+import '../widgets/kitchen_ticket_widget.dart';
+import '../widgets/label_widget.dart';
+import '../widgets/receipt_widget.dart';
+import '../widgets/cash_flow_ticket_widget.dart';
+import '../widgets/end_of_day_report_widget.dart';
+import '../widgets/vietqr_generator.dart';
+import '../widgets/table_notification_widget.dart';
 
 class PrintingService {
   final String tableName;
   final String userName;
 
   PrintingService({required this.tableName, required this.userName});
-
-  static pw.Font? _font;
-  static pw.Font? _boldFont;
-  static pw.Font? _italicFont;
-
-  static Future<pw.Font> loadFont({bool isBold = false, bool isItalic = false}) async {
-    if (isItalic) {
-      if (_italicFont != null) return _italicFont!;
-      final fontData = await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
-      _italicFont = pw.Font.ttf(fontData);
-      return _italicFont!;
-    }
-    if (isBold) {
-      if (_boldFont != null) return _boldFont!;
-      final fontData = await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
-      _boldFont = pw.Font.ttf(fontData);
-      return _boldFont!;
-    }
-    if (_font != null) return _font!;
-    final fontData = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
-    _font = pw.Font.ttf(fontData);
-    return _font!;
-  }
-
-  Future<void> _ensureFontsLoaded() async {
-    if (_font != null && _boldFont != null && _italicFont != null) return;
-    final fontData = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
-    final boldFontData = await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
-    final italicFontData = await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
-    _font = pw.Font.ttf(fontData);
-    _boldFont = pw.Font.ttf(boldFontData);
-    _italicFont = pw.Font.ttf(italicFontData);
-  }
 
   final Map<String, String> _keysToLabels = const {
     'cashier_printer': 'Máy in Thu ngân',
@@ -73,6 +44,186 @@ class PrintingService {
     'label_printer': 'Máy in Tem',
   };
 
+  // --- HÀM HỖ TRỢ CŨ (ĐỂ FIX LỖI Ở CÁC FILE KHÁC) ---
+  static Future<pw.Font> loadFont(
+      {bool isBold = false, bool isItalic = false}) async {
+    try {
+      if (isBold) {
+        final fontData =
+        await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
+        return pw.Font.ttf(fontData);
+      } else if (isItalic) {
+        final fontData =
+        await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
+        return pw.Font.ttf(fontData);
+      } else {
+        final fontData =
+        await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
+        return pw.Font.ttf(fontData);
+      }
+    } catch (e) {
+      debugPrint("Lỗi load font: $e");
+      return pw.Font.courier();
+    }
+  }
+
+  Future<void> disconnectPrinter(PrinterType type) async {
+    await PrinterManager.instance.disconnect(type: type);
+  }
+
+  Future<ReceiptTemplateModel> _loadReceiptSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString('receipt_template_settings');
+    if (jsonStr != null) {
+      return ReceiptTemplateModel.fromJson(jsonStr);
+    }
+    return ReceiptTemplateModel();
+  }
+
+  Future<bool> _printFromWidget({
+    required Widget widgetToPrint,
+    required ConfiguredPrinter printer,
+  }) async {
+    try {
+      debugPrint(">>> START PRINT FROM WIDGET...");
+      final ScreenshotController localController = ScreenshotController();
+
+      // 1. Cấu hình kích thước chuẩn 80mm = 576 dots
+      const double paperWidth = 576.0;
+
+      // 2. Wrapper để căn chỉnh nội dung
+      final wrapperWidget = Container(
+        width: paperWidth,
+        color: Colors.white,
+        alignment: Alignment.topCenter, // Căn giữa nội dung 550px
+        child: widgetToPrint,
+      );
+
+      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS);
+
+      // 3. Chụp ảnh
+      // Với Desktop: Dùng pixelRatio nhỏ hơn (1.5) để tránh ảnh quá to
+      // Với Mobile: Dùng pixelRatio cao (2.0) để nét
+      final double pixelRatio = isDesktop ? 1.5 : 2.0;
+
+      final Uint8List imageBytes = await localController.captureFromWidget(
+        Material(
+          color: Colors.white,
+          child: wrapperWidget,
+        ),
+        delay: const Duration(milliseconds: 60),
+        pixelRatio: pixelRatio,
+        context: null,
+        targetSize: const Size(paperWidth, double.infinity),
+      );
+
+      // A. DESKTOP: Gọi hàm xử lý riêng
+      if (isDesktop) {
+        return await _printImageViaDesktopDriver(printer.physicalPrinter.device, imageBytes);
+      }
+
+      // B. MOBILE / LAN: Xử lý ESC/POS
+      debugPrint(">>> PROCESSING IMAGE IN ISOLATE...");
+      final List<int> printCommands = await compute(_processBillImageInIsolate, {
+        'bytes': imageBytes,
+      });
+
+      final device = printer.physicalPrinter.device;
+      final type = printer.physicalPrinter.type;
+
+      if (type == PrinterType.usb) {
+        if (!kIsWeb && Platform.isAndroid) {
+          final nativeService = NativePrinterService();
+          return await nativeService.print(device.address!, Uint8List.fromList(printCommands));
+        }
+        return await _sendToPrinterManager(printer, printCommands);
+      } else if (type == PrinterType.network) {
+        return await _sendBytesViaSocket(device.address!, printCommands);
+      } else {
+        return await _sendToPrinterManager(printer, printCommands);
+      }
+    } catch (e) {
+      debugPrint("Lỗi in từ Widget: $e");
+      return false;
+    }
+  }
+
+  // ===========================================================================
+  // CÁC HÀM IN NGHIỆP VỤ
+  // ===========================================================================
+
+  // 1. IN HÓA ĐƠN
+  Future<bool> printReceiptBill({
+    required Map<String, String> storeInfo,
+    required List<OrderItem> items,
+    required Map<String, dynamic> summary,
+    required List<ConfiguredPrinter> configuredPrinters,
+  }) async {
+    try {
+      final cashierPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'cashier_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
+      );
+      final settings = await _loadReceiptSettings();
+
+      // --- LOGIC TẠO QR DATA ---
+      String? qrDataString;
+
+      try {
+        final Map<String, dynamic>? bankDetails = (summary['bankDetails'] as Map<String, dynamic>?);
+        final double totalPayable = (summary['totalPayable'] as num?)?.toDouble() ?? 0.0;
+
+        // Lấy tên bàn, xử lý tiếng Việt có dấu thành không dấu nếu cần (ở đây lấy nguyên)
+        final String tableName = (summary['tableName'] ?? this.tableName).toString();
+
+        if (bankDetails != null && totalPayable > 0) {
+          // Lấy BIN và Account an toàn
+          final String bin = (bankDetails['bankBin'] ?? '').toString();
+          final String acc = (bankDetails['bankAccount'] ?? '').toString();
+
+          if (bin.isNotEmpty && acc.isNotEmpty) {
+            final String amount = totalPayable.toInt().toString();
+            final String addInfo = "TT $tableName";
+
+            // Gọi Generator mới
+            qrDataString = VietQrGenerator.generate(
+              bankBin: bin,
+              bankAccount: acc,
+              amount: amount,
+              description: addInfo,
+            );
+
+            debugPrint(">>> Generated QR Data: $qrDataString");
+          } else {
+            debugPrint(">>> Thiếu BIN hoặc Số TK, không tạo QR.");
+          }
+        }
+      } catch (e) {
+        debugPrint("Lỗi tạo mã QR: $e");
+      }
+      // --------------------------
+
+      final widget = ReceiptWidget(
+        title: 'HÓA ĐƠN',
+        storeInfo: storeInfo,
+        items: items.where((i) => i.quantity > 0).toList(),
+        summary: summary,
+        userName: userName,
+        tableName: tableName,
+        showPrices: true,
+        isSimplifiedMode: false,
+        templateSettings: settings,
+        qrData: qrDataString, // Truyền chuỗi vừa tạo vào đây
+      );
+
+      return await _printFromWidget(widgetToPrint: widget, printer: cashierPrinter);
+    } catch (e) {
+      debugPrint('Lỗi in hóa đơn: $e');
+      rethrow;
+    }
+  }
+
+  // 2. IN TẠM TÍNH
   Future<bool> printProvisionalBill({
     required Map<String, String> storeInfo,
     required List<OrderItem> items,
@@ -82,79 +233,97 @@ class PrintingService {
     bool useDetailedLayout = false,
   }) async {
     try {
-      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
-      Uint8List pdfBytes;
-      if (useDetailedLayout) {
-        pdfBytes = await generateReceiptPdf(title: 'TẠM TÍNH', storeInfo: storeInfo, items: items.where((i) => i.quantity > 0).toList(), summary: summary);
-      } else {
-        pdfBytes = await _generateBillPdf(title: showPrices ? 'TẠM TÍNH' : 'KIỂM MÓN', storeInfo: storeInfo, items: items.where((i) => i.quantity > 0).toList(), totalAmount: (summary['subtotal'] as num?)?.toDouble() ?? 0.0, showPrices: showPrices, summary: summary);
-      }
-      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+      final cashierPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'cashier_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
+      );
+      final settings = await _loadReceiptSettings();
+      final String title = showPrices ? 'TẠM TÍNH' : 'KIỂM MÓN';
+
+      final widget = ReceiptWidget(
+        title: title,
+        storeInfo: storeInfo,
+        items: items.where((i) => i.quantity > 0).toList(),
+        summary: summary,
+        userName: userName,
+        tableName: tableName,
+        showPrices: showPrices,
+        isSimplifiedMode: !useDetailedLayout,
+        templateSettings: settings,
+      );
+
+      return await _printFromWidget(
+          widgetToPrint: widget, printer: cashierPrinter);
     } catch (e) {
       debugPrint('Lỗi in tạm tính: $e');
       rethrow;
     }
   }
 
-  Future<bool> printReceiptBill({
-    required Map<String, String> storeInfo,
-    required List<OrderItem> items,
-    required Map<String, dynamic> summary,
+  // 3. IN BÁO BẾP
+  Future<bool> printKitchenTicket({
+    required List<OrderItem> itemsToPrint,
+    required String targetPrinterRole,
     required List<ConfiguredPrinter> configuredPrinters,
+    String? customerName,
   }) async {
+    if (itemsToPrint.isEmpty) return true;
     try {
-      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
-      final pdfBytes = await generateReceiptPdf(title: 'HÓA ĐƠN', storeInfo: storeInfo, items: items.where((i) => i.quantity > 0).toList(), summary: summary);
-      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
+      final targetPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == targetPrinterRole,
+        orElse: () => throw Exception(
+            '${_keysToLabels[targetPrinterRole] ?? targetPrinterRole} chưa được gán.'),
+      );
+      final settings = await _loadReceiptSettings();
+
+      final widget = KitchenTicketWidget(
+        title: 'BÁO BẾP',
+        tableName: tableName,
+        items: itemsToPrint,
+        userName: userName,
+        customerName: customerName,
+        isCancelTicket: false,
+        templateSettings: settings,
+      );
+
+      return await _printFromWidget(
+          widgetToPrint: widget, printer: targetPrinter);
     } catch (e) {
-      debugPrint('Lỗi in hóa đơn: $e');
       rethrow;
     }
   }
 
-  Future<bool> printKitchenTicket({required List<OrderItem> itemsToPrint, required String targetPrinterRole, required List<ConfiguredPrinter> configuredPrinters, String? customerName}) async {
-    if (itemsToPrint.isEmpty) return true;
-    try {
-      final targetPrinter = configuredPrinters.firstWhere((p) => p.logicalName == targetPrinterRole, orElse: () => throw Exception('${_keysToLabels[targetPrinterRole] ?? targetPrinterRole} chưa được gán.'));
-      final pdfBytes = await _generateKitchenPdf(title: 'BÁO BẾP', items: itemsToPrint, isCancelTicket: false, customerName: customerName);
-      return await _printBillRaw(targetPrinter.physicalPrinter.device, targetPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
-    } catch (e) { rethrow; }
-  }
-
-  Future<bool> printCancelTicket({required List<OrderItem> itemsToCancel, required String targetPrinterRole, required List<ConfiguredPrinter> configuredPrinters}) async {
+  // 4. IN HỦY MÓN
+  Future<bool> printCancelTicket({
+    required List<OrderItem> itemsToCancel,
+    required String targetPrinterRole,
+    required List<ConfiguredPrinter> configuredPrinters,
+  }) async {
     if (itemsToCancel.isEmpty) return true;
     try {
-      final targetPrinter = configuredPrinters.firstWhere((p) => p.logicalName == targetPrinterRole, orElse: () => throw Exception('Máy in chưa được gán.'));
-      final pdfBytes = await _generateKitchenPdf(title: 'HỦY MÓN', items: itemsToCancel, isCancelTicket: true);
-      return await _printBillRaw(targetPrinter.physicalPrinter.device, targetPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
-    } catch (e) { rethrow; }
+      final targetPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == targetPrinterRole,
+        orElse: () => throw Exception('Máy in chưa được gán.'),
+      );
+      final settings = await _loadReceiptSettings();
+
+      final widget = KitchenTicketWidget(
+        title: 'HỦY MÓN',
+        tableName: tableName,
+        items: itemsToCancel,
+        userName: userName,
+        isCancelTicket: true,
+        templateSettings: settings,
+      );
+
+      return await _printFromWidget(
+          widgetToPrint: widget, printer: targetPrinter);
+    } catch (e) {
+      rethrow;
+    }
   }
 
-  Future<bool> printEndOfDayReport({required Map<String, String> storeInfo, required Map<String, dynamic> totalReportData, required List<Map<String, dynamic>> shiftReportsData, required List<ConfiguredPrinter> configuredPrinters}) async {
-    await _ensureFontsLoaded();
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
-      final pdfBytes = await EndOfDayReportPrintingHelper.generatePdf(storeInfo: storeInfo, totalReportData: totalReportData, shiftReportsData: shiftReportsData);
-      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
-    } catch (e) { rethrow; }
-  }
-
-  Future<bool> printCashFlowTicket({required Map<String, String> storeInfo, required CashFlowTransaction transaction, required double? openingDebt, required double? closingDebt, required List<ConfiguredPrinter> configuredPrinters}) async {
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
-      final pdfBytes = await CashFlowPrintingHelper.generatePdf(tx: transaction, storeInfo: storeInfo, openingDebt: openingDebt, closingDebt: closingDebt);
-      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
-    } catch (e) { rethrow; }
-  }
-
-  Future<bool> printTableManagementNotification({required Map<String, String> storeInfo, required String actionTitle, required String message, required String userName, required DateTime timestamp, required List<ConfiguredPrinter> configuredPrinters}) async {
-    try {
-      final cashierPrinter = configuredPrinters.firstWhere((p) => p.logicalName == 'cashier_printer', orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'));
-      final pdfBytes = await _generateTableManagementPdf(storeInfo: storeInfo, actionTitle: actionTitle, message: message, userName: userName, timestamp: timestamp);
-      return await _printBillRaw(cashierPrinter.physicalPrinter.device, cashierPrinter.physicalPrinter.type, pdfBytes: pdfBytes);
-    } catch (e) { rethrow; }
-  }
-
+  // 5. IN TEM
   Future<bool> printLabels({
     required List<Map<String, dynamic>> items,
     required String tableName,
@@ -163,6 +332,7 @@ class PrintingService {
     required double width,
     required double height,
     bool isRetailMode = false,
+    String? billCode,
   }) async {
     try {
       final labelPrinter = configuredPrinters.firstWhere(
@@ -170,8 +340,8 @@ class PrintingService {
         orElse: () => throw Exception('Chưa cấu hình "Máy in Tem".'),
       );
 
-      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
-
+      final bool isDesktop =
+          !kIsWeb && (Platform.isWindows || Platform.isMacOS);
       final prefs = await SharedPreferences.getInstance();
       LabelTemplateModel settings = LabelTemplateModel();
       final jsonStr = prefs.getString('label_template_settings');
@@ -183,99 +353,112 @@ class PrintingService {
         settings.labelColumns = (width >= 65) ? 2 : 1;
       }
 
-      final double printWidth = settings.labelWidth;
-      final double printHeight = settings.labelHeight;
       final int columns = settings.labelColumns;
 
-      List<LabelData> allLabelsQueue = [];
-      int grandTotalQty = items.fold(0, (tong, item) => tong + (OrderItem.fromMap(item).quantity).ceil());
+      List<LabelItemData> allLabelsQueue = [];
+      int grandTotalQty = items.fold(
+          0, (tong, item) => tong + (OrderItem.fromMap(item).quantity).ceil());
       final int dailySeq = await _getNextLabelSequence();
       int globalCurrentIndex = 0;
+      String headerDisplay =
+      (billCode != null && billCode.isNotEmpty) ? billCode : tableName;
 
       for (var itemData in items) {
         final item = OrderItem.fromMap(itemData);
         final int itemQty = item.quantity.ceil();
         for (int i = 1; i <= itemQty; i++) {
           globalCurrentIndex++;
-          allLabelsQueue.add(LabelData(item: item, tableName: tableName, createdAt: createdAt, dailySeq: dailySeq, copyIndex: globalCurrentIndex, totalCopies: grandTotalQty));
+          allLabelsQueue.add(LabelItemData(
+            item: item,
+            headerTitle: headerDisplay,
+            index: globalCurrentIndex,
+            total: grandTotalQty,
+            dailySeq: dailySeq,
+          ));
         }
       }
 
-      // --- LOGIC IN TEM (BATCH) ---
+      final ScreenshotController localController = ScreenshotController();
+      List<Uint8List> desktopImageBytesList = [];
+      List<int> totalTsplCommands = [];
+
+      double targetWidthPx = width * 8.0;
+      double targetHeightPx = height * 8.0;
+
+      for (int i = 0; i < allLabelsQueue.length; i += columns) {
+        List<LabelItemData?> rowItems = [];
+        for (int c = 0; c < columns; c++) {
+          if (i + c < allLabelsQueue.length) {
+            rowItems.add(allLabelsQueue[i + c]);
+          } else {
+            rowItems.add(null);
+          }
+        }
+        double capturePixelRatio = isDesktop ? 4.0 : 2.0;
+
+        final Uint8List imageBytes = await localController.captureFromWidget(
+          Directionality(
+            textDirection: ui.TextDirection.ltr,
+            child: MediaQuery(
+              data: MediaQueryData(size: Size(targetWidthPx, targetHeightPx)),
+              child: LabelRowWidget(
+                items: rowItems,
+                widthMm: width,
+                heightMm: height,
+                gapMm: 2.0,
+                isRetailMode: isRetailMode,
+                settings: settings,
+              ),
+            ),
+          ),
+          delay: const Duration(milliseconds: 20),
+          targetSize: Size(targetWidthPx, targetHeightPx),
+          pixelRatio: capturePixelRatio,
+        );
+
+        if (isDesktop) {
+          desktopImageBytesList.add(imageBytes);
+        } else {
+          final List<int> commands =
+          await compute(_processLabelImageInIsolate, {
+            'bytes': imageBytes,
+            'width': width,
+            'height': height,
+          });
+          totalTsplCommands.addAll(commands);
+        }
+      }
 
       if (isDesktop) {
-        // WINDOWS (Driver)
-        for (int i = 0; i < allLabelsQueue.length; i += columns) {
-          List<LabelData> batch = [];
-          for (int c = 0; c < columns; c++) {
-            if (i + c < allLabelsQueue.length) batch.add(allLabelsQueue[i + c]);
-          }
-          final pdfBytes = await LabelPrintingService.generateLabelPdf(
-            labelsOnPage: batch, pageWidthMm: printWidth, pageHeightMm: printHeight, settings: settings, isRetailMode: isRetailMode, forceWhiteBackground: true,
-          );
-          await _printLabelDesktop(labelPrinter.physicalPrinter.device, pdfBytes);
+        if (desktopImageBytesList.isEmpty) return true;
+        final pdf = pw.Document();
+        for (final imgBytes in desktopImageBytesList) {
+          final image = pw.MemoryImage(imgBytes);
+          pdf.addPage(pw.Page(
+              pageFormat: PdfPageFormat(
+                  width * PdfPageFormat.mm, height * PdfPageFormat.mm,
+                  marginAll: 0),
+              build: (ctx) {
+                return pw.Center(child: pw.Image(image, fit: pw.BoxFit.fill));
+              }));
         }
-        return true;
+        return await _printPdfViaDesktopDriver(
+            labelPrinter.physicalPrinter.device, await pdf.save());
+      }
 
+      if (totalTsplCommands.isEmpty) return true;
+
+      if (labelPrinter.physicalPrinter.type == PrinterType.network) {
+        return await _sendBytesViaSocket(
+            labelPrinter.physicalPrinter.device.address!, totalTsplCommands);
       } else {
-        // MOBILE (Android)
-
-        // A. NẾU LÀ MẠNG LAN
-        if (labelPrinter.physicalPrinter.type == PrinterType.network) {
-          final String ip = labelPrinter.physicalPrinter.device.address!;
-          List<int> totalTsplCommands = [];
-
-          for (int i = 0; i < allLabelsQueue.length; i += columns) {
-            List<LabelData> batch = [];
-            for (int c = 0; c < columns; c++) {
-              if (i + c < allLabelsQueue.length) batch.add(allLabelsQueue[i + c]);
-            }
-
-            final pdfBytes = await LabelPrintingService.generateLabelPdf(
-              labelsOnPage: batch, pageWidthMm: printWidth, pageHeightMm: printHeight, settings: settings, isRetailMode: isRetailMode, forceWhiteBackground: false,
-            );
-
-            final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, printWidth, printHeight);
-            totalTsplCommands.addAll(commands);
-          }
-
-          if (totalTsplCommands.isNotEmpty) {
-            return await _sendBytesViaSocket(ip, totalTsplCommands);
-          }
-          return true;
-
-        } else {
-          // B. NẾU LÀ USB (Dùng QuickUsb - RawUsbService)
-          debugPrint(">>> IN TEM USB (QUICK_USB)...");
-
-          List<int> totalTsplCommands = [];
-          for (int i = 0; i < allLabelsQueue.length; i += columns) {
-            List<LabelData> batch = [];
-            for (int c = 0; c < columns; c++) {
-              if (i + c < allLabelsQueue.length) batch.add(allLabelsQueue[i + c]);
-            }
-
-            final pdfBytes = await LabelPrintingService.generateLabelPdf(
-              labelsOnPage: batch, pageWidthMm: printWidth, pageHeightMm: printHeight, settings: settings, isRetailMode: isRetailMode, forceWhiteBackground: false,
-            );
-
-            final List<int> commands = await _getTsplCommandsFromPdf(pdfBytes, printWidth, printHeight);
-            totalTsplCommands.addAll(commands);
-          }
-
-          if (totalTsplCommands.isNotEmpty) {
-            final String? deviceId = labelPrinter.physicalPrinter.device.address;
-
-            if (deviceId != null && deviceId.isNotEmpty) {
-              final nativeService = NativePrinterService();
-              return await nativeService.print(deviceId, Uint8List.fromList(totalTsplCommands));
-            } else {
-              debugPrint("Lỗi In Tem: Address null");
-              return false;
-            }
-          }
-          return true;
+        final String? deviceId = labelPrinter.physicalPrinter.device.address;
+        if (deviceId != null && deviceId.isNotEmpty) {
+          final nativeService = NativePrinterService();
+          return await nativeService.print(
+              deviceId, Uint8List.fromList(totalTsplCommands));
         }
+        return false;
       }
     } catch (e) {
       debugPrint('Lỗi in tem: $e');
@@ -283,228 +466,99 @@ class PrintingService {
     }
   }
 
-  Future<bool> _printBillRaw(PrinterDevice printer, PrinterType type, {required Uint8List pdfBytes}) async {
-    debugPrint(">>> IN BILL: ${printer.name} (${type.name})");
-
-    // 1. WINDOWS / MACOS / LINUX (Driver Print)
-    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
-      return await _printLabelDesktop(printer, pdfBytes);
-    }
-
-    // 2. ANDROID USB (NativePrinterService) - KHÔNG THAY ĐỔI
-    if (!kIsWeb && Platform.isAndroid && type == PrinterType.usb) {
-      debugPrint(">>> IN BILL USB (NATIVE)...");
-      try {
-        final profile = await CapabilityProfile.load(name: 'default');
-        final generator = Generator(PaperSize.mm80, profile);
-        List<int> totalBytes = [];
-
-        // Render PDF thành ảnh ESC/POS
-        await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-          final ui.Image uiImage = await page.toImage();
-          final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData != null) {
-            final rawBytes = byteData.buffer.asUint8List();
-            final decoded = img.decodeImage(rawBytes);
-            if (decoded != null) {
-              final resized = img.copyResize(decoded, width: 576);
-              totalBytes += generator.image(resized);
-              totalBytes += generator.cut();
-            }
-          }
-        }
-
-        final String? deviceId = printer.address;
-
-        if (deviceId != null && deviceId.isNotEmpty) {
-          final nativeService = NativePrinterService();
-          // Gọi hàm print của Native Service
-          return await nativeService.print(deviceId, Uint8List.fromList(totalBytes));
-        } else {
-          debugPrint("Lỗi In Bill: Address null");
-          return false;
-        }
-      } catch (e) {
-        debugPrint("Lỗi Native Print Bill: $e");
-        return false;
-      }
-    }
-
-    // 3. CÁC TRƯỜNG HỢP CÒN LẠI (iOS LAN, Android LAN, Bluetooth...) - ÁP DỤNG LOGIC FIX LAN
-    final printerManager = PrinterManager.instance;
-    final profile = await CapabilityProfile.load(name: 'default');
-    final generator = Generator(PaperSize.mm80, profile);
-
-    List<int> totalBytes = [];
-    final model = _getPrinterModel(printer, type); // Dùng cho Bluetooth
-
+  // 6. IN PHIẾU THU/CHI (THÊM MỚI)
+  Future<bool> printCashFlowTicket({
+    required Map<String, String> storeInfo,
+    required CashFlowTransaction transaction,
+    required double? openingDebt,
+    required double? closingDebt,
+    required List<ConfiguredPrinter> configuredPrinters,
+  }) async {
     try {
-      // 3.1. Ngắt kết nối cũ
-      try {
-        await printerManager.disconnect(type: type);
-      } catch (_) {}
-
-      // Delay nhỏ cho USB (đặc thù)
-      if (type == PrinterType.usb) {
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-
-      debugPrint(">>> BẮT ĐẦU KẾT NỐI: ${printer.name} (${printer.address}) - Type: $type");
-
-      // 3.2. KẾT NỐI (LAN sử dụng TcpPrinterInput trực tiếp)
-      bool isConnected;
-      if (type == PrinterType.network) {
-        final String ip = (printer.address ?? '').trim();
-        if (ip.isEmpty) throw Exception("Địa chỉ IP máy in LAN trống.");
-
-        isConnected = await printerManager.connect(
-            type: type,
-            model: TcpPrinterInput(ipAddress: ip, port: 9100)
-        );
-      } else {
-        // Bluetooth / USB (Dùng model cũ đã tạo)
-        isConnected = await printerManager.connect(type: type, model: model);
-      }
-
-      if (!isConnected) {
-        throw Exception("Kết nối máy in thất bại (connect = false). Kiểm tra IP/Dây cáp.");
-      }
-
-      // 3.3. Gửi dữ liệu in
-      if (type == PrinterType.network || type == PrinterType.usb) {
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-
-      // ... (Phần chuyển PDF sang ESC/POS Image)
-      await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-        final ui.Image uiImage = await page.toImage();
-        final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData != null) {
-          final rawBytes = byteData.buffer.asUint8List();
-          final decoded = img.decodeImage(rawBytes);
-          if (decoded != null) {
-            final resized = img.copyResize(decoded, width: 576);
-            totalBytes += generator.image(resized);
-          }
-        }
-      }
-      totalBytes += generator.feed(1);
-      totalBytes += generator.cut();
-
-      debugPrint(">>> Đang gửi ${totalBytes.length} bytes dữ liệu...");
-      await printerManager.send(type: type, bytes: Uint8List.fromList(totalBytes));
-
-      // 3.4. Ngắt kết nối sau khi in xong
-      await Future.delayed(const Duration(milliseconds: 500));
-      await printerManager.disconnect(type: type);
-
-      debugPrint(">>> IN THÀNH CÔNG!");
-      return true;
-    } catch (e) {
-      debugPrint("Lỗi In Bill Raw (ÁP DỤNG FIX): $e");
-      try { await printerManager.disconnect(type: type); } catch (_) {}
-      return false;
-    }
-  }
-
-  Future<bool> _printLabelDesktop(PrinterDevice printer, Uint8List pdfBytes) async {
-    try {
-      debugPrint(">>> IN WINDOWS DRIVER: ${printer.name}");
-      final printers = await printing_lib.Printing.listPrinters();
-      final targetPrinter = printers.firstWhere(
-            (p) => p.name == printer.name,
-        orElse: () => printing_lib.Printer(url: printer.name, name: printer.name),
+      final cashierPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'cashier_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
       );
-      return await printing_lib.Printing.directPrintPdf(
-        printer: targetPrinter,
-        onLayout: (format) async => pdfBytes,
-        usePrinterSettings: true,
+
+      // SỬA: Dùng Widget mới tách ra
+      final widget = CashFlowTicketWidget(
+        storeInfo: storeInfo,
+        transaction: transaction,
+        userName: userName,
       );
+
+      return await _printFromWidget(widgetToPrint: widget, printer: cashierPrinter);
     } catch (e) {
-      debugPrint("Lỗi In Driver Windows: $e");
-      return false;
+      debugPrint("Lỗi in phiếu thu/chi: $e");
+      rethrow;
     }
   }
 
-  Future<bool> _sendBytesViaSocket(String ipAddress, List<int> bytes) async {
+  // 7. IN BÁO CÁO CUỐI NGÀY (THÊM MỚI)
+  Future<bool> printEndOfDayReport({
+    required Map<String, String> storeInfo,
+    required Map<String, dynamic> totalReportData,
+    required List<Map<String, dynamic>> shiftReportsData,
+    required List<ConfiguredPrinter> configuredPrinters,
+  }) async {
     try {
-      debugPrint(">>> Socket Connecting to $ipAddress:9100... Total bytes: ${bytes.length}");
-      final socket = await Socket.connect(ipAddress, 9100, timeout: const Duration(seconds: 5));
+      final cashierPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'cashier_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
+      );
 
-      const int chunkSize = 4096;
-      for (var i = 0; i < bytes.length; i += chunkSize) {
-        var end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
-        socket.add(bytes.sublist(i, end));
-        // Delay nhẹ để tránh tràn buffer máy in
-        await Future.delayed(const Duration(milliseconds: 10));
-      }
-      await socket.flush();
-      await socket.close();
-      debugPrint(">>> Socket Sent OK!");
-      return true;
+      // SỬA: Dùng Widget mới tách ra
+      final widget = EndOfDayReportWidget(
+        storeInfo: storeInfo,
+        totalReportData: totalReportData,
+        shiftReportsData: shiftReportsData,
+        userName: userName,
+      );
+
+      return await _printFromWidget(widgetToPrint: widget, printer: cashierPrinter);
     } catch (e) {
-      debugPrint(">>> Lỗi Socket LAN: $e");
-      return false;
+      debugPrint("Lỗi in báo cáo cuối ngày: $e");
+      rethrow;
     }
   }
 
-  Future<List<int>> _getTsplCommandsFromPdf(Uint8List pdfBytes, double width, double height) async {
-    List<int> allCommands = [];
-    await for (final page in Printing.raster(pdfBytes, dpi: 203)) {
-      final ui.Image uiImage = await page.toImage();
-      final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData != null) {
-        final rawBytes = byteData.buffer.asUint8List();
-        var decodedImage = img.decodeImage(rawBytes);
-        if (decodedImage != null) {
-          final whiteBgImage = img.Image(width: decodedImage.width, height: decodedImage.height);
-          img.fill(whiteBgImage, color: img.ColorRgb8(255, 255, 255));
-          img.compositeImage(whiteBgImage, decodedImage);
-          allCommands.addAll(_generateTSPL(whiteBgImage, width, height));
-        }
-      }
+  // 8. IN THÔNG BÁO QUẢN LÝ BÀN (THÊM MỚI)
+  Future<bool> printTableManagementNotification({
+    required Map<String, String> storeInfo,
+    required String actionTitle,
+    required String message,
+    required String userName,
+    required DateTime timestamp,
+    required List<ConfiguredPrinter> configuredPrinters,
+  }) async {
+    try {
+      final cashierPrinter = configuredPrinters.firstWhere(
+            (p) => p.logicalName == 'cashier_printer',
+        orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
+      );
+
+      final settings = await _loadReceiptSettings();
+
+      // Sử dụng Widget mới
+      final widget = TableNotificationWidget(
+        storeInfo: storeInfo,
+        actionTitle: actionTitle,
+        message: message,
+        userName: userName,
+        timestamp: timestamp,
+        templateSettings: settings,
+      );
+
+      return await _printFromWidget(widgetToPrint: widget, printer: cashierPrinter);
+    } catch (e) {
+      debugPrint("Lỗi in thông báo bàn: $e");
+      rethrow;
     }
-    return allCommands;
   }
 
-  List<int> _generateTSPL(img.Image image, double widthMm, double heightMm) {
-    List<int> commands = [];
-    int w = widthMm.toInt();
-    int h = heightMm.toInt();
-
-    String cmd = 'SIZE $w mm, $h mm\r\n';
-    cmd += 'GAP 2 mm, 0 mm\r\n';
-    cmd += 'DIRECTION 1\r\n';
-    cmd += 'CLS\r\n';
-    commands.addAll(utf8.encode(cmd));
-
-    int widthPx = image.width;
-    int heightPx = image.height;
-    int widthBytes = (widthPx + 7) ~/ 8;
-    String bitmapHeader = 'BITMAP 0,0,$widthBytes,$heightPx,0,';
-    commands.addAll(utf8.encode(bitmapHeader));
-
-    List<int> bitmapData = [];
-    for (int y = 0; y < heightPx; y++) {
-      for (int i = 0; i < widthBytes; i++) {
-        int byte = 0xFF;
-        for (int j = 0; j < 8; j++) {
-          int x = i * 8 + j;
-          if (x < widthPx) {
-            final pixel = image.getPixel(x, y);
-            if (pixel.a > 0 && pixel.luminance < 128) {
-              byte &= ~(1 << (7 - j));
-            }
-          }
-        }
-        bitmapData.add(byte);
-      }
-    }
-    commands.addAll(bitmapData);
-    commands.addAll(utf8.encode('\r\n'));
-    commands.addAll(utf8.encode('PRINT 1,1\r\n'));
-    return commands;
-  }
+  // ===========================================================================
+  // HELPERS
+  // ===========================================================================
 
   Future<int> _getNextLabelSequence() async {
     final prefs = await SharedPreferences.getInstance();
@@ -521,9 +575,99 @@ class PrintingService {
     return currentSeq;
   }
 
-  Future<void> disconnectPrinter(PrinterType type) async {
+  Future<bool> _sendToPrinterManager(
+      ConfiguredPrinter printer, List<int> bytes) async {
     final printerManager = PrinterManager.instance;
-    await printerManager.disconnect(type: type);
+    final type = printer.physicalPrinter.type;
+    final device = printer.physicalPrinter.device;
+
+    try {
+      await printerManager.disconnect(type: type);
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      final model = _getPrinterModel(device, type);
+      bool isConnected = await printerManager.connect(type: type, model: model);
+
+      if (isConnected) {
+        await printerManager.send(type: type, bytes: Uint8List.fromList(bytes));
+        await Future.delayed(const Duration(milliseconds: 200));
+        await printerManager.disconnect(type: type);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint("Lỗi PrinterManager: $e");
+      return false;
+    }
+  }
+
+  Future<bool> _sendBytesViaSocket(String ipAddress, List<int> bytes) async {
+    try {
+      final socket = await Socket.connect(ipAddress, 9100,
+          timeout: const Duration(seconds: 5));
+      const int chunkSize = 4096;
+      for (var i = 0; i < bytes.length; i += chunkSize) {
+        var end = (i + chunkSize < bytes.length) ? i + chunkSize : bytes.length;
+        socket.add(bytes.sublist(i, end));
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+      await socket.flush();
+      await socket.close();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> _printImageViaDesktopDriver(PrinterDevice printer, Uint8List imageBytes) async {
+    try {
+      final pdf = pw.Document();
+      final image = pw.MemoryImage(imageBytes);
+
+      // Khổ giấy in nhiệt khả dụng trên Desktop (72mm)
+      const double pdfPageWidth = 72.0 * PdfPageFormat.mm;
+
+      // Tạo trang PDF với chiều rộng cố định, chiều dài vô tận (cuộn giấy)
+      pdf.addPage(pw.Page(
+          pageFormat: PdfPageFormat(pdfPageWidth, double.infinity, marginAll: 0),
+          build: (ctx) {
+            // QUAN TRỌNG:
+            // Dùng width = pdfPageWidth để ép ảnh về đúng kích thước 72mm
+            // BoxFit.contain sẽ giữ tỷ lệ ảnh, ngăn chặn phóng to tràn lề
+            return pw.Center(
+                child: pw.Image(
+                    image,
+                    width: pdfPageWidth,
+                    fit: pw.BoxFit.contain
+                )
+            );
+          }));
+
+      return await _printPdfViaDesktopDriver(printer, await pdf.save());
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> _printPdfViaDesktopDriver(
+      PrinterDevice printer, Uint8List pdfBytes) async {
+    try {
+      debugPrint(">>> IN WINDOWS DRIVER: ${printer.name}");
+      final printers = await printing_lib.Printing.listPrinters();
+      final targetPrinter = printers.firstWhere(
+            (p) => p.name == printer.name,
+        orElse: () =>
+            printing_lib.Printer(url: printer.name, name: printer.name),
+      );
+      return await printing_lib.Printing.directPrintPdf(
+        printer: targetPrinter,
+        onLayout: (format) async => pdfBytes,
+        usePrinterSettings: true,
+      );
+    } catch (e) {
+      debugPrint("Lỗi In Driver Windows: $e");
+      return false;
+    }
   }
 
   BasePrinterInput _getPrinterModel(PrinterDevice printer, PrinterType type) {
@@ -538,1022 +682,105 @@ class PrintingService {
             autoConnect: true);
       case PrinterType.usb:
         return UsbPrinterInput(
-          name: printer.name,
-          vendorId: printer.vendorId,
-          productId: printer.productId,
-          // ĐÃ XÓA: deviceId: printer.address
-        );
+            name: printer.name,
+            vendorId: printer.vendorId,
+            productId: printer.productId);
     }
   }
+}
 
-  Future<Uint8List> _generateTableManagementPdf({
-    required Map<String, String> storeInfo,
-    required String actionTitle,
-    required String message,
-    required String userName,
-    required DateTime timestamp,
-  }) async {
-    final pdf = pw.Document();
-    await _ensureFontsLoaded();
-    final font = _font!;
-    final boldFont = _boldFont!;
+Future<List<int>> _processBillImageInIsolate(
+    Map<String, dynamic> params) async {
+  final Uint8List imageBytes = params['bytes'];
+  final int targetWidth = 576; // Chuẩn 80mm
 
-    const double printableWidthMm = 72;
-    final pageFormat = PdfPageFormat(
-      printableWidthMm * PdfPageFormat.mm,
-      double.infinity,
-      marginAll: 3 * PdfPageFormat.mm,
-    );
+  img.Image? decoded = img.decodeImage(imageBytes);
+  if (decoded == null) return [];
 
-    pdf.addPage(
-      pw.Page(
-        pageFormat: pageFormat,
-        build: (ctx) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Center(
-                  child: pw.Text(actionTitle,
-                      style: pw.TextStyle(font: boldFont, fontSize: 16))),
-              pw.SizedBox(height: 15),
-              pw.Text(
-                'Nhân viên: $userName',
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-              pw.SizedBox(height: 5),
-              pw.Text(
-                'Thời gian: ${DateFormat('HH:mm dd/MM/yyyy').format(timestamp)}',
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-              pw.Divider(height: 20, thickness: 1.5),
-              pw.Text(
-                message,
-                style: pw.TextStyle(font: boldFont, fontSize: 12),
-              ),
-              pw.Divider(height: 20, thickness: 1.5),
-            ],
-          );
-        },
-      ),
-    );
-    return pdf.save();
+  if (decoded.width != targetWidth) {
+    decoded = img.copyResize(decoded, width: targetWidth);
   }
 
-  Future<Uint8List> _generateKitchenPdf({
-    required String title,
-    required List<OrderItem> items,
-    required bool isCancelTicket,
-    String? customerName,
-  }) async {
-    final pdf = pw.Document();
-    await _ensureFontsLoaded();
-    final font = _font!;
-    final boldFont = _boldFont!;
-    final italicFont = _italicFont!;
+  final int width = decoded.width;
+  final int height = decoded.height;
+  final int bytesPerLine = (width + 7) ~/ 8;
 
-    const double printableWidthMm = 72;
-    final pageFormat = PdfPageFormat(
-      printableWidthMm * PdfPageFormat.mm,
-      double.infinity,
-      marginAll: 3 * PdfPageFormat.mm,
-    );
-    final quantityFormat = NumberFormat('#,##0.##');
+  List<int> buffer = [];
 
-    pdf.addPage(
-      pw.Page(
-        pageFormat: pageFormat,
-        build: (ctx) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Center(
-                  child: pw.Text('$title - $tableName',
-                      style: pw.TextStyle(font: boldFont, fontSize: 14))),
-              pw.SizedBox(height: 10),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  if (customerName != null && customerName.isNotEmpty) ...[
-                    pw.Text(
-                      'KH: $customerName',
-                      style: pw.TextStyle(font: font, fontSize: 10),
-                    ),
-                    pw.SizedBox(height: 5),
-                  ],
-                  pw.Text(
-                    'Nhân viên: $userName',
-                    style: pw.TextStyle(font: font, fontSize: 10),
-                  ),
-                  pw.SizedBox(height: 5),
-                  pw.Text(
-                    'Thời gian: ${DateFormat('HH:mm dd/MM').format(DateTime.now())}',
-                    style: pw.TextStyle(font: font, fontSize: 10),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 10),
-              pw.Row(children: [
-                pw.Container(
-                    width: 20,
-                    child: pw.Text('STT',
-                        style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                pw.Expanded(
-                    flex: 6,
-                    child: pw.Text('Tên Món',
-                        style: pw.TextStyle(font: boldFont, fontSize: 10),
-                        textAlign: pw.TextAlign.center)),
-                pw.Container(
-                    width: 20,
-                    child: pw.Text('SL',
-                        style: pw.TextStyle(font: boldFont, fontSize: 10),
-                        textAlign: pw.TextAlign.right)),
-              ]),
-              pw.Divider(height: 5, thickness: 1.5),
-              ...items.asMap().entries.map((entry) {
-                final i = entry.key;
-                final item = entry.value;
-                final double quantityToPrint = item.quantity;
-                if (quantityToPrint == 0) {
-                  return pw.SizedBox.shrink();
-                }
+// Header ESC/POS
+  buffer.addAll([0x1D, 0x76, 0x30, 0]);
+  buffer.add(bytesPerLine % 256);
+  buffer.add(bytesPerLine ~/ 256);
+  buffer.add(height % 256);
+  buffer.add(height ~/ 256);
 
-                var itemStyle =
-                pw.TextStyle(font: boldFont, fontSize: 12);
-                if (isCancelTicket) {
-                  itemStyle = itemStyle.copyWith(
-                    decoration: pw.TextDecoration.lineThrough,
-                    decorationThickness: 2.0,
-                  );
-                }
-
-                return pw.Column(children: [
-                  pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Container(
-                            width: 20,
-                            child: pw.Text('${i + 1}.',
-                                style: pw.TextStyle(
-                                    font: boldFont, fontSize: 10))),
-                        pw.Expanded(
-                          flex: 6,
-                          child: pw.Text(
-                            '${item.product.productName}${item.selectedUnit.isNotEmpty ? " (${item.selectedUnit})" : ""}',
-                            style: itemStyle,
-                          ),
-                        ),
-                        pw.Container(
-                            width: 30,
-                            child: pw.Text(
-                              isCancelTicket
-                                  ? '-${quantityFormat.format(quantityToPrint)}'
-                                  : quantityFormat.format(quantityToPrint),
-                              style: pw.TextStyle(
-                                  font: boldFont, fontSize: 12),
-                              textAlign: pw.TextAlign.right,
-                            )),
-                      ]),
-                  if (item.note.nullIfEmpty != null)
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.only(left: 20),
-                      child: pw.Row(
-                        children: [
-                          pw.Text(
-                            '(${item.note!})',
-                            style: pw.TextStyle(
-                                font: italicFont, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (item.toppings.isNotEmpty)
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.only(left: 20),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: item.toppings.entries
-                            .map((e) => pw.Text(
-                          '+${e.key.productName} x${quantityFormat.format(e.value)}',
-                          style: pw.TextStyle(
-                              font: italicFont, fontSize: 12),
-                        ))
-                            .toList(),
-                      ),
-                    ),
-                  pw.Divider(
-                      height: 1,
-                      thickness: 1,
-                      borderStyle: pw.BorderStyle.dashed),
-                ]);
-              }),
-            ],
-          );
-        },
-      ),
-    );
-    return pdf.save();
-  }
-
-  Future<Uint8List> _generateBillPdf({
-    required String title,
-    required List<OrderItem> items,
-    required Map<String, String> storeInfo,
-    required double totalAmount,
-    required bool showPrices,
-    required Map<String, dynamic> summary,
-  }) async {
-    final pdf = pw.Document();
-    await _ensureFontsLoaded();
-    final font = _font!;
-    final boldFont = _boldFont!;
-    final italicFont = _italicFont!;
-
-    const double printableWidthMm = 72;
-    final pageFormat = PdfPageFormat(
-      printableWidthMm * PdfPageFormat.mm,
-      double.infinity,
-      marginAll: 3 * PdfPageFormat.mm,
-    );
-    final currencyFormat = NumberFormat('#,##0');
-    final quantityFormat = NumberFormat('#,##0.##');
-    final timeOnlyFormat = DateFormat('HH:mm');
-
-    final Map<String, dynamic> customer = (summary['customer'] is Map)
-        ? Map<String, dynamic>.from(summary['customer'])
-        : {};
-    final double totalToPrint = (summary['subtotal'] as num?)?.toDouble() ?? totalAmount;
-
-    String formatTotalMinutes(int totalMinutes) {
-      if (totalMinutes <= 0) return "0'";
-      final hours = totalMinutes ~/ 60;
-      final minutes = totalMinutes % 60;
-      if (hours > 0) {
-        return "${hours}h${minutes.toString().padLeft(2, '0')}'";
-      }
-      return "$minutes'";
-    }
-
-    final String guestAddress = (customer['guestAddress'] as String?) ?? '';
-    final String khName = customer['name'] ?? 'Khách lẻ';
-    final String? dbPhone = customer['phone'] as String?;
-    final bool isShipOrder = tableName.startsWith('Giao Hàng');
-
-    pdf.addPage(
-      pw.Page(
-        pageFormat: pageFormat,
-        build: (ctx) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              if ((storeInfo['name'] ?? '').isNotEmpty)
-                pw.Center(
-                    child: pw.Text(storeInfo['name']!,
-                        style: pw.TextStyle(font: boldFont, fontSize: 16))),
-              if ((storeInfo['address'] ?? '').isNotEmpty)
-                pw.Center(
-                    child: pw.Text(storeInfo['address']!,
-                        style: pw.TextStyle(font: font, fontSize: 10),
-                        textAlign: pw.TextAlign.center)),
-              if ((storeInfo['phone'] ?? '').isNotEmpty)
-                pw.Center(
-                    child: pw.Text('SĐT: ${storeInfo['phone']}',
-                        style: pw.TextStyle(font: font, fontSize: 10))),
-              pw.SizedBox(height: 10),
-              pw.Center(
-                  child: pw.Text('$title - $tableName',
-                      style: pw.TextStyle(font: boldFont, fontSize: 14))),
-              pw.SizedBox(height: 10),
-              pw.Row(children: [
-                pw.Text('Thu ngân: $userName',
-                    style: pw.TextStyle(font: font, fontSize: 10)),
-              ]),
-
-              pw.Text('KH: $khName', style: pw.TextStyle(font: font, fontSize: 10)),
-              if (isShipOrder) ...[
-                pw.Text('SĐT: $dbPhone', style: pw.TextStyle(font: font, fontSize: 10)),
-                pw.Text('ĐC: $guestAddress', style: pw.TextStyle(font: font, fontSize: 10), maxLines: 2, overflow: pw.TextOverflow.clip),
-              ],
-
-              pw.Row(children: [
-                pw.Text('Giờ in: ${DateFormat('HH:mm dd/MM/yyyy').format(DateTime.now())}',
-                    style: pw.TextStyle(font: font, fontSize: 10)),
-              ]),
-              pw.SizedBox(height: 10),
-              pw.Row(children: [
-                pw.Container(
-                    width: 20,
-                    child: pw.Text('STT',
-                        style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                pw.Expanded(
-                    flex: 5,
-                    child: pw.Text('Tên Món',
-                        style: pw.TextStyle(font: boldFont, fontSize: 10),
-                        textAlign: pw.TextAlign.center)),
-                pw.Expanded(
-                    flex: 4,
-                    child: pw.Text(showPrices ? 'T.Tiền' : 'SL',
-                        style: pw.TextStyle(font: boldFont, fontSize: 10),
-                        textAlign: pw.TextAlign.right)),
-              ]),
-              pw.Divider(height: 2, thickness: 1),
-
-              ...items.asMap().entries.map((entry) {
-                final i = entry.key;
-                final item = entry.value;
-                final bool isLastItem = i == items.length - 1;
-                final bool isTimeBased = item.product.serviceSetup?['isTimeBased'] == true && item.priceBreakdown.isNotEmpty;
-
-                final bool priceHasChanged = (item.price != item.product.sellPrice) && !isTimeBased;
-                String discountText = '';
-                if (item.discountValue != null && item.discountValue! > 0) {
-                  if (item.discountUnit == '%') {
-                    discountText = "(-${formatNumber(item.discountValue!)}%)";
-                  } else {
-                    discountText = "(-${formatNumber(item.discountValue!)}đ)";
-                  }
-                }
-
-                String itemName = item.product.productName;
-                if (isTimeBased) {
-                  final totalMinutes = item.priceBreakdown.fold<int>(0, (tong, block) => tong + block.minutes);
-                  itemName += ' (${formatTotalMinutes(totalMinutes)})';
-                }
-
-                if (showPrices) {
-                  return pw.Column(children: [
-                    pw.Row(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Container(
-                              width: 20,
-                              child: pw.Text('${i + 1}.',
-                                  style: pw.TextStyle(
-                                      font: boldFont, fontSize: 10))),
-                          pw.Expanded(
-                              child: pw.RichText(
-                                text: pw.TextSpan(
-                                  style: pw.TextStyle(font: boldFont, fontSize: 10),
-                                  children: [
-                                    // 1. Tên SP
-                                    pw.TextSpan(text: itemName),
-
-                                    // 2. Đơn vị tính
-                                    if (item.selectedUnit.isNotEmpty)
-                                      pw.TextSpan(
-                                          text: ' (${item.selectedUnit})',
-                                          style: pw.TextStyle(fontSize: 9)
-                                      ),
-
-                                    // 3. Giá gốc gạch ngang
-                                    if (priceHasChanged)
-                                      pw.TextSpan(
-                                        text: ' ${currencyFormat.format(item.product.sellPrice)}',
-                                        style: pw.TextStyle(
-                                          fontSize: 9,
-                                          decoration: pw.TextDecoration.lineThrough,
-                                          decorationThickness: 2.0,
-                                        ),
-                                      ),
-
-                                    // 4. Chiết khấu
-                                    if (discountText.isNotEmpty)
-                                      pw.TextSpan(
-                                        text: ' $discountText',
-                                        style: pw.TextStyle(
-                                          fontSize: 9,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              )
-                          ),
-                        ]),
-
-                    if (isTimeBased)
-                      pw.Row(children: [
-                        pw.Container(width: 20),
-                        pw.Expanded(
-                            flex: 5,
-                            child: pw.Text(
-                              '${timeOnlyFormat.format(item.addedAt.toDate())} - ${timeOnlyFormat.format(item.addedAt.toDate().add(Duration(minutes: item.priceBreakdown.fold<int>(0, (tong, block) => tong + block.minutes))))}',
-                              style: pw.TextStyle(font: font, fontSize: 10),
-                            )),
-                        pw.Expanded(
-                            flex: 4,
-                            child: pw.Text(currencyFormat.format(item.subtotal),
-                                style: pw.TextStyle(font: font, fontSize: 10),
-                                textAlign: pw.TextAlign.right)),
-                      ])
-                    else
-                      pw.Row(children: [
-                        pw.Container(width: 20),
-                        pw.Expanded(
-                            flex: 5,
-                            child: pw.Text(
-                                '${quantityFormat.format(item.quantity)} x ${currencyFormat.format(item.price)}',
-                                style: pw.TextStyle(font: font, fontSize: 10))),
-                        pw.Expanded(
-                            flex: 4,
-                            child: pw.Text(currencyFormat.format(item.subtotal),
-                                style: pw.TextStyle(font: font, fontSize: 10),
-                                textAlign: pw.TextAlign.right)),
-                      ]),
-
-                    if (item.toppings.isNotEmpty)
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.only(left: 20),
-                        child: pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: item.toppings.entries
-                              .map((e) => pw.Text(
-                            '+ ${e.key.productName} ${quantityFormat.format(e.value)} x ${currencyFormat.format(e.key.sellPrice)}',
-                            style: pw.TextStyle(font: italicFont, fontSize: 9),
-                          )).toList(),
-                        ),
-                      ),
-
-                    _buildTimeBasedItemDetails(item, italicFont, currencyFormat),
-
-                    pw.Divider(
-                      height: 10,
-                      thickness: isLastItem ? 1.2 : 0.5,
-                      borderStyle: isLastItem ? pw.BorderStyle.solid : pw.BorderStyle.dashed,
-                    ),
-                  ]);
-                } else {
-                  return pw.Column(children: [
-                    pw.Row(children: [
-                      pw.Container(
-                          width: 25,
-                          child: pw.Text('${i + 1}.',
-                              style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                      pw.Expanded(
-                          flex: 6,
-                          child: pw.Text(itemName, style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                      pw.Container(
-                          width: 30,
-                          child: pw.Text(quantityFormat.format(item.quantity),
-                              style: pw.TextStyle(font: boldFont, fontSize: 10),
-                              textAlign: pw.TextAlign.right)),
-                    ]),
-                    pw.Divider(
-                      height: 1,
-                      thickness: isLastItem ? 1.2 : 0.5,
-                      borderStyle: isLastItem ? pw.BorderStyle.solid : pw.BorderStyle.dashed,
-                    ),
-                  ]);
-                }
-              }),
-
-              if (showPrices) ...[
-                pw.SizedBox(height: 10),
-                pw.Row(mainAxisAlignment: pw.MainAxisAlignment.end, children: [
-                  pw.Text('TỔNG CỘNG:',
-                      style: pw.TextStyle(font: boldFont, fontSize: 10)),
-                  pw.SizedBox(width: 10),
-                  pw.Text('${currencyFormat.format(totalToPrint)} VND',
-                      style: pw.TextStyle(font: boldFont, fontSize: 12)),
-                ]),
-              ],
-              pw.SizedBox(height: 10),
-              pw.Center(
-                  child: pw.Text('Cảm ơn quý khách!',
-                      style: pw.TextStyle(font: italicFont, fontSize: 12))),
-            ],
-          );
-        },
-      ),
-    );
-    return pdf.save();
-  }
-
-  Future<Uint8List> generateReceiptPdf({
-    required String title,
-    required Map<String, String> storeInfo,
-    required List<OrderItem> items,
-    required Map<String, dynamic> summary,
-  }) async {
-    final pdf = pw.Document();
-    await _ensureFontsLoaded();
-    final font = _font!;
-    final boldFont = _boldFont!;
-    final italicFont = _italicFont!;
-
-    const double printableWidthMm = 72;
-    final pageFormat = PdfPageFormat(
-      printableWidthMm * PdfPageFormat.mm,
-      double.infinity,
-      marginAll: 3 * PdfPageFormat.mm,
-    );
-    final qtyFmt = NumberFormat('#,##0.##', 'vi_VN');
-    final currencyFormat = NumberFormat('#,##0');
-    final timeOnlyFormat = DateFormat('HH:mm');
-    final percentFormat = NumberFormat('#,##0.##', 'vi_VN');
-
-    String formatTotalMinutes(int totalMinutes) {
-      if (totalMinutes <= 0) return "0'";
-      final hours = totalMinutes ~/ 60;
-      final minutes = totalMinutes % 60;
-      if (hours > 0) {
-        return "${hours}h${minutes.toString().padLeft(2, '0')}'";
-      }
-      return "$minutes'";
-    }
-
-    final double subtotal = (summary['subtotal'] as num?)?.toDouble() ?? 0.0;
-    final double discount = (summary['discount'] as num?)?.toDouble() ?? 0.0;
-    final String discountType = (summary['discountType'] as String?) ?? 'VND';
-    final double discountInput = (summary['discountInput'] as num?)?.toDouble() ?? 0.0;
-    final double pointsUsed = (summary['customerPointsUsed'] as num?)?.toDouble() ?? 0.0;
-    final double pointsValue = pointsUsed * 1000.0;
-    final double taxAmount = (summary['taxAmount'] as num?)?.toDouble() ?? 0.0;
-    final double totalPayable = (summary['totalPayable'] as num?)?.toDouble() ?? 0.0;
-    final double changeAmount = (summary['changeAmount'] as num?)?.toDouble() ?? 0.0;
-    final String? voucherCode = summary['voucherCode'] as String?;
-    final double voucherDiscount = (summary['voucherDiscount'] as num?)?.toDouble() ?? 0.0;
-    final rawSurcharges = summary['surcharges'];
-    final List surcharges = (rawSurcharges is List) ? rawSurcharges : const [];
-    final rawPayments = summary['payments'];
-    final Map<String, dynamic> payments = (rawPayments is Map) ? Map<String, dynamic>.from(rawPayments) : {};
-    final Map<String, dynamic> customer = (summary['customer'] is Map) ? Map<String, dynamic>.from(summary['customer']) : {};
-
-    String taxLabel = 'Thuế:';
-    if (taxAmount > 0 && summary['items'] is List) {
-      final summaryItems = summary['items'] as List;
-      // Quét item đầu tiên có thuế để xác định loại
-      for (var item in summaryItems) {
-        if (item is Map && item.containsKey('taxKey')) {
-          final String key = item['taxKey'].toString();
-          if (key.startsWith('HKD_')) {
-            taxLabel = 'Thuế gộp:'; // Nhóm 2 HKD (Trực tiếp)
-            break;
-          } else if (key.startsWith('VAT_')) {
-            taxLabel = 'VAT:'; // Nhóm 3 HKD hoặc Doanh nghiệp (Khấu trừ)
-            break;
+  for (int y = 0; y < height; y++) {
+    for (int i = 0; i < bytesPerLine; i++) {
+      int byte = 0;
+      for (int bit = 0; bit < 8; bit++) {
+        int x = i * 8 + bit;
+        if (x < width) {
+          final pixel = decoded.getPixel(x, y);
+          final luminance = img.getLuminance(pixel);
+          if (luminance < 180) {
+            byte |= (1 << (7 - bit));
           }
         }
       }
+      buffer.add(byte);
     }
+  }
+  buffer.addAll([0x1D, 0x56, 0x41, 0x00]); // Cut
+  return buffer;
+}
 
-    final dynamic rawStart = summary['startTime'] ?? summary['startTimeIso'];
-    DateTime? startTime;
-    if (rawStart is Timestamp) {
-      startTime = rawStart.toDate();
-    } else if (rawStart is String && rawStart.isNotEmpty) {
-      try { startTime = DateTime.parse(rawStart); } catch (e) { debugPrint('Không thể parse startTime: $rawStart ($e)'); }
-    }
-    final dynamic rawCreatedAt = summary['createdAt'];
-    DateTime? createdAtTime;
-    if (rawCreatedAt is Timestamp) {
-      createdAtTime = rawCreatedAt.toDate();
-    } else if (rawCreatedAt is String && rawCreatedAt.isNotEmpty) {
-      try { createdAtTime = DateTime.parse(rawCreatedAt); } catch (e) { debugPrint('Không thể parse createdAtTime: $rawCreatedAt ($e)'); }
-    }
-    final DateTime checkoutTime = createdAtTime ?? DateTime.now();
-    final double totalPaidFromDB = payments.values.fold(0.0, (a, b) => a + (b as num).toDouble());
-    final double debtAmount = totalPayable - totalPaidFromDB;
+List<int> _processLabelImageInIsolate(Map<String, dynamic> params) {
+  final Uint8List imageBytes = params['bytes'];
+  final double widthMm = params['width'];
+  final double heightMm = params['height'];
 
-    final Map<String, dynamic>? bankDetails =
-    (summary['bankDetails'] as Map<String, dynamic>?);
+  final decodedImage = img.decodeImage(imageBytes);
+  if (decodedImage == null) return [];
 
-    final String? eInvoiceFullUrl = summary['eInvoiceFullUrl'] as String?;
-    final String? eInvoiceCode = summary['eInvoiceCode'] as String?;
-    final String? eInvoiceMst = summary['eInvoiceMst'] as String?;
+  final int targetWidth = (widthMm * 8).toInt();
+  final int targetHeight = (heightMm * 8).toInt();
 
-    pw.ImageProvider? qrImage;
+  final resizedImage = img.copyResize(decodedImage,
+      width: targetWidth,
+      height: targetHeight,
+      interpolation: img.Interpolation.nearest);
 
-    final String guestAddress = (customer['guestAddress'] as String?) ?? '';
-    final String khName = customer['name'] ?? 'Khách lẻ';
-    final String? dbPhone = customer['phone'] as String?;
-    final String? billCode = summary['billCode'] as String?;
-    final String mainTitle = '$title - $tableName';
-    final bool isShipOrder = tableName.startsWith('Giao Hàng');
+  List<int> commands = [];
+  int w = widthMm.toInt();
+  int h = heightMm.toInt();
 
-    if (bankDetails != null && totalPayable > 0) {
-      final bin = bankDetails['bankBin'] ?? '';
-      final acc = bankDetails['bankAccount'] ?? '';
-      if (bin.isNotEmpty && acc.isNotEmpty) {
-        final bankInfo = vietnameseBanks.firstWhere(
-              (b) => b.bin == bin,
-          orElse: () => BankInfo(name: '', shortName: '', bin: ''),
-        );
+  String cmd = 'SIZE $w mm, $h mm\r\nGAP 2 mm, 0 mm\r\nDIRECTION 1\r\nCLS\r\n';
+  commands.addAll(utf8.encode(cmd));
 
-        if (bankInfo.shortName.isNotEmpty) {
-          final amount = totalPayable.toInt().toString();
-          final addInfo = Uri.encodeComponent(tableName);
-          final compactUrl = 'https://img.vietqr.io/image/${bankInfo.shortName}-$acc-compact.png?amount=$amount&addInfo=$addInfo';
-          try {
-            qrImage = await networkImage(compactUrl);
-          } catch (e) {
-            debugPrint("PrintingService: Lỗi tải ảnh QR để in: $e");
-            qrImage = null;
+  int widthPx = resizedImage.width;
+  int heightPx = resizedImage.height;
+  int widthBytes = (widthPx + 7) ~/ 8;
+
+  String bitmapHeader = 'BITMAP 0,0,$widthBytes,$heightPx,0,';
+  commands.addAll(utf8.encode(bitmapHeader));
+
+  List<int> bitmapData = [];
+  for (int y = 0; y < heightPx; y++) {
+    for (int i = 0; i < widthBytes; i++) {
+      int byte = 0xFF;
+      for (int j = 0; j < 8; j++) {
+        int x = i * 8 + j;
+        if (x < widthPx) {
+          final pixel = resizedImage.getPixel(x, y);
+          if (pixel.luminance < 128) {
+            byte &= ~(1 << (7 - j));
           }
         }
       }
+      bitmapData.add(byte);
     }
-
-    pdf.addPage(
-      pw.Page(
-        pageFormat: pageFormat,
-        build: (ctx) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              if (storeInfo['name']?.isNotEmpty == true)
-                pw.Center(child: pw.Text(storeInfo['name']!, style: pw.TextStyle(font: boldFont, fontSize: 16))),
-              if (storeInfo['address']?.isNotEmpty == true)
-                pw.Center(child: pw.Text(storeInfo['address']!, style: pw.TextStyle(font: font, fontSize: 10), textAlign: pw.TextAlign.center)),
-              if ((storeInfo['phone'] ?? '').isNotEmpty)
-                pw.Center(child: pw.Text('ĐT: ${storeInfo['phone']!}', style: pw.TextStyle(font: font, fontSize: 10))),
-              pw.SizedBox(height: 8),
-
-              pw.Center(child: pw.Text(mainTitle, style: pw.TextStyle(font: boldFont, fontSize: 14))),
-
-              if (billCode != null && billCode.isNotEmpty)
-                pw.Center(child: pw.Text(billCode, style: pw.TextStyle(font: font, fontSize: 10))),
-
-              pw.SizedBox(height: 8),
-              pw.Text('KH: $khName', style: pw.TextStyle(font: font, fontSize: 10)),
-
-              if (isShipOrder) ...[
-                pw.Text('SĐT: $dbPhone', style: pw.TextStyle(font: font, fontSize: 10)),
-                pw.Text('ĐC: $guestAddress', style: pw.TextStyle(font: font, fontSize: 10), maxLines: 2, overflow: pw.TextOverflow.clip),
-              ],
-
-              if (!isShipOrder) ...[
-                if (startTime != null)
-                  pw.Text('Giờ vào: ${DateFormat('HH:mm dd/MM/yyyy').format(startTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
-                pw.Text('Giờ ra: ${DateFormat('HH:mm dd/MM/yyyy').format(checkoutTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
-              ] else ...[
-                pw.Text('Giờ in: ${DateFormat('HH:mm dd/MM/yyyy').format(checkoutTime)}', style: pw.TextStyle(font: font, fontSize: 10)),
-              ],
-              pw.Text('Thu ngân: $userName', style: pw.TextStyle(font: font, fontSize: 10)),
-              pw.SizedBox(height: 8),
-
-              pw.Row(children: [
-                pw.Container(width: 20, child: pw.Text('STT', style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                pw.Expanded(flex: 5, child: pw.Text('Tên Món (Thuế)', style: pw.TextStyle(font: boldFont, fontSize: 10), textAlign: pw.TextAlign.center)),
-                pw.Expanded(flex: 4, child: pw.Text('T.Tiền', style: pw.TextStyle(font: boldFont, fontSize: 10), textAlign: pw.TextAlign.right)),
-              ]),
-              pw.Divider(height: 2, thickness: 0.5),
-              pw.SizedBox(height: 4),
-
-              ...items.asMap().entries.map((entry) {
-                final i = entry.key;
-                final it = entry.value;
-                final bool isLastItem = i == items.length - 1;
-                final bool isTimeBased = it.product.serviceSetup?['isTimeBased'] == true && it.priceBreakdown.isNotEmpty;
-
-                final bool priceHasChanged = (it.price != it.product.sellPrice) && !isTimeBased;
-                String discountText = '';
-                if (it.discountValue != null && it.discountValue! > 0) {
-                  if (it.discountUnit == '%') {
-                    discountText = "[-${formatNumber(it.discountValue!)}%]";
-                  } else {
-                    discountText = "[-${formatNumber(it.discountValue!)}đ]";
-                  }
-                }
-
-                String itemName = it.product.productName;
-
-                double itemTaxRate = 0;
-                if (summary['items'] is List) {
-                  final summaryItem = (summary['items'] as List)[i];
-                  if (summaryItem is Map) {
-                    itemTaxRate = (summaryItem['taxRate'] as num?)?.toDouble() ?? 0.0;
-                  }
-                }
-
-                String taxRateStr = '';
-                if (itemTaxRate > 0) {
-                  double percentValue = itemTaxRate * 100;
-                  taxRateStr = " (${percentFormat.format(percentValue)}%)";
-                }
-
-                if (isTimeBased) {
-                  final totalMinutes = it.priceBreakdown.fold<int>(0, (tong, block) => tong + block.minutes);
-                  itemName += ' (${formatTotalMinutes(totalMinutes)})';
-                }
-
-                return pw.Column(children: [
-                  pw.Row(children: [
-                    pw.Container(width: 20, child: pw.Text('${i + 1}.', style: pw.TextStyle(font: boldFont, fontSize: 10))),
-                    pw.Expanded(
-                        child: pw.RichText(
-                          text: pw.TextSpan(
-                            style: pw.TextStyle(font: boldFont, fontSize: 10),
-                            children: [
-                              // 1. Tên SP
-                              pw.TextSpan(text: itemName),
-
-                              // 2. Đơn vị tính (Đưa lên trước thuế)
-                              if (it.selectedUnit.isNotEmpty)
-                                pw.TextSpan(
-                                    text: ' - ${it.selectedUnit}',
-                                    style: pw.TextStyle(fontSize: 9)
-                                ),
-
-                              // 3. % Thuế (Nằm sau ĐVT)
-                              if (taxRateStr.isNotEmpty)
-                                pw.TextSpan(
-                                  text: taxRateStr,
-                                  style: pw.TextStyle(fontSize: 9),
-                                ),
-
-                              // 4. Giá gốc gạch ngang
-                              if (priceHasChanged)
-                                pw.TextSpan(
-                                  text: ' ${currencyFormat.format(it.product.sellPrice)}',
-                                  style: pw.TextStyle(
-                                    fontSize: 9,
-                                    decoration: pw.TextDecoration.lineThrough,
-                                    decorationThickness: 2.0,
-                                  ),
-                                ),
-
-                              // 5. Chiết khấu
-                              if (discountText.isNotEmpty)
-                                pw.TextSpan(
-                                  text: ' $discountText',
-                                  style: pw.TextStyle(
-                                    fontSize: 9,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        )
-                    ),
-                  ]),
-
-                  if (isTimeBased)
-                    pw.Row(children: [
-                      pw.Container(width: 20),
-                      pw.Expanded(
-                          flex: 5,
-                          child: pw.Text(
-                            '${timeOnlyFormat.format(it.addedAt.toDate())} - ${timeOnlyFormat.format(it.addedAt.toDate().add(Duration(minutes: it.priceBreakdown.fold<int>(0, (tong, block) => tong + block.minutes))))}',
-                            style: pw.TextStyle(font: font, fontSize: 10),
-                          )),
-                      pw.Expanded(
-                          flex: 4,
-                          child: pw.Text(formatNumber(it.subtotal),
-                              style: pw.TextStyle(font: font, fontSize: 10),
-                              textAlign: pw.TextAlign.right)),
-                    ])
-                  else
-                    pw.Row(children: [
-                      pw.Container(width: 20),
-                      pw.Expanded(flex: 5, child: pw.Text('${qtyFmt.format(it.quantity)} x ${formatNumber(it.price)}', style: pw.TextStyle(font: font, fontSize: 10))),
-                      pw.Expanded(flex: 4, child: pw.Text(formatNumber(it.subtotal), style: pw.TextStyle(font: font, fontSize: 10), textAlign: pw.TextAlign.right)),
-                    ]),
-
-                  if (it.toppings.isNotEmpty)
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.only(left: 20),
-                      child: pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: it.toppings.entries
-                            .map((e) => pw.Text(
-                          '+ ${e.key.productName} ${qtyFmt.format(e.value)} x ${formatNumber(e.key.sellPrice)}',
-                          style: pw.TextStyle(font: italicFont, fontSize: 9),
-                        )).toList(),
-                      ),
-                    ),
-
-                  if (it.note.nullIfEmpty != null)
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.only(left: 20),
-                      child: pw.Row(
-                        children: [
-                          pw.Text(
-                            '(${it.note!})',
-                            style: pw.TextStyle(
-                              font: italicFont,
-                              fontSize: 9,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  _buildTimeBasedItemDetails(it, italicFont, currencyFormat),
-
-                  if (!isLastItem)
-                    pw.Divider(
-                      height: 8,
-                      thickness: 0.5,
-                      borderStyle: pw.BorderStyle.dashed,
-                    ),
-                ]);
-              }),
-
-              pw.Divider(height: 4, thickness: 0.5),
-              pw.SizedBox(height: 8),
-
-              _kvRow('Tổng cộng:', '${formatNumber(subtotal)} đ'),
-
-              if (taxAmount > 0)
-                _kvRow(
-                    taxLabel,
-                    '+ ${currencyFormat.format(taxAmount)} đ'
-                ),
-
-              if (discount > 0)
-                _kvRow('Chiết khấu: ${discountType == '%' ? ' (${formatNumber(discountInput)}%)' : ''}', '- ${formatNumber(discount)} đ'),
-              if (voucherDiscount > 0)
-                _kvRow('Voucher (${voucherCode ?? ''}):', '- ${formatNumber(voucherDiscount)} đ'),
-              if (pointsValue > 0)
-                _kvRow('Điểm thưởng:', '- ${formatNumber(pointsValue)} đ'),
-
-              if (surcharges.isNotEmpty) ...[
-                ...surcharges.map((s) {
-                  final name = s['name']?.toString() ?? 'Phụ thu';
-                  final bool isPercent = s['isPercent'] == true;
-                  final amount = (s['amount'] as num?)?.toDouble() ?? 0.0;
-                  final computedValue = isPercent ? (subtotal * amount / 100) : amount;
-                  final label = isPercent ? '$name (${formatNumber(amount)}%)' : name;
-                  return _kvRow(label, '+ ${formatNumber(computedValue)} đ');
-                }),
-              ],
-              pw.SizedBox(height: 8),
-              _kvRow('Thành tiền:', '${formatNumber(totalPayable)} đ'),
-              if (title == 'HÓA ĐƠN') ...[
-                if (payments.isNotEmpty) ...[
-                  pw.Padding(
-                    padding: const pw.EdgeInsets.only(top: 0),
-                    child: pw.Text(
-                      'Phương thức thanh toán:',
-                      style: pw.TextStyle(font: font, fontSize: 10),
-                    ),
-                  ),
-                  ...payments.entries.map((entry) {
-                    final methodName = entry.key;
-                    final methodAmount = (entry.value as num?)?.toDouble() ?? 0.0;
-                    return _kvRow(
-                        '- $methodName:',
-                        '${formatNumber(methodAmount)} đ',
-                        small: true
-                    );
-                  }),
-                ],
-                if (changeAmount > 0)
-                  _kvRow('Tiền thừa:', '${formatNumber(changeAmount)} đ'),
-                if (debtAmount > 0)
-                  _kvRow('Dư nợ:', '${formatNumber(debtAmount)} đ'),
-              ],
-
-              if (qrImage != null) ...[
-                pw.SizedBox(height: 10),
-                pw.Center(
-                  child: pw.Text('Quét mã để thanh toán',
-                      style: pw.TextStyle(font: font, fontSize: 10)),
-                ),
-                pw.SizedBox(height: 4),
-                pw.Center(
-                  child: pw.Image(
-                    qrImage,
-                    width: 100,
-                    height: 100,
-                  ),
-                ),
-              ],
-
-              pw.SizedBox(height: 10),
-              pw.Center(child: pw.Text('Cảm ơn quý khách!', style: pw.TextStyle(font: italicFont, fontSize: 10))),
-
-              if (eInvoiceFullUrl != null && eInvoiceFullUrl.isNotEmpty) ...[
-                pw.SizedBox(height: 8),
-                pw.Divider(height: 2, thickness: 0.5, borderStyle: pw.BorderStyle.dashed),
-                pw.SizedBox(height: 8),
-                pw.Center(
-                  child: pw.Text(
-                    'TRA CỨU HÓA ĐƠN ĐIỆN TỬ',
-                    style: pw.TextStyle(font: boldFont, fontSize: 9),
-                  ),
-                ),
-                pw.SizedBox(height: 4),
-                pw.Builder(
-                    builder: (context) {
-                      String qrData = eInvoiceFullUrl;
-
-                      if (eInvoiceMst != null && eInvoiceMst.isNotEmpty &&
-                          eInvoiceCode != null && eInvoiceCode.isNotEmpty) {
-
-                        final uri = Uri.tryParse(eInvoiceFullUrl);
-                        final baseUrl = uri != null
-                            ? '${uri.scheme}://${uri.host}${uri.path}'
-                            : eInvoiceFullUrl;
-                        qrData = '$baseUrl?taxCode=$eInvoiceMst&reservationCode=$eInvoiceCode';
-                      }
-
-                      return pw.Center(
-                        child: pw.BarcodeWidget(
-                          barcode: pw.Barcode.qrCode(),
-                          data: qrData,
-                          width: 60,
-                          height: 60,
-                        ),
-                      );
-                    }
-                ),
-                pw.SizedBox(height: 4),
-                pw.Center(
-                  child: pw.Text(
-                    'MST bên bán: $eInvoiceMst',
-                    style: pw.TextStyle(font: font, fontSize: 9),
-                  ),
-                ),
-                pw.Center(
-                  child: pw.Text(
-                    'Mã số bí mật: $eInvoiceCode',
-                    style: pw.TextStyle(font: font, fontSize: 9),
-                  ),
-                ),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-    return pdf.save();
   }
-
-  pw.Widget _kvRow(
-      String key,
-      String value, {
-        bool bold = false,
-        bool big = false,
-        bool small = false,
-        PdfColor? color,
-        pw.Font? boldFont,
-      }) {
-    final fs = big ? 12 : (small ? 9 : 10);
-    final normalFont = _font!;
-    final effectiveBold = boldFont ?? _boldFont!;
-
-    return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      children: [
-        pw.Text(key,
-            style: pw.TextStyle(
-              font: bold ? effectiveBold : normalFont,
-              fontSize: fs.toDouble(),
-              color: color ?? PdfColors.black,
-            )),
-        pw.Text(value,
-            style: pw.TextStyle(
-              font: effectiveBold,
-              fontSize: fs.toDouble(),
-              color: color ?? PdfColors.black,
-            )),
-      ],
-    );
-  }
-
-  pw.Widget _buildTimeBasedItemDetails(
-      OrderItem item,
-      pw.Font italicFont,
-      NumberFormat currencyFormat,
-      ) {
-    if (item.product.serviceSetup?['isTimeBased'] != true ||
-        item.priceBreakdown.isEmpty) {
-      return pw.SizedBox.shrink();
-    }
-
-    final timeFormat = DateFormat('HH:mm dd/MM');
-
-    String formatMinutes(int totalMinutes) {
-      if (totalMinutes <= 0) return "0'";
-      final hours = totalMinutes ~/ 60;
-      final minutes = totalMinutes % 60;
-      if (hours > 0) {
-        return "${hours}h${minutes.toString().padLeft(2, '0')}'";
-      }
-      return "$minutes'";
-    }
-
-    return pw.Padding(
-      padding: const pw.EdgeInsets.only(left: 20),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: item.priceBreakdown.map((block) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                '${timeFormat.format(block.startTime)} -> ${timeFormat.format(block.endTime)}',
-                style: pw.TextStyle(font: italicFont, fontSize: 9),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.only(left: 10),
-                child: pw.Text(
-                  "${formatMinutes(block.minutes)} x ${currencyFormat.format(block.ratePerHour)} = ${currencyFormat.format(block.cost)}",
-                  style: pw.TextStyle(font: italicFont, fontSize: 9),
-                ),
-              )
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
+  commands.addAll(bitmapData);
+  commands.addAll(utf8.encode('\r\nPRINT 1,1\r\n'));
+  return commands;
 }

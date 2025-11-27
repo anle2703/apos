@@ -10,6 +10,7 @@ import '../../widgets/custom_text_form_field.dart';
 import 'package:app_4cash/widgets/bank_list.dart';
 import '../../services/settings_service.dart';
 import '../../models/store_settings_model.dart';
+import 'package:app_4cash/screens/sales/payment_screen.dart';
 
 extension PaymentMethodTypeExtension on PaymentMethodType {
   String get vietnameseName {
@@ -39,17 +40,15 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
   // Thêm SettingsService
   final SettingsService _settingsService = SettingsService();
 
-  // --- THÊM HÀM MỚI: Để đặt/gỡ PTTT mặc định ---
   Future<void> _setDefaultPaymentMethod(String methodId, bool isCurrentlyDefault) async {
     try {
-      // Nếu PTTT này đang là mặc định, bấm lần nữa sẽ gỡ nó (quay về Tiền mặt)
       final dynamic newDefaultId = isCurrentlyDefault ? null : methodId;
 
       await _settingsService.updateStoreSettings(
           widget.currentUser.ownerUid ?? widget.currentUser.uid, // <-- SỬA DÒNG NÀY
           {'defaultPaymentMethodId': newDefaultId}
       );
-
+      PaymentScreen.clearCache();
       ToastService().show(
           message: isCurrentlyDefault ? "Đã gỡ PTTT mặc định" : "Đã đặt làm PTTT mặc định",
           type: ToastType.success
@@ -319,6 +318,8 @@ class _PaymentMethodFormState extends State<_PaymentMethodForm> {
       } else {
         await widget.firestoreService.updatePaymentMethod(newMethod);
       }
+
+      PaymentScreen.clearCache();
 
       ToastService()
           .show(message: 'Đã lưu PTTT thành công', type: ToastType.success);

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../theme/app_theme.dart';
@@ -15,11 +14,15 @@ import '../models/user_model.dart';
 import '../models/bill_model.dart';
 import '../services/firestore_service.dart';
 import '../services/toast_service.dart';
-import '../services/printing_service.dart';
 import '../models/print_job_model.dart';
 import '../services/print_queue_service.dart';
 import '../widgets/app_dropdown.dart';
 import 'package:omni_datetime_picker/omni_datetime_picker.dart';
+import 'package:screenshot/screenshot.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import '../models/receipt_template_model.dart';
+import '../widgets/receipt_widget.dart';
 
 class BillService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -796,52 +799,64 @@ class BillReceiptDialog extends StatefulWidget {
 }
 
 class _BillReceiptDialogState extends State<BillReceiptDialog> {
-  ImageProvider? _imageProvider;
-  Uint8List? _pdfBytes;
-  bool _isLoading = true;
+  final ScreenshotController _screenshotController = ScreenshotController();
+  bool _isLoadingSettings = true;
+  ReceiptTemplateModel? _templateSettings;
 
   bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   @override
   void initState() {
     super.initState();
-    _initialize();
+    _loadSettings();
   }
 
-  Future<void> _initialize() async {
-    try {
-      final pdfBytes = await _generatePdfBytes();
-      final raster = await Printing.raster(pdfBytes, pages: [0], dpi: 203).first;
-      final image = await raster.toImage();
-      final pngBytes = await image.toByteData(format: ui.ImageByteFormat.png);
-
-      if (mounted) {
-        setState(() {
-          _pdfBytes = pdfBytes;
-          if (pngBytes != null) {
-            _imageProvider = MemoryImage(pngBytes.buffer.asUint8List());
-          }
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        debugPrint("Lỗi khi tạo ảnh bill: $e");
-      }
-    }
+  Future<void> _loadSettings() async {
+    setState(() => _isLoadingSettings = false);
   }
 
   Map<String, dynamic> _buildSummaryMap() {
     final eInvoiceInfo = widget.bill.eInvoiceInfo;
 
+    // 1. Xử lý hiển thị Phụ thu
+    final List<Map<String, dynamic>> formattedSurcharges = widget.bill.surcharges.map((s) {
+      final String name = s['name'] ?? '';
+      final double amount = (s['amount'] as num?)?.toDouble() ?? 0.0;
+      final bool isPercent = s['isPercent'] == true;
+
+      if (isPercent) {
+        final double calculatedAmount = widget.bill.subtotal * (amount / 100);
+        return {
+          'name': '$name (${formatNumber(amount)}%)',
+          'amount': calculatedAmount,
+          'isPercent': true,
+        };
+      } else {
+        return {
+          'name': name,
+          'amount': amount,
+          'isPercent': false,
+        };
+      }
+    }).toList();
+
+    // 2. Xử lý hiển thị Chiết khấu (Logic MỚI THÊM)
+    String discountName = 'Chiết khấu';
+    if (widget.bill.discountType == '%') {
+      discountName = 'Chiết khấu (${formatNumber(widget.bill.discountInput)}%)';
+    }
+
     return {
       'billCode': widget.bill.billCode,
       'subtotal': widget.bill.subtotal,
+
+      // Các trường liên quan đến chiết khấu
       'discount': widget.bill.discount,
       'discountType': widget.bill.discountType,
       'discountInput': widget.bill.discountInput,
-      'surcharges': widget.bill.surcharges,
+      'discountName': discountName, // <--- KEY MỚI ĐỂ IN TÊN KÈM %
+
+      'surcharges': formattedSurcharges,
       'taxPercent': widget.bill.taxPercent,
       'taxAmount': widget.bill.taxAmount,
       'totalPayable': widget.bill.totalPayable,
@@ -866,15 +881,29 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
     };
   }
 
-  Future<Uint8List> _generatePdfBytes() async {
-    final printingService = PrintingService(
-        tableName: widget.bill.tableName, userName: widget.bill.createdByName ?? 'N/A');
-    return printingService.generateReceiptPdf(
-      title: 'HÓA ĐƠN', storeInfo: widget.storeInfo,
-      items: widget.bill.items.whereType<Map<String, dynamic>>()
-          .map((itemData) => OrderItem.fromMap(itemData)).toList(),
-      summary: _buildSummaryMap(),
-    );
+  Future<Uint8List?> _capturePdf() async {
+    try {
+      // 1. Chụp ảnh Widget
+      final Uint8List? imageBytes = await _screenshotController.capture(
+        delay: const Duration(milliseconds: 20),
+        pixelRatio: 2.5,
+      );
+      if (imageBytes == null) return null;
+
+      // 2. Tạo PDF chứa ảnh
+      final pdf = pw.Document();
+      final image = pw.MemoryImage(imageBytes);
+      pdf.addPage(pw.Page(
+        pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 0),
+        build: (ctx) {
+          return pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain));
+        },
+      ));
+      return await pdf.save();
+    } catch (e) {
+      debugPrint("Lỗi tạo PDF từ widget: $e");
+      return null;
+    }
   }
 
   Future<void> _handleCancel(BuildContext context) async {
@@ -902,13 +931,10 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       },
     );
 
-    if (confirmed != true) {
-      return;
-    }
+    if (confirmed != true) return;
 
     try {
       await BillService().cancelBillAndReverseTransactions(widget.bill, widget.currentUser.storeId);
-
       ToastService().show(message: "Hóa đơn đã được hủy và hoàn tác", type: ToastType.success);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -918,16 +944,13 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   }
 
   Future<void> _confirmAndDeleteBill(BuildContext context) async {
-    // Chỉ thực hiện nếu hóa đơn đã bị hủy
     if (widget.bill.status != 'cancelled') return;
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Xóa Hóa đơn vĩnh viễn'),
-          content: const Text(
-              'Bạn có chắc chắn muốn XÓA VĨNH VIỄN hóa đơn này? Hành động này không thể khôi phục.'),
+          content: const Text('Bạn có chắc chắn muốn XÓA VĨNH VIỄN hóa đơn này? Hành động này không thể khôi phục.'),
           actions: <Widget>[
             TextButton(
               child: const Text('Không'),
@@ -941,33 +964,20 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
         );
       },
     );
-    if (confirmed == true) {
-      if (context.mounted) {
-        await _performDeleteBill(context);
-      }
+    if (confirmed == true && context.mounted) {
+      await _performDeleteBill(context);
     }
   }
 
   Future<void> _performDeleteBill(BuildContext context) async {
-    if (widget.bill.status != 'cancelled') return;
-    setState(() => _isLoading = true); // Dùng biến _isLoading để hiển thị loading
-
     try {
       await BillService().deleteBillPermanently(widget.bill.id);
-
       if (context.mounted) {
         ToastService().show(message: 'Đã xóa vĩnh viễn hóa đơn!', type: ToastType.success);
-        Navigator.of(context).pop(); // Thoát khỏi dialog sau khi xóa
+        Navigator.of(context).pop();
       }
     } catch (e) {
-      if (context.mounted) {
-        ToastService().show(message: 'Lỗi khi xóa hóa đơn: $e', type: ToastType.error);
-      }
-    } finally {
-      // Đảm bảo tắt loading kể cả khi có lỗi
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      ToastService().show(message: 'Lỗi khi xóa hóa đơn: $e', type: ToastType.error);
     }
   }
 
@@ -982,12 +992,20 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   }
 
   Future<void> _shareReceipt() async {
-    if (_pdfBytes == null) return;
-    await Printing.sharePdf(bytes: _pdfBytes!, filename: 'HoaDon_${widget.bill.billCode}.pdf');
+    final bytes = await _capturePdf();
+    if (bytes == null) {
+      ToastService().show(message: "Lỗi tạo file chia sẻ", type: ToastType.error);
+      return;
+    }
+    await Printing.sharePdf(bytes: bytes, filename: 'HoaDon_${widget.bill.billCode}.pdf');
   }
 
   Future<void> _savePdf() async {
-    if (_pdfBytes == null) return;
+    final bytes = await _capturePdf();
+    if (bytes == null) {
+      ToastService().show(message: "Lỗi tạo file PDF", type: ToastType.error);
+      return;
+    }
     try {
       final String? filePath = await FilePicker.platform.saveFile(
         dialogTitle: 'Lưu hóa đơn PDF', fileName: 'HoaDon_${widget.bill.billCode}.pdf',
@@ -995,17 +1013,32 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       );
       if (filePath != null) {
         final file = File(filePath);
-        await file.writeAsBytes(_pdfBytes!);
+        await file.writeAsBytes(bytes);
         ToastService().show(message: "Đã lưu hóa đơn thành công!", type: ToastType.success);
       }
     } catch (e) {
       ToastService().show(message: "Lỗi khi lưu file: $e", type: ToastType.error);
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final bool isCancelled = widget.bill.status == 'cancelled';
+
+    // Widget dùng để in (Scale chuẩn 1.8 mặc định trong ReceiptWidget)
+    final Widget receiptWidget = ReceiptWidget(
+      title: 'HÓA ĐƠN',
+      storeInfo: widget.storeInfo,
+      items: widget.bill.items.whereType<Map<String, dynamic>>()
+          .map((itemData) => OrderItem.fromMap(itemData)).toList(),
+      summary: _buildSummaryMap(),
+      userName: widget.bill.createdByName ?? 'N/A',
+      tableName: widget.bill.tableName,
+      showPrices: true,
+      isSimplifiedMode: false,
+      templateSettings: _templateSettings,
+    );
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -1013,39 +1046,45 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 380,
-          maxHeight: screenHeight * 0.9,
+          maxWidth: 400, // Giới hạn chiều rộng Dialog
+          maxHeight: screenHeight * 0.85,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // === PHẦN NỘI DUNG CÓ THỂ CUỘN ===
             Expanded(
               child: Container(
-                decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12.0)),
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _imageProvider == null
-                    ? const Center(child: Text("Lỗi tạo ảnh hóa đơn."))
-                // SingleChildScrollView chỉ bao bọc hình ảnh
-                    : SingleChildScrollView(
-                  child: Padding(
-                    padding:
-                    const EdgeInsets.symmetric(vertical: 20),
-                    child: Image(image: _imageProvider!),
+                clipBehavior: Clip.antiAlias, // Bo góc mượt mà
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12.0)),
+                child: Screenshot(
+                  controller: _screenshotController,
+                  child: SingleChildScrollView(
+                    child: Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+
+                      // --- SỬA Ở ĐÂY: THU NHỎ GIAO DIỆN ---
+                      child: Center(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown, // Tự động thu nhỏ nếu quá to
+                          child: SizedBox(
+                            width: 550, // Ép chiều rộng chuẩn của Bill để layout không bị vỡ
+                            child: receiptWidget,
+                          ),
+                        ),
+                      ),
+                      // -------------------------------------
+
+                    ),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            // === PHẦN NÚT BẤM CỐ ĐỊNH ===
+            // ... (Phần nút bấm giữ nguyên)
             Container(
-              width: 380,
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12.0)),
+              width: 400, // Đồng bộ width với Dialog
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12.0)),
               padding: const EdgeInsets.symmetric(vertical: 4.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1065,7 +1104,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
                     child: const Text("In lại"),
                   ),
                   TextButton(
-                    onPressed: _pdfBytes == null ? null : (_isDesktop ? _savePdf : _shareReceipt),
+                    onPressed: _isDesktop ? _savePdf : _shareReceipt,
                     child: Text(_isDesktop ? "Lưu PDF" : "Chia sẻ"),
                   ),
                   TextButton(
