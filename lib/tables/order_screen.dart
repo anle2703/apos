@@ -1079,58 +1079,110 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() => _isPaymentLoading = true);
 
     try {
-      // BƯỚC 1: ĐẢM BẢO CÓ ORDER ID
-      // Nếu là đơn mới tinh (chưa từng lưu), bắt buộc phải await để lấy ID từ Server.
-      // (Thao tác này thường rất nhanh, chỉ chậm khi mạng quá yếu).
+      // 1. CHUẨN BỊ DỮ LIỆU "LẠC QUAN" (OPTIMISTIC DATA)
+
       if (_currentOrder == null) {
-        bool created = await _saveOrder();
-        if (!created || _currentOrder == null) {
-          ToastService().show(
-              message: "Không thể khởi tạo đơn hàng.", type: ToastType.error);
-          setState(() => _isPaymentLoading = false);
-          return;
+        // --- TRƯỜNG HỢP: ĐƠN MỚI TINH ---
+
+        final DocumentReference orderRef = _firestoreService.getOrderReference(widget.table.id);
+        final String newOrderId = orderRef.id;
+
+        // Chuẩn bị danh sách món ăn (sentQuantity = quantity)
+        final List<Map<String, dynamic>> optimisticItems = _displayCart.values.map((item) {
+          return item.copyWith(sentQuantity: item.quantity).toMap();
+        }).toList();
+
+        final double currentTotal = _totalAmount;
+
+        // TẠO MAP DỮ LIỆU TRƯỚC
+        final Map<String, dynamic> optimisticData = {
+          'id': newOrderId,
+          'tableId': widget.table.id,
+          'tableName': widget.table.tableName,
+          'storeId': widget.currentUser.storeId,
+          'status': 'active',
+          'startTime': Timestamp.now(),
+          'items': optimisticItems,
+          'totalAmount': currentTotal,
+          'customerId': _selectedCustomer?.id,
+          'customerName': _selectedCustomer?.name,
+          'customerPhone': _selectedCustomer?.phone,
+          'numberOfCustomers': _numberOfCustomers,
+          'version': 1,
+          'createdAt': Timestamp.now(),
+          'createdByUid': widget.currentUser.uid,
+          'createdByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
+        };
+
+        // SỬA LỖI Ở ĐÂY: Dùng fromMap thay vì Constructor trực tiếp
+        final optimisticOrder = OrderModel.fromMap(optimisticData);
+
+        // Cập nhật State
+        _currentOrder = optimisticOrder;
+
+        // BẮN LỆNH LƯU NGẦM
+        // Lưu ý: Copy map ra để sửa timestamp cho server
+        final serverData = Map<String, dynamic>.from(optimisticData);
+        serverData['createdAt'] = FieldValue.serverTimestamp();
+        serverData['startTime'] = FieldValue.serverTimestamp();
+
+        orderRef.set(serverData).then((_) {
+          debugPrint(">>> [Background] Đã tạo đơn mới ngầm thành công: $newOrderId");
+          if (_notifyKitchenAfterPayment) {
+            _sendToKitchen(performPrint: true, popOnFinish: false);
+          }
+        }).catchError((e) {
+          debugPrint(">>> [Background] Lỗi tạo đơn ngầm: $e");
+        });
+
+      } else {
+        // --- TRƯỜNG HỢP: ĐƠN CŨ ---
+        if (_hasUnsentItems) {
+          _sendToKitchen(
+            popOnFinish: false,
+            navigateToCartViewOnSuccess: false,
+            performPrint: _notifyKitchenAfterPayment,
+          ).then((_) => debugPrint(">>> [Background] Update món mới thành công"));
+        } else {
+          _saveOrder();
         }
       }
 
-      // BƯỚC 2: XỬ LÝ LƯU NGẦM (BACKGROUND)
-      // Thay vì await (chờ đợi), ta gọi hàm và để nó tự chạy.
-      if (_hasUnsentItems) {
-        // Gọi lưu và báo bếp nhưng KHÔNG await kết quả
-        _sendToKitchen(
-          popOnFinish: false,
-          navigateToCartViewOnSuccess: false,
-          performPrint: _notifyKitchenAfterPayment,
-        ).then((success) {
-          if (success) {
-            debugPrint(">>> [BACKGROUND] Đã lưu và báo bếp thành công.");
-          } else {
-            debugPrint(">>> [BACKGROUND] Lưu ngầm thất bại (User đang ở màn thanh toán).");
-          }
-        }).catchError((e) {
-          debugPrint(">>> [BACKGROUND] Lỗi lưu ngầm: $e");
-        });
-      } else {
-        // Nếu không có món mới, chỉ gọi saveOrder nhẹ nhàng để sync
-        _saveOrder();
-      }
-
-      // BƯỚC 3: CHUẨN BỊ DỮ LIỆU THANH TOÁN TỪ LOCAL
-      // Chúng ta lấy dữ liệu trực tiếp từ _displayCart (trên máy) thay vì chờ tải lại từ Server.
-      // Điều này giúp màn hình thanh toán hiện ra NGAY LẬP TỨC.
-
-      final savedState = _currentOrder != null ? _paymentStateCache[_currentOrder!.id] : null;
+      // 2. CHUẨN BỊ MỞ PAYMENT SCREEN
+      final savedState = _paymentStateCache[_currentOrder!.id];
       _isFinalizingPayment = true;
 
       final upToDateOrder = _currentOrder!.copyWith(
-        // Map lại items từ giỏ hàng hiện tại
         items: _displayCart.values.map((item) {
-          // Mẹo: Gán sentQuantity = quantity để logic in bill coi như món đã chốt
           return item.copyWith(sentQuantity: item.quantity).toMap();
         }).toList(),
         totalAmount: _totalAmount,
       );
+      if (mounted) {
+        setState(() {
+          // 1. Đưa các món từ _localChanges vào _cart chính thức
+          // và cập nhật sentQuantity = quantity (coi như đã gửi)
+          _localChanges.forEach((key, item) {
+            _cart[key] = item.copyWith(sentQuantity: item.quantity);
+          });
 
-      // BƯỚC 4: ĐIỀU HƯỚNG NGAY LẬP TỨC
+          // 2. Xóa sạch danh sách món chờ (Đây là bước quan trọng để tắt cảnh báo)
+          _localChanges.clear();
+
+          // 3. Nếu là đơn mới, đảm bảo _cart hiển thị đúng các món vừa tạo
+          if (_cart.isEmpty && _currentOrder != null) {
+            final itemsMap = {
+              for (var item in _currentOrder!.items)
+              // Tái tạo OrderItem từ Map
+                OrderItem.fromMap(item as Map<String,dynamic>, allProducts: _menuProducts).lineId :
+                OrderItem.fromMap(item, allProducts: _menuProducts)
+            };
+            _cart.addAll(itemsMap);
+          }
+        });
+      }
+
+      // 3. NAVIGATE
       if (isDesktop) {
         setState(() {
           _isPaymentView = true;
@@ -1162,7 +1214,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     } catch (e) {
       debugPrint("Lỗi chuẩn bị thanh toán: $e");
-      ToastService().show(message: "Có lỗi xảy ra: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi: $e", type: ToastType.error);
     } finally {
       if (mounted) {
         setState(() => _isPaymentLoading = false);
