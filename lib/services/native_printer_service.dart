@@ -38,11 +38,10 @@ class NativePrinterService {
     }
   }
 
-  // HÀM IN: Gửi lệnh ngay lập tức, không chờ đợi, không xếp hàng
+  // HÀM IN: Gửi lệnh ngay lập tức
   Future<bool> print(String identifier, Uint8List data) async {
     try {
       debugPrint(">>> NativePrint: Bắn lệnh in tới $identifier");
-      // Gọi thẳng xuống Native, Native sẽ tự tạo Thread riêng để xử lý
       await _channel.invokeMethod('printData', {
         'identifier': identifier,
         'data': data,
@@ -50,7 +49,8 @@ class NativePrinterService {
       return true;
     } catch (e) {
       debugPrint(">>> NativePrint Lỗi: $e");
-      return false;
+      // QUAN TRỌNG: Phải ném lỗi ra ngoài để PrintQueueService biết đường sửa lỗi
+      rethrow;
     }
   }
 }

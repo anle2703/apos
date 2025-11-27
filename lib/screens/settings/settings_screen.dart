@@ -339,21 +339,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       try {
         final devices = await nativeService.getPrinters();
         for (var device in devices) {
-          final String realId = device.identifier;
-          final String displayName = "${device.name} (ID: $realId)";
+          final String realId = device.identifier; // Địa chỉ động (ví dụ: /dev/usb/001)
+          final String vid = device.vendorId.toString();
+          final String pid = device.productId.toString();
+
+          // Tạo tên hiển thị kèm VID:PID để bạn dễ phân biệt khi chọn
+          final String displayName = "${device.name} (USB $vid:$pid)";
 
           final p = pos_printer.PrinterDevice(
-            name: displayName,
-            address: realId,
-            vendorId: device.vendorId.toString(),
-            productId: device.productId.toString(),
+            name: displayName, // Lưu tên gốc vào đây (thư viện sẽ dùng tên này)
+            address: realId,   // Địa chỉ động để kết nối
+            vendorId: vid,
+            productId: pid,
           );
 
           final scanned = ScannedPrinter(device: p, type: pos_printer.PrinterType.usb);
 
           if (mounted) {
             setState(() {
-              if (!_scannedPrinters.any((p) => p.device.address == realId)) {
+              // Logic check trùng lặp dựa trên ID mới (USB:VID:PID:NAME)
+              final uniqueId = _getPrinterUniqueId(scanned);
+              if (!_scannedPrinters.any((p) => _getPrinterUniqueId(p) == uniqueId)) {
                 _scannedPrinters.add(scanned);
               }
             });
@@ -378,8 +384,75 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _isScanning = false);
+    Future.delayed(const Duration(seconds: 1), () async {
+      if (mounted) {
+        bool hasChanged = false;
+
+        setState(() {
+          _isScanning = false;
+
+          // Duyệt qua các máy in ĐÃ ĐƯỢC GÁN (ví dụ: Máy in Bếp, Thu ngân...)
+          _printerAssignments.forEach((role, config) {
+            if (config != null && config.physicalPrinter.type == pos_printer.PrinterType.usb) {
+
+              final savedVid = config.physicalPrinter.device.vendorId.toString();
+              final savedPid = config.physicalPrinter.device.productId.toString();
+
+              // 1. Thử tìm chính xác theo Unique ID (Logic cũ)
+              final savedId = _getPrinterUniqueId(config.physicalPrinter);
+              var foundPrinter = _scannedPrinters.firstWhereOrNull(
+                      (p) => _getPrinterUniqueId(p) == savedId);
+
+              // 2. Nếu không tìm thấy theo ID (do đổi tên), tìm theo VID + PID (Logic mới quan trọng)
+              if (foundPrinter == null) {
+                foundPrinter = _scannedPrinters.firstWhereOrNull((p) {
+                  final pVid = p.device.vendorId.toString();
+                  final pPid = p.device.productId.toString();
+                  return pVid == savedVid && pPid == savedPid;
+                });
+                if (foundPrinter != null) {
+                  debugPrint(">>> UI: Tìm thấy máy in $role qua VID/PID (Tên có thể đã đổi).");
+                }
+              }
+
+              // 3. Nếu tìm thấy máy in tương ứng
+              if (foundPrinter != null) {
+                // Kiểm tra xem Address có khác không
+                if (config.physicalPrinter.device.address != foundPrinter.device.address) {
+                  debugPrint(">>> UI Auto-update address cho $role: ${config.physicalPrinter.device.address} -> ${foundPrinter.device.address}");
+
+                  // Cập nhật lại config với máy in mới tìm thấy
+                  _printerAssignments[role] = ConfiguredPrinter(
+                      logicalName: role,
+                      physicalPrinter: foundPrinter // Dùng object mới quét được (có address mới)
+                  );
+                  hasChanged = true;
+                }
+              }
+            }
+          });
+        });
+
+        // Lưu lại nếu có thay đổi
+        if (hasChanged) {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final List<Map<String, dynamic>> listToSave = _printerAssignments.values
+                .where((p) => p != null)
+                .map((p) => p!.toJson())
+                .toList();
+            await prefs.setString('printer_assignments', jsonEncode(listToSave));
+            debugPrint(">>> Đã lưu địa chỉ máy in mới xuống bộ nhớ thành công.");
+
+            ToastService().show(
+                message: "Đã tự động cập nhật cổng kết nối máy in!",
+                type: ToastType.success
+            );
+          } catch (e) {
+            debugPrint(">>> Lỗi khi lưu cập nhật máy in tự động: $e");
+          }
+        }
+      }
       debugPrint(">>> KẾT THÚC QUÉT.");
     });
   }
@@ -430,10 +503,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _getPrinterUniqueId(ScannedPrinter printer) {
+    if (printer.type == pos_printer.PrinterType.usb) {
+      final vid = printer.device.vendorId;
+      final pid = printer.device.productId;
+      final name = printer.device.name;
+
+      if (vid != null && pid != null && vid.isNotEmpty && pid.isNotEmpty) {
+        // Định danh: USB:VID:PID:NAME
+        // Bỏ qua serial vì thư viện không hỗ trợ
+        return 'USB:$vid:$pid:$name';
+      }
+    }
     return '${printer.device.name}|${printer.device.vendorId ?? ''}|${printer.device.productId ?? ''}';
   }
-
-  // --- CONTENT BUILDER METHODS (Reused for both Mobile and Desktop) ---
 
   Widget _buildStoreInfoContent() {
     if (widget.currentUser.role != 'owner') {
@@ -891,12 +973,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       }).toList(),
                       onChanged: (newValueId) {
                         if (newValueId == null) return;
-                        final selectedPrinter = _scannedPrinters
-                            .firstWhereOrNull(
+
+                        // Tìm máy in trong danh sách vừa quét
+                        final selectedPrinter = _scannedPrinters.firstWhereOrNull(
                                 (p) => _getPrinterUniqueId(p) == newValueId);
 
                         if (selectedPrinter != null) {
                           setState(() {
+                            // Lưu máy in với thông tin mới nhất (bao gồm address động mới)
                             _printerAssignments[roleKey] = ConfiguredPrinter(
                               logicalName: roleKey,
                               physicalPrinter: selectedPrinter,

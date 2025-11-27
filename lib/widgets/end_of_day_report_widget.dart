@@ -72,7 +72,7 @@ class EndOfDayReportWidget extends StatelessWidget {
           const Divider(thickness: 2, color: Colors.black),
 
           // 2. CHI TIẾT DOANH SỐ (Bổ sung phần này)
-          _buildRow('Đơn hàng:', '$totalOrders đơn', baseStyle, boldStyle),
+          _buildRow('Đơn hàng:', '$totalOrders', baseStyle, boldStyle),
           const Divider(height: 8, thickness: 0.5),
           _buildRow('Chiết khấu/Món:', formatNumber(totalDiscount), baseStyle, baseStyle),
           _buildRow('Chiết khấu/Bill:', formatNumber(totalBillDiscount), baseStyle, baseStyle),

@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:sunmi_printer_plus/sunmi_printer_plus.dart';
+import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart' as pos_printer;
+
 import '../models/print_job_model.dart';
 import '../models/configured_printer_model.dart';
 import '../models/order_item_model.dart';
@@ -17,6 +19,7 @@ import 'firestore_service.dart';
 import '../services/toast_service.dart';
 import '../models/cash_flow_transaction_model.dart';
 import '../theme/string_extensions.dart';
+import '../services/native_printer_service.dart';
 
 class PrintQueueService {
   static final PrintQueueService _instance = PrintQueueService._internal();
@@ -32,7 +35,7 @@ class PrintQueueService {
   final ValueNotifier<List<PrintJob>> failedJobsNotifier = ValueNotifier([]);
 
   bool _isInitialized = false;
-
+  Completer<void>? _fixCompleter;
   Future<void> initialize(String storeId) async {
     await _loadFailedJobsFromPrefs();
     if (!_isInitialized) {
@@ -59,7 +62,6 @@ class PrintQueueService {
       return;
     }
 
-    // Kitchen / Cancel: tách theo vai trò máy in bếp
     if (type == PrintJobType.kitchen || type == PrintJobType.cancel) {
       final items = (data['items'] as List)
           .map((i) => OrderItem.fromMap(i as Map<String, dynamic>))
@@ -87,24 +89,24 @@ class PrintQueueService {
         }
       }
 
-      // Nếu không có món nào được gán máy in bếp, mặc định in ra máy thu ngân
       if (jobsByPrinter.isEmpty && items.isNotEmpty) {
         debugPrint("Không có món nào được chỉ định máy in bếp, sẽ in ra máy thu ngân.");
         jobsByPrinter['cashier_printer'] = items;
       }
 
-      if (jobsByPrinter.isEmpty) {
-        debugPrint("Không có món nào để tạo lệnh in bếp.");
-        return;
-      }
+      if (jobsByPrinter.isEmpty) return;
+
+      // --- THAY ĐỔI QUAN TRỌNG: DÙNG Future.wait ĐỂ IN SONG SONG ---
+      debugPrint(">>> [PQ] Bắt đầu in song song ${jobsByPrinter.length} lệnh bếp...");
+
+      final List<Future<void>> parallelJobs = [];
 
       for (final entry in jobsByPrinter.entries) {
         final printerRole = entry.key;
         final printerItems = entry.value;
 
         final jobDataForPrinter = Map<String, dynamic>.from(data);
-        jobDataForPrinter['items'] =
-            printerItems.map((i) => i.toMap()).toList();
+        jobDataForPrinter['items'] = printerItems.map((i) => i.toMap()).toList();
         jobDataForPrinter['targetPrinterRole'] = printerRole;
 
         final job = PrintJob(
@@ -113,8 +115,14 @@ class PrintQueueService {
           data: jobDataForPrinter,
           createdAt: DateTime.now(),
         );
-        _processSingleJob(job);
+
+        // Thêm vào danh sách chạy song song
+        parallelJobs.add(_processSingleJob(job));
       }
+
+      // Chờ tất cả các máy in nhận lệnh xong (hoặc chạy ngầm cũng được)
+      await Future.wait(parallelJobs);
+      debugPrint(">>> [PQ] Đã gửi toàn bộ lệnh in bếp.");
       return;
     }
   }
@@ -263,39 +271,216 @@ class PrintQueueService {
     });
   }
 
-  Future<bool> _executePrintLocally(
-      PrintJob job, String printMode) async {
+  Future<bool> _executePrintLocally(PrintJob job, String printMode) async {
+    debugPrint(">>> [PQ] Bắt đầu xử lý Job cục bộ (Mode: $printMode)");
+
     final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString('printer_assignments');
-    if (jsonString == null) throw Exception('Chưa cấu hình máy in.');
 
-    final List<dynamic> jsonList = jsonDecode(jsonString);
-    final allConfiguredPrinters =
-    jsonList.map((j) => ConfiguredPrinter.fromJson(j)).toList();
-
-    // 1. Quyết định một lần duy nhất: Có phải gửi lệnh in qua Server LAN không?
+    // Check Server LAN
     final bool isMobileAndInServerMode = printMode == 'server' &&
         !(Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
     if (isMobileAndInServerMode) {
-      // Nếu đúng, gửi qua server và kết thúc. Áp dụng cho MỌI LOẠI JOB.
-      final serverIp = (await SharedPreferences.getInstance()).getString('print_server_ip');
+      final serverIp = prefs.getString('print_server_ip');
       if (serverIp == null || serverIp.isEmpty) {
         throw Exception("Chưa cấu hình IP máy chủ.");
       }
       return await _sendJobToServerLAN(serverIp, job);
     }
 
-    // 2. Nếu không, tất cả các trường hợp còn lại đều là in trực tiếp (Direct Print)
+    // Load Config
+    var jsonString = prefs.getString('printer_assignments');
+    if (jsonString == null) throw Exception('Chưa cấu hình máy in.');
+
+    var jsonList = jsonDecode(jsonString);
+    List<ConfiguredPrinter> allConfiguredPrinters =
+    (jsonList as List).map((j) => ConfiguredPrinter.fromJson(j)).toList();
+
+    try {
+      debugPrint(">>> [PQ] Thử in lần 1...");
+      // Nếu in thất bại, PrintingService giờ sẽ ném lỗi (rethrow) -> nhảy xuống catch
+      return await _dispatchPrintJob(job, allConfiguredPrinters);
+    } catch (e) {
+      debugPrint(">>> [PQ] In thất bại lần 1. Lỗi: $e");
+
+      if (_fixCompleter != null && !_fixCompleter!.isCompleted) {
+        debugPrint(">>> [PQ] Đang có tiến trình sửa lỗi khác. Job ${job.id} sẽ đứng chờ...");
+        await _fixCompleter!.future;
+        debugPrint(">>> [PQ] Tiến trình sửa lỗi xong. Job ${job.id} thử in lại...");
+
+        // Sau khi chờ xong, reload lại config mới nhất từ đĩa
+        jsonString = prefs.getString('printer_assignments');
+        if (jsonString != null) {
+          jsonList = jsonDecode(jsonString);
+          allConfiguredPrinters = (jsonList as List).map((j) => ConfiguredPrinter.fromJson(j)).toList();
+        }
+        // Và thử in lại luôn (không chạy fix nữa)
+        return await _dispatchPrintJob(job, allConfiguredPrinters);
+      }
+
+      // Nếu chưa có ai Fix, mình sẽ là thằng đi Fix (Tạo khóa)
+      _fixCompleter = Completer<void>();
+
+      try {
+        debugPrint(">>> [PQ] Đang xác định máy in mục tiêu để sửa lỗi...");
+        final targetPrinter = _identifyTargetPrinter(job, allConfiguredPrinters);
+
+        if (targetPrinter == null) rethrow;
+        if (targetPrinter.physicalPrinter.type.name != 'usb') rethrow;
+
+        final String oldAddress = targetPrinter.physicalPrinter.device.address ?? '';
+        final String role = targetPrinter.logicalName;
+
+        // Gọi hàm fix (Hàm _tryFixPrinterAddress bạn đang dùng đã OK, giữ nguyên)
+        final updatedPrinters = await _tryFixPrinterAddress(oldAddress, role, allConfiguredPrinters);
+
+        if (updatedPrinters != null) {
+          // Fix thành công
+          allConfiguredPrinters = updatedPrinters;
+
+          // Mở khóa cho các thằng đang chờ
+          _fixCompleter!.complete();
+
+          // Thử in lại lần 2
+          return await _dispatchPrintJob(job, allConfiguredPrinters);
+        } else {
+          // Fix thất bại
+          _fixCompleter!.complete(); // Vẫn phải mở khóa để các thằng khác không chờ mãi
+          rethrow;
+        }
+      } catch (err) {
+        // Đảm bảo luôn mở khóa dù có lỗi
+        if (!_fixCompleter!.isCompleted) _fixCompleter!.complete();
+        rethrow; // Ném lỗi ra ngoài
+      } finally {
+        // Reset khóa
+        _fixCompleter = null;
+      }
+    }
+  }
+
+  Future<List<ConfiguredPrinter>?> _tryFixPrinterAddress(
+      String oldAddress,
+      String printerRole,
+      List<ConfiguredPrinter> currentAssignments
+      ) async {
+    final nativeService = NativePrinterService();
+    try {
+      // 1. Quét danh sách thiết bị thực tế
+      final devices = await nativeService.getPrinters();
+
+      // 2. Lấy thông tin cấu hình của máy in đang bị lỗi
+      final targetConfig = currentAssignments.firstWhere(
+              (p) => p.logicalName == printerRole,
+          orElse: () => currentAssignments.first
+      );
+
+      // Lấy thông tin gốc từ cấu hình
+      final String savedVid = targetConfig.physicalPrinter.device.vendorId.toString();
+      final String savedPid = targetConfig.physicalPrinter.device.productId.toString();
+      final String savedFullName = targetConfig.physicalPrinter.device.name;
+
+      // --- SỬA LỖI Ở ĐÂY: Lấy tên gốc bằng cách cắt bỏ phần phụ tố "(USB..." ---
+      // Ví dụ: "USB Device (USB 8137:8214)" -> "USB Device"
+      String savedBaseName = savedFullName;
+      if (savedFullName.contains(" (USB")) {
+        savedBaseName = savedFullName.split(" (USB")[0].trim();
+      }
+
+      debugPrint(">>> [Auto-Fix] Tìm máy in: BaseName='$savedBaseName', VID=$savedVid, PID=$savedPid");
+
+      // 3. Tìm trong danh sách thiết bị thực tế
+      for (var device in devices) {
+        final String currentVid = device.vendorId.toString();
+        final String currentPid = device.productId.toString();
+        final String currentName = device.name; // Tên thực tế từ phần cứng (thường ngắn gọn)
+        final String newAddress = device.identifier;
+
+        // So sánh VID, PID
+        bool matchVid = currentVid == savedVid;
+        bool matchPid = currentPid == savedPid;
+
+        // So sánh tên:
+        // 1. Giống hệt nhau
+        // 2. HOẶC Tên đã lưu chứa tên thực tế (đề phòng trường hợp khác biến thể)
+        bool matchName = (currentName == savedBaseName) || (savedBaseName.contains(currentName));
+
+        if (matchVid && matchPid && matchName) {
+          debugPrint(">>> [Auto-Fix] TÌM THẤY! Address mới: $newAddress (Device: $currentName)");
+
+          if (newAddress != oldAddress) {
+            debugPrint(">>> [Auto-Fix] -> CẬP NHẬT ĐỒNG LOẠT CHO NHÓM '$savedBaseName'...");
+            bool hasAnyChange = false;
+
+            // 4. Cập nhật cho TẤT CẢ các vai trò có cùng VID/PID/Tên Gốc
+            final updatedAssignments = currentAssignments.map((p) {
+              final pVid = p.physicalPrinter.device.vendorId.toString();
+              final pPid = p.physicalPrinter.device.productId.toString();
+              final pFullName = p.physicalPrinter.device.name;
+
+              // Lấy base name của mục cấu hình này để so sánh
+              String pBaseName = pFullName;
+              if (pFullName.contains(" (USB")) {
+                pBaseName = pFullName.split(" (USB")[0].trim();
+              }
+
+              // Kiểm tra xem cấu hình này có khớp với thiết bị vừa tìm thấy không
+              if (pVid == savedVid && pPid == savedPid && pBaseName == savedBaseName) {
+                if (p.physicalPrinter.device.address != newAddress) {
+                  debugPrint(">>> [Auto-Fix] -> Update role '${p.logicalName}': $newAddress");
+                  hasAnyChange = true;
+
+                  // Tạo device mới giữ nguyên tên hiển thị cũ (để không làm rối UI)
+                  final newDev = pos_printer.PrinterDevice(
+                    name: pFullName, // Giữ nguyên tên đầy đủ cũ
+                    vendorId: p.physicalPrinter.device.vendorId,
+                    productId: p.physicalPrinter.device.productId,
+                    address: newAddress, // Address MỚI
+                  );
+
+                  final newPhys = ScannedPrinter(
+                    device: newDev,
+                    type: p.physicalPrinter.type,
+                  );
+
+                  return ConfiguredPrinter(
+                    logicalName: p.logicalName,
+                    physicalPrinter: newPhys,
+                  );
+                }
+              }
+              return p;
+            }).toList();
+
+            if (hasAnyChange) {
+              final prefs = await SharedPreferences.getInstance();
+              final listToSave = updatedAssignments.map((p) => p.toJson()).toList();
+              await prefs.setString('printer_assignments', jsonEncode(listToSave));
+              debugPrint(">>> [Auto-Fix] Đã lưu cấu hình mới.");
+              return updatedAssignments;
+            } else {
+              return currentAssignments;
+            }
+          }
+        }
+      }
+      debugPrint(">>> [Auto-Fix] Không tìm thấy thiết bị nào khớp BaseName + VID + PID.");
+    } catch (e) {
+      debugPrint(">>> [Auto-Fix] Lỗi ngoại lệ: $e");
+    }
+    return null;
+  }
+
+  Future<bool> _dispatchPrintJob(PrintJob job, List<ConfiguredPrinter> printers) async {
     if (job.type == PrintJobType.kitchen || job.type == PrintJobType.cancel) {
-      // Ưu tiên Sunmi nếu có máy in bếp nào là Sunmi
-      final useSunmi = allConfiguredPrinters.any((p) =>
+      final useSunmi = printers.any((p) =>
       p.logicalName.startsWith('kitchen_printer_') &&
           p.physicalPrinter.device.address == 'sunmi_internal');
+
       if (useSunmi) {
         return await _printWithSunmiSDK(job);
       } else {
-        return await _printWithGenericService(job, allConfiguredPrinters);
+        return await _printWithGenericService(job, printers);
       }
     }
 
@@ -305,23 +490,45 @@ class PrintQueueService {
         job.type == PrintJobType.cashFlow ||
         job.type == PrintJobType.endOfDayReport ||
         job.type == PrintJobType.tableManagement) {
-      final target = _getTargetPrinterForJob(job.type, allConfiguredPrinters);
-      if (target == null) {
-        throw Exception("Chưa cấu hình máy in thu ngân.");
-      }
+
+      final target = _getTargetPrinterForJob(job.type, printers);
+      if (target == null) throw Exception("Chưa cấu hình máy in thu ngân.");
+
       if (target.physicalPrinter.device.address == 'sunmi_internal' &&
           job.type != PrintJobType.cashFlow &&
           job.type != PrintJobType.endOfDayReport &&
           job.type != PrintJobType.tableManagement) {
         return await _printWithSunmiSDK(job);
       } else {
-        return await _printWithGenericService(job, allConfiguredPrinters);
+        return await _printWithGenericService(job, printers);
       }
     }
+
     if (job.type == PrintJobType.label) {
-      return await _printWithGenericService(job, allConfiguredPrinters);
+      return await _printWithGenericService(job, printers);
     }
+
     return true;
+  }
+
+  ConfiguredPrinter? _identifyTargetPrinter(PrintJob job, List<ConfiguredPrinter> printers) {
+    String? targetRole;
+
+    if (job.type == PrintJobType.kitchen || job.type == PrintJobType.cancel) {
+      targetRole = job.data['targetPrinterRole'];
+    } else if (job.type == PrintJobType.label) {
+      targetRole = 'label_printer';
+    } else {
+      targetRole = 'cashier_printer';
+    }
+
+    if (targetRole == null) return null;
+
+    try {
+      return printers.firstWhere((p) => p.logicalName == targetRole);
+    } catch (_) {
+      return null;
+    }
   }
 
   ConfiguredPrinter? _getTargetPrinterForJob(
@@ -395,7 +602,6 @@ class PrintQueueService {
       await SunmiPrinter.printText('Nhân viên: ${data['userName']}',
           style: SunmiTextStyle(align: alignLeft));
 
-      // Header bảng
       await SunmiPrinter.printRow(cols: [
         SunmiColumn(
             text: 'STT',
@@ -414,9 +620,7 @@ class PrintQueueService {
 
       for (var i = 0; i < items.length; i++) {
         final item = items[i];
-
         double quantityToPrint = item.quantity;
-
         if (quantityToPrint == 0) continue;
 
         String itemName = item.product.productName;
@@ -465,7 +669,7 @@ class PrintQueueService {
       return true;
     } catch (e, st) {
       debugPrint("Lỗi Sunmi SDK: $e\n$st");
-      return false;
+      rethrow;
     }
   }
 
@@ -637,14 +841,12 @@ class PrintQueueService {
 
     final url = Uri.parse('http://$serverIp:8080$endpoint');
 
-    // Chuẩn hoá để tránh server cast Timestamp?
     final normalized = _normalizeJobDataForLan(job.data);
 
     final body = jsonEncode(normalized, toEncodable: (value) {
       if (value is Timestamp) return value.toDate().toIso8601String();
       return value;
     });
-
 
     final response = await http
         .post(
@@ -800,7 +1002,7 @@ class PrintQueueService {
         .where((job) => job.firestoreId == null)
         .map((job) {
       final json = job.toJson();
-      json['data'] = _sanitizeJson(json['data']); // tránh Timestamp gây lỗi
+      json['data'] = _sanitizeJson(json['data']);
       return json;
     }).toList();
 
@@ -830,18 +1032,14 @@ class PrintQueueService {
 
     final cloned = jsonDecode(jsonEncode(raw, toEncodable: toEncodable)) as Map<String, dynamic>;
 
-    // Đặc biệt xử lý summary.startTime để tránh server cast sang Timestamp
     final summary = cloned['summary'];
     if (summary is Map<String, dynamic>) {
       final st = summary['startTime'];
-      // Lưu ra key khác để tương thích dần về sau (nếu cần)
       if (st is String) {
         summary['startTimeIso'] = st;
       } else if (st is Map || st is int) {
-        // hiếm khi dùng, nhưng cứ để phòng
         summary['startTimeIso'] = st.toString();
       }
-      // XÓA/GÁN NULL để server không còn cast Timestamp?
       summary['startTime'] = null;
     }
 

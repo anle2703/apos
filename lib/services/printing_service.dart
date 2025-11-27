@@ -144,7 +144,7 @@ class PrintingService {
       }
     } catch (e) {
       debugPrint("Lỗi in từ Widget: $e");
-      return false;
+      rethrow;
     }
   }
 
@@ -462,7 +462,7 @@ class PrintingService {
       }
     } catch (e) {
       debugPrint('Lỗi in tem: $e');
-      return false;
+      rethrow;
     }
   }
 
