@@ -3927,9 +3927,7 @@ class _OrderScreenState extends State<OrderScreen> {
                               // Hiển thị Đơn giá ĐÃ GIẢM
                               Text(
                                 "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
-                                style: textTheme.bodyMedium?.copyWith(
-                                    color: Colors.grey[600],
-                                    fontSize: 12),
+                                style: textTheme.bodyMedium
                               ),
                             ],
                           ),

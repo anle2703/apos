@@ -16,6 +16,7 @@ import '../../theme/number_utils.dart';
 import '../../widgets/custom_text_form_field.dart';
 import '../../widgets/product_search_delegate.dart';
 import '../../services/discount_service.dart';
+import '../../widgets/app_dropdown.dart';
 
 class DiscountFormScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -34,6 +35,7 @@ class DiscountFormScreen extends StatefulWidget {
 class _DiscountFormScreenState extends State<DiscountFormScreen> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _nameController;
+  bool _isLoading = false;
 
   // --- Logic Thời gian ---
   String _timeType = 'specific'; // 'specific', 'daily', 'weekly'
@@ -41,7 +43,7 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
   DateTime? _endAt;
 
   // [CẬP NHẬT] Thay vì 1 mốc giờ, dùng danh sách mốc giờ
-  List<Map<String, TimeOfDay>> _dailyTimeRanges = [];
+  final List<Map<String, TimeOfDay>> _dailyTimeRanges = [];
 
   List<int> _selectedWeekDays = []; // 2=Mon, 8=Sun
 
@@ -49,6 +51,7 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
   String _targetType = 'all'; // 'all', 'retail', 'group'
   CustomerGroupModel? _selectedGroup;
   List<CustomerGroupModel> _availableGroups = [];
+  String? _combinedTargetValue;
 
   // --- Logic Sản phẩm ---
   List<DiscountItem> _selectedItems = [];
@@ -61,7 +64,31 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
     super.initState();
     _nameController = TextEditingController(text: widget.discount?.name ?? '');
     _initData();
-    _fetchCustomerGroups();
+    _fetchCustomerGroups().then((_) => _initCombinedTargetValue());
+  }
+
+  void _initCombinedTargetValue() {
+    if (widget.discount == null) {
+      setState(() => _combinedTargetValue = 'all');
+      return;
+    }
+
+    setState(() {
+      if (widget.discount!.targetType == 'group' && widget.discount!.targetGroupId != null) {
+        // Nếu là nhóm và nhóm đó có trong danh sách tải về -> Chọn ID nhóm
+        // Nếu nhóm đã bị xóa khỏi DB -> Fallback về 'all' hoặc giữ ID cũ tùy logic (ở đây fallback về all cho an toàn)
+        final exists = _availableGroups.any((g) => g.id == widget.discount!.targetGroupId);
+        _combinedTargetValue = exists ? widget.discount!.targetGroupId : 'all';
+
+        if (exists) {
+          _selectedGroup = _availableGroups.firstWhere((g) => g.id == widget.discount!.targetGroupId);
+        }
+      } else if (widget.discount!.targetType == 'retail') {
+        _combinedTargetValue = 'retail';
+      } else {
+        _combinedTargetValue = 'all';
+      }
+    });
   }
 
   void _initData() {
@@ -108,9 +135,8 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
   Future<void> _fetchCustomerGroups() async {
     try {
       final snapshot = await FirebaseFirestore.instance
-          .collection('stores')
-          .doc(widget.currentUser.storeId)
-          .collection('customer_groups')
+          .collection('customer_groups') // Collection gốc
+          .where('storeId', isEqualTo: widget.currentUser.storeId) // Lọc theo storeId
           .get();
 
       if (mounted) {
@@ -118,12 +144,6 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
           _availableGroups = snapshot.docs
               .map((doc) => CustomerGroupModel.fromFirestore(doc))
               .toList();
-
-          if (widget.discount?.targetGroupId != null) {
-            try {
-              _selectedGroup = _availableGroups.firstWhere((g) => g.id == widget.discount!.targetGroupId);
-            } catch (_) {}
-          }
         });
       }
     } catch (e) {
@@ -453,7 +473,7 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
       createdAt: widget.discount?.createdAt ?? DateTime.now(),
       isActive: true,
     );
-
+    setState(() => _isLoading = true);
     try {
       await FirestoreService().saveDiscount(discountModel);
       DiscountService.notifyDiscountsChanged();
@@ -461,19 +481,81 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       ToastService().show(message: "Lỗi lưu: $e", type: ToastType.error);
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+// --- HÀM XỬ LÝ XÓA KHUYẾN MÃI MỚI ---
+  Future<void> _deleteDiscount() async {
+    if (widget.discount == null) return; // Chỉ xóa được khi đang sửa
+
+    // 1. Hiển thị hộp thoại xác nhận
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Xác nhận xóa"),
+        content: Text("Bạn có chắc chắn muốn xóa chương trình khuyến mãi '${widget.discount!.name}' không? Hành động này không thể hoàn tác."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false), // Hủy
+            child: const Text("Hủy"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true), // Đồng ý xóa
+            child: const Text("Xóa", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    // Nếu người dùng chọn Hủy hoặc bấm ra ngoài -> Thoát
+    if (confirm != true) return;
+
+    setState(() => _isLoading = true); // Hiện loading
+
+    try {
+      // 2. Gọi Service để xóa trên Firestore
+      // (Giả sử hàm deleteDiscount trong FirestoreService nhận vào ID)
+      await FirestoreService().deleteDiscount(widget.discount!.id);
+
+      // 3. [QUAN TRỌNG] Bắn tín hiệu cập nhật cho toàn app
+      DiscountService.notifyDiscountsChanged();
+
+      if (mounted) {
+        ToastService().show(message: "Đã xóa khuyến mãi thành công.", type: ToastType.success);
+        // 4. Đóng màn hình chỉnh sửa và quay lại danh sách
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      debugPrint("Lỗi khi xóa khuyến mãi: $e");
+      if (mounted) {
+        ToastService().show(message: "Lỗi khi xóa: $e", type: ToastType.error);
+        setState(() => _isLoading = false); // Tắt loading nếu lỗi
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Biến kiểm tra xem đang Sửa hay Tạo mới
+    final bool isEditing = widget.discount != null;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.discount == null ? "Tạo Giảm Giá" : "Sửa Giảm Giá"),
+        title: Text(isEditing ? "Sửa Giảm Giá" : "Tạo Giảm Giá"),
         actions: [
+          // --- [MỚI] NÚT XÓA (Chỉ hiện khi đang sửa) ---
+          if (isEditing)
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              tooltip: "Xóa chương trình này",
+              onPressed: _isLoading ? null : _deleteDiscount,
+            ),
+          // ---------------------------------------------
+
           Padding(
             padding: const EdgeInsets.only(right: 8.0),
             child: IconButton(
-              onPressed: _saveDiscount,
+              onPressed: _isLoading ? null : _saveDiscount,
               icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 30),
               tooltip: "Lưu lại",
             ),
@@ -521,44 +603,60 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
 
               _buildSectionTitle("Đối tượng áp dụng"),
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                initialValue: _targetType,
-                decoration: InputDecoration(
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.people_outline),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'all', child: Text("Tất cả khách hàng")),
-                  DropdownMenuItem(value: 'retail', child: Text("Khách vãng lai (Lẻ)")),
-                  DropdownMenuItem(value: 'group', child: Text("Nhóm khách hàng")),
-                ],
-                onChanged: (val) {
-                  setState(() {
-                    _targetType = val!;
-                    if (_targetType != 'group') {
-                      _selectedGroup = null;
-                    }
-                  });
-                },
-              ),
-              if (_targetType == 'group') ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<CustomerGroupModel>(
-                  initialValue: _selectedGroup,
-                  decoration: InputDecoration(
-                    labelText: "Chọn nhóm",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  items: _availableGroups.map((g) => DropdownMenuItem(
-                    value: g,
-                    child: Text(g.name),
-                  )).toList(),
-                  onChanged: (val) => setState(() => _selectedGroup = val),
-                  hint: const Text("Chọn nhóm khách hàng"),
-                )
-              ],
 
-              const SizedBox(height: 24),
+              // Đoạn Dropdown gộp (Giữ nguyên như bạn đã sửa)
+              Builder(
+                  builder: (context) {
+                    final List<DropdownMenuItem<String>> dropdownItems = [
+                      const DropdownMenuItem(
+                        value: 'all',
+                        child: Text("Tất cả khách hàng"),
+                      ),
+                      const DropdownMenuItem(
+                        value: 'retail',
+                        child: Text("Khách lẻ"),
+                      ),
+                    ];
+
+                    if (_availableGroups.isNotEmpty) {
+                      for (var group in _availableGroups) {
+                        dropdownItems.add(DropdownMenuItem(
+                          value: group.id,
+                          child: Text("Nhóm: ${group.name}"),
+                        ));
+                      }
+                    }
+
+                    return AppDropdown<String>(
+                      labelText: "Chọn đối tượng",
+                      value: _combinedTargetValue,
+                      items: dropdownItems,
+                      onChanged: (val) {
+                        setState(() {
+                          _combinedTargetValue = val;
+
+                          if (val == 'all') {
+                            _targetType = 'all';
+                            _selectedGroup = null;
+                          } else if (val == 'retail') {
+                            _targetType = 'retail';
+                            _selectedGroup = null;
+                          } else {
+                            _targetType = 'group';
+                            try {
+                              _selectedGroup = _availableGroups.firstWhere((g) => g.id == val);
+                            } catch (e) {
+                              _selectedGroup = null;
+                              debugPrint("Không tìm thấy nhóm với id: $val");
+                            }
+                          }
+                        });
+                      },
+                    );
+                  }
+              ),
+
+              const SizedBox(height: 12),
 
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -585,7 +683,6 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
                   itemBuilder: (context, index) {
                     final item = _selectedItems[index];
 
-                    // Logic hiển thị giá sau giảm
                     double finalDisplayPrice;
                     if (item.isPercent) {
                       finalDisplayPrice = item.oldPrice * (1 - (item.value / 100));

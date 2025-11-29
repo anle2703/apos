@@ -142,7 +142,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   Future<void> _showEditCustomerDialog() async {
     if (_customer == null) return;
 
-    final result = await showDialog<Map<String, dynamic>>(
+    // 1. Thay đổi kiểu mong đợi từ Map<String, dynamic> sang dynamic (hoặc CustomerModel)
+    final result = await showDialog<dynamic>(
       context: context,
       barrierDismissible: false,
       builder: (_) => AddEditCustomerDialog(
@@ -152,20 +153,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       ),
     );
 
-    if (result == null || !mounted) return;
-    try {
-      final bool isEdit = result['isEdit'] as bool;
-      final customerData = result['data'] as Map<String, dynamic>;
+    // 2. Xử lý kết quả trả về
+    // Nếu result là CustomerModel nghĩa là Dialog đã lưu và update thành công
+    if (result != null && result is CustomerModel) {
+      ToastService().show(message: 'Cập nhật thành công!', type: ToastType.success);
 
-      if (isEdit) {
-        await _firestoreService.updateCustomer(_customer!.id, customerData);
-        ToastService().show(message: 'Cập nhật thành công!', type: ToastType.success);
-      }
+      // 3. Tải lại dữ liệu để hiển thị thông tin mới nhất (nhóm mới, tên mới...)
       _loadAllData();
-
-    } catch (e) {
-      ToastService().show(message: "Lưu khách hàng thất bại: $e", type: ToastType.error);
     }
+    // Không cần gọi _firestoreService.updateCustomer ở đây nữa vì Dialog đã làm rồi.
   }
 
   Future<void> _showBillDetailDialog(BillModel bill) async {

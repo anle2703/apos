@@ -115,15 +115,26 @@ class DiscountService {
 
   // Helper check khách hàng
   bool _isValidCustomer(DiscountModel d, CustomerModel? c) {
+    // 1. Nếu áp dụng cho TẤT CẢ -> Luôn đúng
     if (d.targetType == 'all') return true;
-    if (d.targetType == 'retail' && c == null) return true; // Khách lẻ (không có info)
-    if (d.targetType == 'group') {
-      if (c == null) return false;
-      // Kiểm tra xem khách có thuộc nhóm này không
-      // Giả sử CustomerModel có field groupIds hoặc logic tương tự
-      // return c.groupIds.contains(d.targetGroupId);
-      return true; // Tạm thời return true để test
+
+    // 2. Nếu áp dụng cho KHÁCH LẺ (Vãng lai)
+    if (d.targetType == 'retail') {
+      // Chỉ áp dụng nếu KHÔNG chọn khách hàng nào (c == null)
+      return c == null;
     }
+
+    // 3. Nếu áp dụng cho NHÓM KHÁCH HÀNG
+    if (d.targetType == 'group') {
+      // Nếu không chọn khách hàng -> Không hợp lệ
+      if (c == null) return false;
+
+      // [SỬA LẠI ĐÚNG VỚI MODEL CỦA BẠN]
+      // So sánh ID nhóm trong hồ sơ khách (customerGroupId)
+      // với ID nhóm yêu cầu của khuyến mãi (targetGroupId)
+      return c.customerGroupId == d.targetGroupId;
+    }
+
     return false;
   }
 }
