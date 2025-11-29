@@ -17,6 +17,7 @@ import 'package:crypto/crypto.dart';
 import '../models/quick_note_model.dart';
 import '../models/payment_method_model.dart';
 import '../models/web_order_model.dart';
+import '../models/discount_model.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -1530,5 +1531,58 @@ class FirestoreService {
   // 2. Hàm mới: Lưu Bill với ID tự tạo (thay vì add() tự sinh ID)
   Future<void> setBill(String billId, Map<String, dynamic> data) async {
     await _firestore.collection('bills').doc(billId).set(data);
+  }
+
+  // --- QUẢN LÝ DISCOUNT (ROOT COLLECTION) ---
+
+  // 1. Lấy danh sách Discount theo StoreId
+  Stream<List<DiscountModel>> getDiscountsStream(String storeId) {
+    return _db
+        .collection('discounts') // Lưu ở Root Collection
+        .where('storeId', isEqualTo: storeId) // Lọc theo StoreId
+        .orderBy('updatedAt', descending: true) // Sắp xếp mới nhất lên đầu (tuỳ chọn)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+        .map((doc) => DiscountModel.fromFirestore(doc))
+        .toList());
+  }
+
+  // 2. Lưu hoặc Cập nhật Discount
+  // Hàm này xử lý cả tạo mới (nếu id rỗng) và cập nhật (nếu có id)
+  Future<void> saveDiscount(DiscountModel discount) async {
+    try {
+      final collectionRef = _db.collection('discounts');
+
+      // Nếu model đã có ID thì dùng ID đó, nếu không thì tạo ID mới
+      final docRef = discount.id.isNotEmpty
+          ? collectionRef.doc(discount.id)
+          : collectionRef.doc();
+
+      final data = discount.toMap();
+
+      // Đảm bảo các trường quan trọng luôn đúng
+      data['id'] = docRef.id;
+      data['storeId'] = discount.storeId;
+      data['updatedAt'] = FieldValue.serverTimestamp();
+
+      // Nếu là tạo mới (dựa vào check ID ban đầu của model)
+      if (discount.id.isEmpty) {
+        data['createdAt'] = FieldValue.serverTimestamp();
+      }
+
+      // Sử dụng SetOptions(merge: true) để an toàn khi cập nhật
+      await docRef.set(data, SetOptions(merge: true));
+    } catch (e) {
+      throw Exception('Không thể lưu chương trình giảm giá: $e');
+    }
+  }
+
+  // 3. Xóa Discount
+  Future<void> deleteDiscount(String discountId) async {
+    try {
+      await _db.collection('discounts').doc(discountId).delete();
+    } catch (e) {
+      throw Exception('Không thể xóa chương trình giảm giá: $e');
+    }
   }
 }

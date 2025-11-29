@@ -22,6 +22,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../screens/sales/web_order_list_screen.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:collection/collection.dart';
+// [THÊM] Import Discount Service và Model để tính giá real-time
+import '../../services/discount_service.dart';
+import '../../models/discount_model.dart';
 
 enum TableStatusFilter { all, occupied, empty }
 
@@ -46,6 +49,7 @@ class TableSelectionScreen extends StatefulWidget {
 
 class _TableSelectionScreenState extends State<TableSelectionScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final DiscountService _discountService = DiscountService(); // [THÊM]
   TableStatusFilter _currentStatusFilter = TableStatusFilter.all;
   late Stream<Map<String, dynamic>> _combinedStream;
 
@@ -58,6 +62,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
   Stream<Map<String, dynamic>> _getCombinedStream() {
     final tablesStream = _firestoreService.getAllTablesStream(widget.currentUser.storeId);
     final ordersStream = _firestoreService.getActiveOrdersStream(widget.currentUser.storeId);
+    final discountsStream = _discountService.getActiveDiscountsStream(widget.currentUser.storeId);
 
     final activeOrdersRawStream = FirebaseFirestore.instance
         .collection('orders')
@@ -66,25 +71,108 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
         .snapshots()
         .map((snapshot) => { for (var doc in snapshot.docs) doc.id : doc.data() });
 
-    return Rx.combineLatest6(
+    return Rx.combineLatest7(
       tablesStream,
       _firestoreService.getAllTablesStream(widget.currentUser.storeId),
       ordersStream,
       _firestoreService.getTableGroups(widget.currentUser.storeId).asStream(),
       Stream.periodic(const Duration(minutes: 1)).startWith(null),
       activeOrdersRawStream,
+      discountsStream,
           ( List<TableModel> allTablesRaw,
           List<TableModel> tables,
           List<OrderModel> orders,
           List<TableGroupModel> groups,
           _,
-          Map<String, Map<String, dynamic>> ordersRawDataMap
+          Map<String, Map<String, dynamic>> ordersRawDataMap,
+          List<DiscountModel> activeDiscounts,
           ) {
+
+            for (var order in orders) {
+              double recalculatedTotal = 0;
+
+              for (var itemData in order.items) {
+                final itemMap = itemData as Map<String, dynamic>;
+                final product = ProductModel.fromMap(itemMap['product']);
+
+                // Lấy thông tin cơ bản
+                double itemFinalPrice = 0;
+
+                // --- LOGIC TÍNH LẠI GIÁ ---
+
+                // 1. Dịch vụ tính giờ: Tính giá Real-time
+                if (product.serviceSetup?['isTimeBased'] == true) {
+                  final startTime = itemMap['addedAt'] as Timestamp;
+                  final isPaused = itemMap['isPaused'] as bool? ?? false;
+                  final pausedAt = itemMap['pausedAt'] as Timestamp?;
+                  final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
+
+                  final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
+                    product: product,
+                    startTime: startTime,
+                    isPaused: isPaused,
+                    pausedAt: pausedAt,
+                    totalPausedDurationInSeconds: totalPausedDuration,
+                  );
+
+                  double currentRealTimeTotal = timeResult.totalPrice; // Tổng tiền giờ hiện tại
+                  double discountAmount = 0;
+
+                  // --- QUAN TRỌNG: TÌM LẠI KHUYẾN MÃI ĐANG CHẠY ĐỂ ÁP DỤNG REAL-TIME ---
+                  // (Thay vì lấy discountValue cũ rích trong DB)
+
+                  // Tìm khuyến mãi phù hợp nhất cho sản phẩm này trong danh sách activeDiscounts
+                  final discountRule = _discountService.findBestDiscountForProduct(
+                      product: product,
+                      activeDiscounts: activeDiscounts,
+                      customer: null,
+                      checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
+                  );
+
+                  if (discountRule != null) {
+                    if (discountRule.isPercent) {
+                      // Logic %: Giảm trên tổng tiền giờ
+                      // VD: Giờ hát 100k, giảm 10% -> giảm 10k
+                      discountAmount = currentRealTimeTotal * (discountRule.value / 100);
+                    } else {
+                      // Logic VNĐ cho Dịch vụ: Giảm trên Đơn giá/Giờ
+                      // Yêu cầu: "giảm 10.000/h"
+                      // Cách tính: Tổng giờ chơi * 10.000
+
+                      double totalHours = timeResult.totalMinutesBilled / 60.0;
+                      discountAmount = totalHours * discountRule.value;
+                    }
+                  } else {
+                    // Nếu không tìm thấy KM active, fallback về giá trị đang lưu trong DB (nếu có)
+                    // để tránh nhảy giá sốc nếu KM vừa hết hạn tức thì.
+                    // Tuy nhiên, với TimeBased, giá trị cũ thường sai lệch.
+                    // Tốt nhất: Nếu hết KM -> Không giảm nữa (hoặc giữ % cũ nếu muốn).
+                    // Ở đây tôi chọn an toàn: Lấy giá trị lưu DB nếu nó là loại tiền mặt cố định (trường hợp hiếm),
+                    // còn không thì coi như = 0 để đảm bảo tính đúng đắn real-time.
+                    discountAmount = 0;
+                  }
+
+                  itemFinalPrice = (currentRealTimeTotal - discountAmount).clamp(0, double.infinity);
+
+                }
+                // 2. Món thường: Giữ nguyên logic lấy từ DB (vì giá không nhảy theo giây)
+                else {
+                  // Lấy subtotal đã tính sẵn lúc order, đảm bảo khớp 100%
+                  itemFinalPrice = (itemMap['subtotal'] as num?)?.toDouble() ?? 0.0;
+                }
+
+                recalculatedTotal += itemFinalPrice;
+              }
+
+              // Cập nhật tổng tiền hiển thị trên Dashboard
+              order.totalAmount = recalculatedTotal;
+            }
 
         final orderMap = {for (var order in orders) order.tableId: order};
 
         final tablesWithInfo = tables.map((table) {
           final orderModel = orderMap[table.id];
+          // Lấy raw data từ map thay vì getter
           Map<String, dynamic>? rawData;
           if (orderModel != null) {
             rawData = ordersRawDataMap[orderModel.id];
@@ -138,9 +226,8 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
   }
 
   void _initPendingOrdersListener() {
-    // Đảm bảo set source 1 lần khi khởi tạo
-    _audioPlayer.setSource(AssetSource('tiengchuong.wav')); // <-- Dùng file WAV
-    _audioPlayer.setReleaseMode(ReleaseMode.stop); // Dừng sau khi phát xong
+    _audioPlayer.setSource(AssetSource('tiengchuong.wav'));
+    _audioPlayer.setReleaseMode(ReleaseMode.stop);
 
     final query = FirebaseFirestore.instance
         .collection('web_orders')
@@ -151,14 +238,11 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
       final newCount = snapshot.docs.length;
 
       if (newCount > 0 && _pendingOrderCount == 0) {
-        // Có đơn mới (chuyển từ 0 -> 1+)
         _startNotificationSound();
       } else if (newCount == 0) {
-        // Không còn đơn nào
         _stopNotificationSound();
       }
 
-      // Cập nhật UI
       if (mounted) {
         setState(() {
           _pendingOrderCount = newCount;
@@ -183,57 +267,41 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
         try {
           final orderData = doc.data();
           final items = (orderData['items'] as List?) ?? [];
-
-          // --- SỬA LỖI: Thao tác trực tiếp trên Map, không cần OrderItem ---
-
           final List<Map<String, dynamic>> itemsToPrint = [];
-          bool hasChanges = false; // Cờ để xem có cần update DB không
+          bool hasChanges = false;
 
-          // 1. Tạo danh sách item MỚI (đã cập nhật) để ghi lại vào DB
           final List<Map<String, dynamic>> updatedItemsForDB = items.map((item) {
             final map = Map<String, dynamic>.from(item as Map<String, dynamic>);
             final num sentQty = map['sentQuantity'] ?? 0;
             final num qty = map['quantity'] ?? 0;
 
-            // 1. Chỉ in khi số lượng mới > số lượng đã in
             if (qty > sentQty) {
-              final num changeToPrint = qty - sentQty; // Số lượng chênh lệch
+              final num changeToPrint = qty - sentQty;
               hasChanges = true;
-
-              // 2. Tạo payload để in (chỉ in số lượng chênh lệch)
               final Map<String, dynamic> printPayload = Map<String, dynamic>.from(map);
               printPayload['quantity'] = changeToPrint;
               itemsToPrint.add(printPayload);
-
-              // 3. Cập nhật 'sentQuantity' trong bản đồ để lưu vào DB
               map['sentQuantity'] = qty;
             }
             return map;
           }).toList();
 
-          // 2. Nếu có món mới, Gửi in VÀ Cập nhật DB
           if (hasChanges) {
-
             PrintQueueService().addJob(PrintJobType.kitchen, {
               'storeId': orderData['storeId'],
               'tableName': orderData['tableName'],
               'userName': orderData['createdByName'] ?? 'Guest',
-              'items': itemsToPrint, // Chỉ gửi các món mới
+              'items': itemsToPrint,
               'printType': 'add',
             });
 
-            // 3. Cập nhật DB
             doc.reference.update({
               'kitchenPrinted': true,
               'items': updatedItemsForDB
             });
-
           } else if (orderData['kitchenPrinted'] != true) {
-            // Không có món mới, chỉ cần đánh dấu là đã check
             doc.reference.update({'kitchenPrinted': true});
           }
-          // --- KẾT THÚC SỬA ---
-
         } catch (e) {
           debugPrint("Lỗi tự động in bếp: $e");
           doc.reference.update({'kitchenPrinted': 'error'});
@@ -276,8 +344,8 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
     final bool isMobile = screenWidth < mobileBreakpoint;
 
     return StreamBuilder<Map<String, dynamic>>(
-        stream: _combinedStream,
-        builder: (context, snapshot) {
+      stream: _combinedStream,
+      builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
@@ -289,58 +357,20 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
           return const Scaffold(body: Center(child: Text('Không có dữ liệu.')));
         }
         final List<TableWithOrderInfo> allTables =
-            snapshot.data!['tablesWithInfo'];
+        snapshot.data!['tablesWithInfo'];
         final List<TableModel> allTablesRaw = snapshot.data!['allTablesRaw'];
         final List<TableGroupModel> groups = snapshot.data!['groups'];
         List<OrderModel> activeOrders = snapshot.data!['activeOrders'];
         final Map<String, Map<String, dynamic>> allActiveOrdersRawDataMap =
         snapshot.data!['allActiveOrdersRawDataMap'];
 
-        double liveTotalProvisionalAmount = 0;
-        for (var order in activeOrders) {
-          double currentOrderTotal = 0;
-          bool hasTimeBasedItem = false;
-
-          for (var itemData in order.items) {
-            final itemMap = itemData as Map<String, dynamic>;
-
-            final product = ProductModel.fromMap(itemMap['product']);
-            final serviceSetup = product.serviceSetup;
-
-            if (serviceSetup != null && serviceSetup['isTimeBased'] == true) {
-              hasTimeBasedItem = true;
-              final startTime = itemMap['addedAt'] as Timestamp;
-              final isPaused = itemMap['isPaused'] as bool? ?? false;
-              final pausedAt = itemMap['pausedAt'] as Timestamp?;
-              final totalPausedDuration =
-                  (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ??
-                      0;
-
-              final timeResult =
-                  TimeBasedPricingService.calculatePriceWithBreakdown(
-                product: product,
-                startTime: startTime,
-                isPaused: isPaused,
-                pausedAt: pausedAt,
-                totalPausedDurationInSeconds: totalPausedDuration,
-              );
-              currentOrderTotal += timeResult.totalPrice;
-            } else {
-              currentOrderTotal +=
-                  (itemMap['subtotal'] as num?)?.toDouble() ?? 0.0;
-            }
-          }
-          liveTotalProvisionalAmount += currentOrderTotal;
-
-          if (hasTimeBasedItem) {
-            order.totalAmount = currentOrderTotal;
-          }
-        }
+        // Tổng tiền hiển thị ở App Bar (đã được tính lại real-time trong Stream)
+        double liveTotalProvisionalAmount = activeOrders.fold(0, (tong, order) => tong + order.totalAmount);
 
         final groupNames = ['Tất cả', ...groups.map((g) => g.name)];
         final occupiedCount = activeOrders.length;
         final double toolbarContentHeight =
-            isMobile ? (kToolbarHeight + 40.0) : (kToolbarHeight + 16.0);
+        isMobile ? (kToolbarHeight + 40.0) : (kToolbarHeight + 16.0);
 
         return DefaultTabController(
           length: groupNames.length,
@@ -350,9 +380,9 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
               automaticallyImplyLeading: false,
               title: isMobile
                   ? _buildMobileAppBarContent(occupiedCount, allTables.length,
-                      liveTotalProvisionalAmount)
+                  liveTotalProvisionalAmount)
                   : _buildDesktopAppBarContent(occupiedCount, allTables.length,
-                      liveTotalProvisionalAmount),
+                  liveTotalProvisionalAmount),
               bottom: TabBar(
                 isScrollable: true,
                 tabs: groupNames.map((name) => Tab(text: name)).toList(),
@@ -361,7 +391,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
             body: TabBarView(
               children: groupNames.map((groupName) {
                 List<TableWithOrderInfo> filteredList =
-                    allTables.where((tableInfo) {
+                allTables.where((tableInfo) {
                   final bool groupMatch = (groupName == 'Tất cả') ||
                       (tableInfo.table.tableGroup == groupName);
                   if (!groupMatch) return false;
@@ -536,7 +566,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
             onPressed: () => failedJobs.isNotEmpty
                 ? _showFailedJobsSheet()
                 : ToastService().show(
-                    message: "Không có lệnh in lỗi.", type: ToastType.warning),
+                message: "Không có lệnh in lỗi.", type: ToastType.warning),
           ),
         ),
       ),
@@ -568,104 +598,105 @@ class _TableCard extends StatelessWidget {
     required this.allActiveOrdersRawDataMap,
   });
 
-  String _formatDuration(Duration d, {bool isCountdown = false}) {
-    // Luôn dùng abs() để tính toán, sau đó kiểm tra cờ isNegative
-    final totalMinutes = d.abs().inMinutes;
+  // [HÀM MỚI] Tính chênh lệch phút bỏ qua giây (VD: 13:01 -> 13:06 = 5 phút)
+  int _diffInMinutes(DateTime from, DateTime to) {
+    // Tạo DateTime mới chỉ giữ lại đến phút (giây = 0)
+    final start = DateTime(from.year, from.month, from.day, from.hour, from.minute);
+    final end = DateTime(to.year, to.month, to.day, to.hour, to.minute);
+    return end.difference(start).inMinutes;
+  }
 
-    if (totalMinutes < 1) {
-      if (isCountdown) return "Sắp đến";
-      // Nếu không phải đếm ngược, nghĩa là đã qua
-      return d.isNegative ? "Vừa trễ" : "Vừa xong";
+  // [SỬA] Logic hiển thị: Bàn thường (đếm thời gian), Booking (đếm ngược/trễ)
+  String _formatDurationCustom(DateTime startTime, {bool isCountdown = false}) {
+    final now = DateTime.now();
+
+    // Nếu là đếm ngược (Booking), startTime là giờ hẹn.
+    // Nếu là đếm xuôi (Bàn thường), startTime là giờ vào.
+
+    if (!isCountdown) {
+      // --- LOGIC BÀN THƯỜNG ---
+      // Tính từ lúc vào đến bây giờ. Luôn dương.
+      final int minutesDiff = _diffInMinutes(startTime, now);
+      return _formatMinutesToLabel(minutesDiff);
+    } else {
+      // --- LOGIC BOOKING ---
+      // Tính chênh lệch: Hiện tại - Giờ hẹn
+      final int diff = _diffInMinutes(startTime, now);
+
+      if (diff > 0) {
+        // Hiện tại lớn hơn giờ hẹn -> Trễ
+        return "Trễ ${_formatMinutesToLabel(diff)}";
+      } else if (diff == 0) {
+        return "Đến giờ";
+      } else {
+        // Hiện tại nhỏ hơn giờ hẹn -> Còn sớm (Lấy trị tuyệt đối)
+        return "Còn ${_formatMinutesToLabel(diff.abs())}";
+      }
     }
+  }
 
+  String _formatMinutesToLabel(int totalMinutes) {
     final days = totalMinutes ~/ 1440;
     final hours = (totalMinutes % 1440) ~/ 60;
     final minutes = totalMinutes % 60;
 
     final List<String> parts = [];
-    if (days > 0) {
-      parts.add('${days}d');
-    }
-    if (hours > 0) {
-      parts.add('${hours}h');
-    }
-    // Luôn hiển thị phút
+    if (days > 0) parts.add('${days}d');
+    if (hours > 0) parts.add('${hours}h');
     parts.add("${minutes.toString().padLeft(2, '0')}'");
 
-    final timeString = parts.join(' ');
-
-    if (isCountdown) {
-      return 'Còn $timeString';
-    }
-
-    // Nếu không đếm ngược, kiểm tra xem có bị trễ (âm) không
-    if (d.isNegative) {
-      return 'Trễ $timeString';
-    }
-
-    // Mặc định là thời gian đã qua
-    return timeString;
+    return parts.join(' ');
   }
 
   Color _generateColorFromId(String id) {
     final hash = id.hashCode;
     final hue = hash.abs() % 360;
-    final saturation = 0.4 + (hash.abs() % 40) / 100.0; // 0.4 -> 0.8
-    final lightness = 0.4 + (hash.abs() % 20) / 100.0; // 0.4 -> 0.6
-
-    return HSLColor.fromAHSL(1.0, hue.toDouble(), saturation, lightness)
-        .toColor();
+    final saturation = 0.4 + (hash.abs() % 40) / 100.0;
+    final lightness = 0.4 + (hash.abs() % 20) / 100.0;
+    return HSLColor.fromAHSL(1.0, hue.toDouble(), saturation, lightness).toColor();
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final table = tableInfo.table; // Bàn gốc (1)
-
-    // --- LOGIC MỚI: XÁC ĐỊNH BÀN, ĐƠN HÀNG ĐỂ HIỂN THỊ ---
+    final table = tableInfo.table;
     final String? masterTableId = table.mergedWithTableId;
     final bool isMergedSlave = masterTableId != null && masterTableId.isNotEmpty;
 
     OrderModel? displayOrder;
     Map<String, dynamic>? displayRawData;
     TableModel? masterTable;
-    String? effectiveMergeId; // ID để tô màu
-    TableModel tableToOpen = table; // Bàn sẽ mở khi tap
+    String? effectiveMergeId;
+    TableModel tableToOpen = table;
 
     if (isMergedSlave) {
-      // 1. Đây là Bàn "Phụ" (Bàn 2)
       masterTable = allTablesRaw.firstWhereOrNull((t) => t.id == masterTableId);
       if (masterTable != null) {
-        displayOrder = allActiveOrders.firstWhereOrNull(
-                (o) => o.tableId == masterTableId);
+        displayOrder = allActiveOrders.firstWhereOrNull((o) => o.tableId == masterTableId);
         if (displayOrder != null) {
           displayRawData = allActiveOrdersRawDataMap[displayOrder.id];
         }
         effectiveMergeId = masterTableId;
-        tableToOpen = masterTable; // Khi tap sẽ mở bàn chủ
+        tableToOpen = masterTable;
       } else {
-        // Lỗi: Bàn chủ không tồn tại, hiển thị như bàn bình thường
         displayOrder = tableInfo.order;
         displayRawData = tableInfo.rawData;
       }
     } else {
-      // 2. Đây là Bàn "Thường" hoặc "Chủ" (Bàn 1)
       displayOrder = tableInfo.order;
       displayRawData = tableInfo.rawData;
-      tableToOpen = table; // Khi tap mở chính nó
-
+      tableToOpen = table;
       final bool isMergedMaster = allTablesRaw.any((t) => t.mergedWithTableId == table.id);
-      if (isMergedMaster && displayOrder != null) { // Chỉ là master nếu có khách
-        effectiveMergeId = table.id; // Lấy ID của chính nó để tô màu
+      if (isMergedMaster && displayOrder != null) {
+        effectiveMergeId = table.id;
       }
     }
 
     final bool isMerged = effectiveMergeId != null;
     final Color? mergeColor = isMerged ? _generateColorFromId(effectiveMergeId) : null;
-
     final bool isOccupied = displayOrder != null;
-    final order = displayOrder; // Đơn hàng để hiển thị
-    final rawData = displayRawData; // Dữ liệu thô để hiển thị
+    final order = displayOrder;
+    final rawData = displayRawData;
     final bool isOnlineGroup = table.tableGroup == 'Online';
     final bool isScheduleOrder = isOnlineGroup && table.id.startsWith('schedule_');
     final bool isShipOrder = isOnlineGroup && table.id.startsWith('ship_');
@@ -676,46 +707,39 @@ class _TableCard extends StatelessWidget {
     DateTime? appointmentTime;
 
     if (isOccupied && order != null) {
-      final difference = DateTime.now().difference(order.startTime.toDate());
-      duration = _formatDuration(difference, isCountdown: false);
-      entryTime = DateFormat('HH:mm dd/MM/yy', 'vi_VN')
-          .format(order.startTime.toDate());
-
-      // Logic đếm ngược (chỉ áp dụng cho bàn GỐC là bàn hẹn)
+      // 1. Logic thời gian vào / Giờ hẹn
       if (isScheduleOrder) {
         final String? appointmentString = rawData?['guestAddress'] as String?;
         if (appointmentString != null && appointmentString.isNotEmpty) {
           try {
-            // Thử parse định dạng mới "HH:mm dd/MM/yy"
             final format = DateFormat('HH:mm dd/MM/yy', 'vi_VN');
             appointmentTime = format.parseStrict(appointmentString);
-            entryTime = appointmentString; // Hiển thị giờ hẹn
-
-            final countdownDifference = appointmentTime.difference(DateTime.now());
-            isCountdown = !countdownDifference.isNegative;
-            duration = _formatDuration(countdownDifference, isCountdown: isCountdown);
-
+            entryTime = appointmentString;
+            isCountdown = true;
+            // Với booking: tính từ giờ hẹn
+            duration = _formatDurationCustom(appointmentTime, isCountdown: true);
           } catch (e) {
-            // Lỗi parse, thử định dạng cũ "HH:mm - dd/MM/yyyy"
+            // Thử định dạng cũ
             try {
               final oldFormat = DateFormat('HH:mm - dd/MM/yyyy', 'vi_VN');
               appointmentTime = oldFormat.parseStrict(appointmentString);
-              // Format lại sang định dạng mới để hiển thị
               entryTime = DateFormat('HH:mm dd/MM/yy', 'vi_VN').format(appointmentTime);
-
-              final countdownDifference = appointmentTime.difference(DateTime.now());
-              isCountdown = !countdownDifference.isNegative;
-              duration = _formatDuration(countdownDifference, isCountdown: isCountdown);
-
+              isCountdown = true;
+              duration = _formatDurationCustom(appointmentTime, isCountdown: true);
             } catch (e2) {
-              debugPrint("Lỗi parse thời gian hẹn (cả 2 định dạng): $appointmentString ($e)");
               entryTime = "Lỗi giờ hẹn";
-              duration = "Lỗi đếm";
+              duration = "--";
             }
           }
         } else {
           entryTime = "Không có giờ hẹn";
+          duration = "--";
         }
+      } else {
+        // Bàn thường: Tính từ lúc tạo đơn
+        entryTime = DateFormat('HH:mm dd/MM/yy', 'vi_VN').format(order.startTime.toDate());
+        isCountdown = false;
+        duration = _formatDurationCustom(order.startTime.toDate(), isCountdown: false);
       }
     }
 
@@ -732,7 +756,6 @@ class _TableCard extends StatelessWidget {
         occupiedColorBase.withAlpha((255 * 0.1).round()),
         Theme.of(context).cardColor);
 
-    // Hiển thị tên khách (từ đơn hàng master)
     final String displayText;
     if (isOccupied && (isOnlineGroup || (rawData?['customerName'] as String?)?.isNotEmpty == true)) {
       final String? customerName = rawData?['customerName'] as String?;
@@ -749,15 +772,13 @@ class _TableCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        // --- SỬA LOGIC ONTAP ---
         Navigator.of(context).push(MaterialPageRoute(
           builder: (context) => OrderScreen(
             currentUser: currentUser,
-            table: tableToOpen, // Mở bàn chủ
-            initialOrder: displayOrder, // Mở đơn chủ
+            table: tableToOpen,
+            initialOrder: displayOrder,
           ),
         ));
-        // --- KẾT THÚC SỬA ---
       },
       child: Stack(
         clipBehavior: Clip.none,
@@ -790,7 +811,7 @@ class _TableCard extends StatelessWidget {
                     borderRadius: const BorderRadius.only(topLeft: Radius.circular(14), topRight: Radius.circular(14)),
                   ),
                   child: Text(
-                    table.tableName, // Luôn hiển thị tên bàn gốc
+                    table.tableName,
                     textAlign: TextAlign.center,
                     style: textTheme.labelLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.white),
                   ),
@@ -809,8 +830,9 @@ class _TableCard extends StatelessWidget {
                               : (isShipOrder
                               ? Icons.local_shipping_outlined
                               : Icons.people_alt_outlined),
-                          text: displayText, // Hiển thị tên khách (từ đơn chủ)
+                          text: displayText,
                         ),
+                        // HIỂN THỊ TỔNG TIỀN ĐÃ ĐƯỢC CẬP NHẬT REAL-TIME
                         _buildInfoRow(context, icon: Icons.payments_outlined, text: NumberFormat.currency(locale: 'vi_VN', symbol: 'đ').format(order.totalAmount)),
                         _buildInfoRow(
                             context,
@@ -838,9 +860,7 @@ class _TableCard extends StatelessWidget {
                             isCountdown ? Icons.timelapse : Icons.timer_outlined,
                             size: 16,
                             color: isCountdown
-                                ? Colors.blue
-                                : (isScheduleOrder)
-                                ? Colors.red
+                                ? (duration.contains("Trễ") ? Colors.red : Colors.blue)
                                 : Colors.black54
                         ),
                         const SizedBox(width: 4),
@@ -849,9 +869,7 @@ class _TableCard extends StatelessWidget {
                             style: textTheme.bodyMedium?.copyWith(
                                 fontWeight: FontWeight.w600,
                                 color: isCountdown
-                                    ? Colors.blue
-                                    : (isScheduleOrder)
-                                    ? Colors.red
+                                    ? (duration.contains("Trễ") ? Colors.red : Colors.blue)
                                     : null
                             )
                         ),
@@ -889,8 +907,6 @@ class _TableCard extends StatelessWidget {
                 );
               },
             ),
-
-          // --- SỬA LOGIC ICON GỘP BÀN ---
           if (isMerged)
             Positioned(
               top: -5,

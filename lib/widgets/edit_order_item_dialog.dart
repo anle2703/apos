@@ -48,7 +48,9 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
     _discountValueController =
         TextEditingController(text: formatNumber(item.discountValue ?? 0));
     _noteController = TextEditingController(text: item.note ?? '');
-    _discountUnit = item.discountUnit ?? '%';
+    String rawUnit = item.discountUnit ?? '%';
+    if (rawUnit == 'VND') rawUnit = 'VNĐ';
+    _discountUnit = rawUnit;
 
     _isCommissionableService = item.product.productType == "Dịch vụ/Tính giờ" &&
         (item.product.serviceSetup?['isTimeBased'] == false);
@@ -128,7 +130,7 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
           textAlign: TextAlign.center),
 
       // 3. Thu nho padding cho khu vuc nut bam
-      actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      actionsPadding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 16.0),
 
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 500, minWidth: 400),
@@ -212,7 +214,7 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
                   child: AppDropdown(
                     labelText: 'Đơn vị',
                     value: _discountUnit,
-                    items: ['%', 'VND']
+                    items: ['%', 'VNĐ']
                         .map((v) => DropdownMenuItem(value: v, child: Text(v)))
                         .toList(),
                     onChanged: (v) {

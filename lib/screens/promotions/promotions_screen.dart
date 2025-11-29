@@ -12,6 +12,8 @@ import 'package:intl/intl.dart';
 import '../../widgets/app_dropdown.dart';
 import 'package:flutter/services.dart';
 import '../../widgets/custom_text_form_field.dart';
+import '../../models/discount_model.dart';
+import 'discount_form_screen.dart';
 
 // --- WIDGET CHÍNH ---
 class PromotionsScreen extends StatelessWidget {
@@ -38,7 +40,7 @@ class PromotionsScreen extends StatelessWidget {
         body: TabBarView(
           children: [
             PointsSettingsTab(currentUser: currentUser),
-            ComingSoonWidget(featureName: "Giảm giá trực tiếp"),
+            DiscountsTab(currentUser: currentUser),
             VouchersTab(currentUser: currentUser),
             ComingSoonWidget(featureName: "Mua hàng tặng hàng"),
           ],
@@ -290,13 +292,13 @@ class _VouchersTabState extends State<VouchersTab> {
             itemCount: vouchers.length,
             itemBuilder: (context, index) {
               final v = vouchers[index];
-              final valueString = v.isPercent ? '${formatNumber(v.value)}%' : '${formatNumber(v.value)}đ';
+              final valueString = v.isPercent ? '${formatNumber(v.value)}%' : '${formatNumber(v.value)} đ';
 
               String subtitle = "Giảm $valueString";
               final quantityUsed = v.quantityUsed ?? 0;
 
               if (v.quantity != null) {
-                subtitle += " - SL: ${v.quantity} - Đã dùng: $quantityUsed";
+                subtitle += " - Còn: ${v.quantity} - Đã dùng: $quantityUsed";
               } else {
                 subtitle += " - Đã dùng: $quantityUsed";
               }
@@ -636,16 +638,96 @@ class DiscountsTab extends StatefulWidget {
 }
 
 class _DiscountsTabState extends State<DiscountsTab> {
+  final _firestoreService = FirestoreService();
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(child: Text("Quản lý Giảm giá")),
+      body: StreamBuilder<List<DiscountModel>>(
+        stream: _firestoreService.getDiscountsStream(widget.currentUser.storeId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          // --- THÊM PHẦN NÀY ĐỂ HIỆN LINK INDEX ---
+          if (snapshot.hasError) {
+            debugPrint("==================================================");
+            debugPrint(">>> LỖI QUERY FIRESTORE (CÓ THỂ THIẾU INDEX):");
+            debugPrint(snapshot.error.toString());
+            debugPrint("==================================================");
+            return Center(child: Text("Lỗi: ${snapshot.error}"));
+          }
+          // ----------------------------------------
+
+          final discounts = snapshot.data ?? [];
+          if (discounts.isEmpty) {
+            return const Center(child: Text("Chưa có chương trình giảm giá nào."));
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: discounts.length,
+            itemBuilder: (context, index) {
+              final discount = discounts[index];
+
+              // Xử lý hiển thị text thời gian
+              String timeStr = "Chưa thiết lập thời gian";
+              if (discount.startAt != null && discount.endAt != null) {
+                timeStr = "${DateFormat('dd/MM').format(discount.startAt!)} - ${DateFormat('dd/MM').format(discount.endAt!)}";
+              } else if (discount.type == 'weekly') {
+                timeStr = "Hàng tuần (${discount.daysOfWeek?.length ?? 0} ngày)";
+              } else if (discount.type == 'daily') {
+                timeStr = "Hàng ngày";
+              }
+
+              // Xử lý hiển thị text đối tượng
+              String targetStr = "Tất cả khách";
+              if (discount.targetType == 'retail') targetStr = "Khách lẻ";
+              if (discount.targetType == 'group') targetStr = discount.targetGroupName ?? "Nhóm khách hàng";
+
+              return Card(
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: discount.isActive ? Colors.blue.shade100 : Colors.grey.shade200,
+                    child: Icon(Icons.price_change, color: discount.isActive ? Colors.blue : Colors.grey),
+                  ),
+                  title: Text(discount.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("${discount.items.length} sản phẩm - $targetStr"),
+                      Text(timeStr, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    ],
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => DiscountFormScreen(
+                          currentUser: widget.currentUser,
+                          discount: discount,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
-          // TODO: Mở dialog thêm Giảm giá
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => DiscountFormScreen(currentUser: widget.currentUser),
+            ),
+          );
         },
         icon: const Icon(Icons.add),
         label: const Text("Tạo Giảm Giá"),
+        backgroundColor: AppTheme.primaryColor,
       ),
     );
   }

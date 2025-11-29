@@ -31,6 +31,8 @@ import '../models/quick_note_model.dart';
 import '../screens/quick_notes_screen.dart';
 import '../tables/table_transfer_screen.dart';
 import 'package:flutter/services.dart';
+import '../services/discount_service.dart';
+import '../models/discount_model.dart';
 
 class OrderScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -81,7 +83,6 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _isPaymentView = false;
   bool get _hasUnsentItems {
     if (_localChanges.isEmpty) return false;
-
     for (final item in _localChanges.values) {
       if (item.hasUnsentChanges) {
         return true;
@@ -90,6 +91,9 @@ class _OrderScreenState extends State<OrderScreen> {
 
     return false;
   }
+  final _discountService = DiscountService();
+  List<DiscountModel> _activeDiscounts = [];
+  StreamSubscription<List<DiscountModel>>? _discountsSub;
   bool _suppressInitialToast = false;
   bool get isDesktop => MediaQuery.of(context).size.width >= 1100;
   bool _allowProvisionalBill = true;
@@ -119,6 +123,7 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _isPaymentLoading = false;
   Map<String, dynamic>? _storeTaxSettings;
   final Map<String, String> _productTaxMap = {};
+  StreamSubscription? _manualUpdateSub;
 
   @override
   void initState() {
@@ -173,8 +178,26 @@ class _OrderScreenState extends State<OrderScreen> {
       _updateTimeBasedPrices();
     });
 
+    _manualUpdateSub = DiscountService.onDiscountsChanged.listen((_) {
+      if (mounted) {
+        debugPrint(">>> [EVENT] Nhận tín hiệu Cập Nhật Giảm Giá chủ động!");
+        // 1. Nếu cần reload lại danh sách từ server cho chắc ăn (tùy chọn, nhưng nên làm để lấy data mới nhất)
+        // Nếu bạn tin tưởng luồng stream cũ thì chỉ cần gọi tính lại.
+        // Nhưng an toàn nhất là kích hoạt tính lại ngay:
+        _recalculateCartDiscounts();
+      }
+    });
+
     _fetchStaff();
     _listenQuickNotes();
+    _discountsSub = _discountService.getActiveDiscountsStream(widget.currentUser.storeId).listen((discounts) {
+      if (mounted) {
+        setState(() {
+          _activeDiscounts = discounts;
+        });
+        _recalculateCartDiscounts();
+      }
+    });
   }
 
   @override
@@ -185,6 +208,8 @@ class _OrderScreenState extends State<OrderScreen> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _priceUpdateTimer?.cancel();
+    _discountsSub?.cancel();
+    _manualUpdateSub?.cancel();
     super.dispose();
   }
 
@@ -207,6 +232,91 @@ class _OrderScreenState extends State<OrderScreen> {
       }
     } catch (e) {
       debugPrint("Lỗi tải cấu hình thuế: $e");
+    }
+  }
+
+  void _recalculateCartDiscounts() {
+    // [FIX QUAN TRỌNG] Chỉ cần có danh sách khuyến mãi là chạy.
+    // Không quan tâm giỏ hàng có rỗng hay không (vì _cart có thể có dữ liệu nhưng UI chưa vẽ).
+    if (_activeDiscounts.isEmpty) return;
+
+    bool hasChanges = false;
+    final Map<String, OrderItem> updates = {};
+
+    // Lấy tất cả item, ưu tiên dữ liệu đang chỉnh sửa cục bộ
+    final allItems = {..._cart, ..._localChanges};
+
+    allItems.forEach((key, item) {
+      if (item.status == 'cancelled') return;
+
+      final discountItem = _discountService.findBestDiscountForProduct(
+        product: item.product,
+        activeDiscounts: _activeDiscounts,
+        customer: _selectedCustomer,
+        checkTime: item.addedAt.toDate(),
+      );
+
+      final double currentItemVal = item.discountValue ?? 0;
+      final String currentItemUnit = item.discountUnit ?? '%';
+
+      double newCalculatedAmount = 0;
+      String newUnit = '%';
+
+      if (discountItem != null) {
+        final double configValue = discountItem.value;
+        final bool isPercent = discountItem.isPercent;
+
+        // Ép kiểu Unit theo cấu hình mới nhất
+        newUnit = isPercent ? '%' : 'VNĐ';
+
+        if (isPercent) {
+          newCalculatedAmount = configValue;
+        } else {
+          final isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
+          if (isTimeBased) {
+            // Logic tính cho món theo giờ
+            final pricingResult = _timeBasedDataCache[key] ??
+                TimeBasedPricingService.calculatePriceWithBreakdown(
+                  product: item.product,
+                  startTime: item.addedAt,
+                  isPaused: item.isPaused,
+                  pausedAt: item.pausedAt,
+                  totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
+                );
+            double totalHours = pricingResult.totalMinutesBilled / 60.0;
+            newCalculatedAmount = configValue * totalHours;
+          } else {
+            // Món thường: Giá trị giảm chính là giá trị cấu hình (VD: 5000)
+            newCalculatedAmount = configValue;
+          }
+        }
+      } else {
+        // Không có KM hoặc hết hạn -> Reset về 0
+        newCalculatedAmount = 0;
+        newUnit = '%';
+      }
+
+      // So sánh: Dùng sai số nhỏ cho double
+      bool valueChanged = (currentItemVal - newCalculatedAmount).abs() > 0.001;
+      bool unitChanged = currentItemUnit != newUnit;
+
+      if (valueChanged || unitChanged) {
+        updates[key] = item.copyWith(
+          discountValue: newCalculatedAmount,
+          discountUnit: newUnit,
+        );
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      // [FIX QUAN TRỌNG] Gọi setState trực tiếp để đảm bảo UI cập nhật ngay.
+      // Kiểm tra mounted để tránh lỗi nếu màn hình đã đóng.
+      if (mounted) {
+        setState(() {
+          _localChanges.addAll(updates);
+        });
+      }
     }
   }
 
@@ -407,11 +517,12 @@ class _OrderScreenState extends State<OrderScreen> {
 
     _displayCart.forEach((lineId, item) {
       final serviceSetup = item.product.serviceSetup;
-      if (serviceSetup != null &&
-          serviceSetup['isTimeBased'] == true &&
-          !item.isPaused) {
-        final pricingResult =
-        TimeBasedPricingService.calculatePriceWithBreakdown(
+
+      // Chỉ xử lý món tính giờ đang chạy (chưa pause)
+      if (serviceSetup != null && serviceSetup['isTimeBased'] == true && !item.isPaused) {
+
+        // 1. Tính toán giá tiền giờ mới nhất (theo thời gian thực)
+        final pricingResult = TimeBasedPricingService.calculatePriceWithBreakdown(
           product: item.product,
           startTime: item.addedAt,
           isPaused: item.isPaused,
@@ -419,21 +530,58 @@ class _OrderScreenState extends State<OrderScreen> {
           totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
         );
 
-        // So sánh giá mới và cũ để quyết định có cần setState hay không
-        if ((pricingResult.totalPrice - item.price).abs() > 0.01) {
+        // 2. [FIX QUAN TRỌNG] Tìm lại khuyến mãi tốt nhất hiện tại
+        // Việc này đảm bảo nếu bạn vừa chuyển từ VNĐ sang %, logic tính giờ sẽ nhận diện được ngay
+        final discountItem = _discountService.findBestDiscountForProduct(
+          product: item.product,
+          activeDiscounts: _activeDiscounts,
+          customer: _selectedCustomer,
+          checkTime: item.addedAt.toDate(),
+        );
+
+        double newDiscountVal = item.discountValue ?? 0;
+        String newDiscountUnit = item.discountUnit ?? '%';
+
+        if (discountItem != null) {
+          // Luôn cập nhật Unit theo cấu hình mới nhất (tránh việc giữ cache cũ)
+          newDiscountUnit = discountItem.isPercent ? '%' : 'VNĐ';
+
+          if (discountItem.isPercent) {
+            // Nếu là %, giá trị giảm giữ nguyên theo cấu hình (VD: 10 => 10%)
+            // Lưu ý: Không nhân với giờ chơi
+            newDiscountVal = discountItem.value;
+          } else {
+            // Nếu là VNĐ, tính lại Tổng tiền giảm theo số giờ đã chơi
+            // VD: Giảm 10k/h -> Chơi 2h -> Giảm 20k
+            double totalHours = pricingResult.totalMinutesBilled / 60.0;
+            newDiscountVal = discountItem.value * totalHours;
+          }
+        }
+
+        // 3. So sánh xem có thay đổi gì không để trigger update UI
+        // Dùng sai số nhỏ (epsilon) khi so sánh double
+        bool priceChanged = (pricingResult.totalPrice - item.price).abs() > 0.01;
+        bool discountValChanged = ((item.discountValue ?? 0) - newDiscountVal).abs() > 0.001;
+        bool discountUnitChanged = item.discountUnit != newDiscountUnit;
+
+        if (priceChanged || discountValChanged || discountUnitChanged) {
+          // Cập nhật Item với giá trị mới
           final updatedItem = item.copyWith(
             price: pricingResult.totalPrice,
             priceBreakdown: pricingResult.blocks,
+            discountValue: newDiscountVal,
+            discountUnit: newDiscountUnit, // Cập nhật đơn vị mới
           );
 
-          // Cập nhật lại cache để giao diện nhận được dữ liệu mới
+          // Cập nhật Cache kết quả tính toán
           _timeBasedDataCache[lineId] = pricingResult;
 
-          // Cập nhật vào đúng nơi (cart đã lưu hoặc local changes)
+          // Logic ưu tiên cập nhật vào _localChanges
           if (_localChanges.containsKey(lineId)) {
             _localChanges[lineId] = updatedItem;
           } else if (_cart.containsKey(lineId)) {
-            _cart[lineId] = updatedItem;
+            // Nếu item đang nằm trong cart gốc, copy sang localChanges để UI render cái mới
+            _localChanges[lineId] = updatedItem;
           }
 
           needsUpdate = true;
@@ -443,6 +591,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     if (needsUpdate) {
       setState(() {});
+      _saveOrder(onlyTimeBasedUpdates: true);
     }
   }
 
@@ -478,11 +627,12 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() {
       _localChanges[lineId] = item!;
     });
-    _saveOrder();
+    _saveOrder(onlyTimeBasedUpdates: true);
   }
 
   Future<void> _addItemToCart(ProductModel product) async {
     final serviceSetup = product.serviceSetup;
+
     if (serviceSetup != null && serviceSetup['isTimeBased'] == true) {
       if (_displayCart.values.any((item) => item.product.id == product.id)) {
         ToastService().show(message: "Dịch vụ này đã được tính giờ.", type: ToastType.warning);
@@ -490,6 +640,8 @@ class _OrderScreenState extends State<OrderScreen> {
       }
 
       final startTime = Timestamp.now();
+
+      // 1. Tính giá khởi điểm
       final initialResult = TimeBasedPricingService.calculatePriceWithBreakdown(
         product: product,
         startTime: startTime,
@@ -498,21 +650,40 @@ class _OrderScreenState extends State<OrderScreen> {
         totalPausedDurationInSeconds: 0,
       );
 
+      // 2. [FIX] TÌM KHUYẾN MÃI NGAY LẬP TỨC (Trước khi tạo Item)
+      final discountItem = _discountService.findBestDiscountForProduct(
+        product: product,
+        activeDiscounts: _activeDiscounts,
+        customer: _selectedCustomer,
+        checkTime: startTime.toDate(), // Dùng giờ bắt đầu để check
+      );
+
+      double discountVal = 0;
+      String discountUnit = '%';
+
+      if (discountItem != null) {
+        discountVal = discountItem.value;
+        discountUnit = discountItem.isPercent ? '%' : 'VNĐ';
+      }
+
+      // 3. Tạo Item với thông tin giảm giá đã tìm được
       final newItem = OrderItem(
         product: product,
         price: initialResult.totalPrice,
         priceBreakdown: initialResult.blocks,
-        quantity: 1,
+        quantity: 1, // Lúc đầu set là 1, sau này update timer sẽ thành số giờ
         sentQuantity: 1,
         addedBy: widget.currentUser.name ?? 'N/A',
         addedAt: startTime,
-        discountValue: 0,
-        discountUnit: '%',
+
+        // [FIX] Gán giá trị giảm giá vào ngay lúc tạo
+        discountValue: discountVal,
+        discountUnit: discountUnit,
+
         note: null,
         commissionStaff: {},
       );
 
-      // Cập nhật UI ngay
       setState(() {
         _localChanges[newItem.lineId] = newItem;
         _timeBasedDataCache[newItem.lineId] = initialResult;
@@ -531,22 +702,26 @@ class _OrderScreenState extends State<OrderScreen> {
           return;
         }
       } else {
-        // MOBILE: dùng đường mobile riêng để không mất món chưa báo bếp
         await _saveTimeBasedServiceOnly(newItem);
       }
 
-      return; // kết thúc nhánh dịch vụ tính giờ
+      return; // Kết thúc xử lý cho món tính giờ
     }
 
-    // --- LOGIC MỚI: Xử lý Ghi chú nhanh và Tùy chọn ---
     final relevantNotes = _quickNotes.where((note) {
       return note.productIds.isEmpty || note.productIds.contains(product.id);
     }).toList();
 
-    // Điều kiện mở dialog: Tùy chọn đơn vị, Topping, HOẶC Ghi chú nhanh
     final bool needsOptionDialog = product.additionalUnits.isNotEmpty || product.accompanyingItems.isNotEmpty || relevantNotes.isNotEmpty;
 
     OrderItem newItem;
+
+    final discountItem = _discountService.findBestDiscountForProduct(
+      product: product,
+      activeDiscounts: _activeDiscounts,
+      customer: _selectedCustomer,
+      checkTime: DateTime.now(),
+    );
 
     if (needsOptionDialog) {
       final result = await showDialog<Map<String, dynamic>>(
@@ -554,7 +729,7 @@ class _OrderScreenState extends State<OrderScreen> {
         builder: (context) => _ProductOptionsDialog(
           product: product,
           allProducts: _menuProducts,
-          relevantQuickNotes: relevantNotes, // TRUYỀN GHI CHÚ
+          relevantQuickNotes: relevantNotes,
         ),
       );
       if (result == null) return;
@@ -562,22 +737,58 @@ class _OrderScreenState extends State<OrderScreen> {
       final selectedUnit = result['selectedUnit'] as String;
       final priceForUnit = result['price'] as double;
       final selectedToppings = result['selectedToppings'] as Map<ProductModel, double>;
-      final selectedNoteText = result['selectedNote'] as String?; // LẤY GHI CHÚ
+      final selectedNoteText = result['selectedNote'] as String?;
+
+      double originalPrice = priceForUnit;
+      double discountVal = 0;
+      String discountUnit = '%';
+
+      if (discountItem != null) {
+        if (discountItem.isPercent) {
+          discountVal = discountItem.value;
+          discountUnit = '%';
+        } else {
+          discountVal = discountItem.value;
+          discountUnit = 'VNĐ';
+        }
+      }
 
       newItem = OrderItem(
-        product: product, selectedUnit: selectedUnit, price: priceForUnit,
-        toppings: selectedToppings, addedBy: widget.currentUser.name ?? 'N/A', addedAt: Timestamp.now(),
-        discountValue: 0,
-        discountUnit: '%',
-        note: selectedNoteText.nullIfEmpty, // GÁN GHI CHÚ (quan trọng cho groupKey)
+        product: product,
+        selectedUnit: selectedUnit,
+        price: originalPrice, // VẪN LƯU GIÁ GỐC
+        toppings: selectedToppings,
+        addedBy: widget.currentUser.name ?? 'N/A',
+        addedAt: Timestamp.now(),
+        discountValue: discountVal, // CHỈ LƯU GIÁ TRỊ GIẢM
+        discountUnit: discountUnit,
+        note: selectedNoteText.nullIfEmpty,
         commissionStaff: {},
       );
     } else {
+      // Logic không có dialog
+      double originalPrice = product.sellPrice;
+      double discountVal = 0;
+      String discountUnit = '%';
+
+      if (discountItem != null) {
+        if (discountItem.isPercent) {
+          discountVal = discountItem.value;
+          discountUnit = '%';
+        } else {
+          discountVal = discountItem.value;
+          discountUnit = 'VNĐ';
+        }
+      }
+
       newItem = OrderItem(
-        product: product, price: product.sellPrice, selectedUnit: product.unit ?? '',
-        addedBy: widget.currentUser.name ?? 'N/A', addedAt: Timestamp.now(),
-        discountValue: 0,
-        discountUnit: '%',
+        product: product,
+        price: originalPrice, // VẪN LƯU GIÁ GỐC
+        selectedUnit: product.unit ?? '',
+        addedBy: widget.currentUser.name ?? 'N/A',
+        addedAt: Timestamp.now(),
+        discountValue: discountVal, // CHỈ LƯU GIÁ TRỊ GIẢM
+        discountUnit: discountUnit,
         note: null,
         commissionStaff: {},
       );
@@ -1415,10 +1626,51 @@ class _OrderScreenState extends State<OrderScreen> {
     final Map<String, OrderItem> mergedCart = {};
 
     for (var itemData in firestoreItems) {
-      final newItem = OrderItem.fromMap(
+      // 1. Tạo item từ dữ liệu gốc của Firestore (đang chứa discount cũ)
+      OrderItem newItem = OrderItem.fromMap(
         (itemData as Map).cast<String, dynamic>(),
         allProducts: currentProducts,
       );
+
+      if (_activeDiscounts.isNotEmpty) {
+        final discountItem = _discountService.findBestDiscountForProduct(
+          product: newItem.product,
+          activeDiscounts: _activeDiscounts,
+          customer: _selectedCustomer,
+          checkTime: newItem.addedAt.toDate(),
+        );
+
+        if (discountItem != null) {
+          final bool isPercentConfig = discountItem.isPercent;
+          final double configValue = discountItem.value;
+
+          String fixedUnit = isPercentConfig ? '%' : 'VNĐ';
+          double fixedValue = 0;
+
+          if (isPercentConfig) {
+            fixedValue = configValue;
+          } else {
+            final bool isTimeBased = newItem.product.serviceSetup?['isTimeBased'] == true;
+            if (isTimeBased) {
+              fixedValue = newItem.discountValue ?? 0;
+            } else {
+              // Món thường: Ép về giá trị giảm tiền mặt mới
+              fixedValue = configValue;
+            }
+          }
+
+          // [SỬA LẠI ĐOẠN SO SÁNH NÀY]
+          bool unitDiff = newItem.discountUnit != fixedUnit;
+          bool valueDiff = (newItem.discountValue ?? 0) != fixedValue;
+
+          if (unitDiff || valueDiff) {
+            newItem = newItem.copyWith(
+                discountUnit: fixedUnit,
+                discountValue: fixedValue
+            );
+          }
+        }
+      }
 
       final existingEntry = mergedCart.entries.firstWhereOrNull(
             (entry) => entry.value.groupKey == newItem.groupKey,
@@ -1434,6 +1686,9 @@ class _OrderScreenState extends State<OrderScreen> {
           addedAt: (existingItem.addedAt.seconds < newItem.addedAt.seconds)
               ? existingItem.addedAt
               : newItem.addedAt,
+          // Merge luôn thông tin giảm giá mới nhất
+          discountValue: newItem.discountValue,
+          discountUnit: newItem.discountUnit,
         );
 
         mergedCart[existingKey] = updatedItem;
@@ -1461,7 +1716,10 @@ class _OrderScreenState extends State<OrderScreen> {
           });
         }
       }
+
+      // Chạy các hàm tính toán lại để đảm bảo chính xác tuyệt đối
       _updateTimeBasedPrices();
+      _recalculateCartDiscounts();
     }
   }
 
@@ -2153,6 +2411,8 @@ class _OrderScreenState extends State<OrderScreen> {
       _selectedCustomer = newCustomer;
     });
 
+    _recalculateCartDiscounts();
+
     if (_currentOrder != null) {
       final orderRef = _firestoreService.getOrderReference(_currentOrder!.id);
       final dataToUpdate = {
@@ -2381,15 +2641,14 @@ class _OrderScreenState extends State<OrderScreen> {
     for (final entry in _displayCart.entries) {
       final cartId = entry.key;
       final oldItem = entry.value;
+      if (oldItem.product.serviceSetup?['isTimeBased'] == true) continue;
       final latestProduct = latestProductMap[oldItem.product.id];
 
       if (latestProduct != null) {
-        // So sánh giá bán và tên sản phẩm
         if (oldItem.price != latestProduct.sellPrice ||
             oldItem.product.productName != latestProduct.productName) {
           hasPriceChanges = true;
 
-          // KIẾN TRÚC MỚI: Chuẩn bị một bản cập nhật cho "Giấy Nháp" (_localChanges)
           priceUpdates[cartId] = oldItem.copyWith(
             product: latestProduct,
             price: latestProduct.sellPrice,
@@ -2494,23 +2753,34 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  Future<bool> _saveOrder() async {
+  Future<bool> _saveOrder({bool onlyTimeBasedUpdates = false}) async {
     final bool useMergeStrategy =
         kIsWeb || !Platform.isIOS && !Platform.isAndroid;
     if (useMergeStrategy) {
-      return await _saveOrderWithMerge();
+      return await _saveOrderWithMerge(onlyTimeBasedUpdates: onlyTimeBasedUpdates);
     } else {
-      return await _saveOrderWithTransaction();
+      return await _saveOrderWithTransaction(onlyTimeBasedUpdates: onlyTimeBasedUpdates);
     }
   }
 
-  Future<bool> _saveOrderWithMerge() async {
+  Future<bool> _saveOrderWithMerge({bool onlyTimeBasedUpdates = false}) async {
     if (_currentOrder != null &&
         ['paid', 'cancelled'].contains(_currentOrder!.status)) {
       return true;
     }
-    final localChanges = Map<String, OrderItem>.from(_localChanges);
-    if (localChanges.isEmpty) return true;
+
+    // [FIX 2] Lọc dữ liệu trước khi lưu
+    Map<String, OrderItem> localChangesToProcess;
+    if (onlyTimeBasedUpdates) {
+      // Chỉ lấy các món tính giờ từ bộ nhớ tạm
+      localChangesToProcess = Map.from(_localChanges)
+        ..removeWhere((key, item) => item.product.serviceSetup?['isTimeBased'] != true);
+    } else {
+      // Lấy tất cả (hành vi cũ)
+      localChangesToProcess = Map<String, OrderItem>.from(_localChanges);
+    }
+
+    if (localChangesToProcess.isEmpty) return true; // Không có gì để lưu thì thoát
 
     Map<String, OrderItem> finalCart = {};
 
@@ -2552,7 +2822,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
       if (!serverSnapshot.exists || ['paid', 'cancelled'].contains(
           (serverSnapshot.data() as Map<String, dynamic>?)?['status'])) {
-        final result = groupAndCalculate(localChanges);
+        final result = groupAndCalculate(localChangesToProcess);
         if (result.items.isEmpty) return true;
 
         final currentVersion = ((serverSnapshot.data() as Map<String,
@@ -2589,8 +2859,7 @@ class _OrderScreenState extends State<OrderScreen> {
         };
 
         final mergedItems = Map<String, OrderItem>.from(serverItemsMap);
-        mergedItems.addAll(localChanges);
-
+        mergedItems.addAll(localChangesToProcess);
         final result = groupAndCalculate(mergedItems);
 
         if (result.items.isEmpty) {
@@ -2622,7 +2891,12 @@ class _OrderScreenState extends State<OrderScreen> {
 
       if (mounted) {
         setState(() {
-          _localChanges.clear();
+          if (onlyTimeBasedUpdates) {
+            _localChanges.removeWhere((key, item) => item.product.serviceSetup?['isTimeBased'] == true);
+          } else {
+            _localChanges.clear();
+          }
+
           _cart.clear();
           _cart.addAll(finalCart);
         });
@@ -2646,12 +2920,22 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  Future<bool> _saveOrderWithTransaction() async {
+  Future<bool> _saveOrderWithTransaction({bool onlyTimeBasedUpdates = false}) async {
     if (_currentOrder != null &&
         ['paid', 'cancelled'].contains(_currentOrder!.status)) {
       return true;
     }
     if (_localChanges.isEmpty) return true;
+
+    Map<String, OrderItem> localChangesToProcess;
+    if (onlyTimeBasedUpdates) {
+      localChangesToProcess = Map.from(_localChanges)
+        ..removeWhere((key, item) => item.product.serviceSetup?['isTimeBased'] != true);
+    } else {
+      localChangesToProcess = Map<String, OrderItem>.from(_localChanges);
+    }
+
+    if (localChangesToProcess.isEmpty) return true;
 
     Map<String, OrderItem> finalCartAfterSave = {};
 
@@ -2668,9 +2952,8 @@ class _OrderScreenState extends State<OrderScreen> {
         final serverData = serverSnapshot.data() as Map<String, dynamic>?;
         final serverStatus = serverData?['status'];
 
-        if (!serverSnapshot.exists ||
-            ['paid', 'cancelled'].contains(serverStatus)) {
-          Map<String, OrderItem> finalCart = Map<String, OrderItem>.from(_localChanges);
+        if (!serverSnapshot.exists || ['paid', 'cancelled'].contains(serverStatus)) {
+          Map<String, OrderItem> finalCart = Map<String, OrderItem>.from(localChangesToProcess);
           finalCart.removeWhere((key, item) => item.quantity <= 0);
           if (finalCart.isEmpty) {
             finalCartAfterSave = {};
@@ -2718,7 +3001,7 @@ class _OrderScreenState extends State<OrderScreen> {
           };
 
           final mergedItems = Map<String, OrderItem>.from(serverItemsMap);
-          mergedItems.addAll(_localChanges);
+          mergedItems.addAll(localChangesToProcess);
 
           final Map<String, OrderItem> mergedByGroupKey = {};
           for (final item in mergedItems.values) {
@@ -2777,7 +3060,13 @@ class _OrderScreenState extends State<OrderScreen> {
           if (finalCartAfterSave.isEmpty) {
             _currentOrder = null;
           }
-          _localChanges.clear();
+          // Chỉ xóa những món đã xử lý
+          if (onlyTimeBasedUpdates) {
+            _localChanges.removeWhere((key, item) => item.product.serviceSetup?['isTimeBased'] == true);
+          } else {
+            _localChanges.clear();
+          }
+
           _cart.clear();
           _cart.addAll(finalCartAfterSave);
         });
@@ -3131,18 +3420,48 @@ class _OrderScreenState extends State<OrderScreen> {
     final change = item.unsentChange;
     final bool isCancelled = item.quantity == 0 && item.sentQuantity > 0;
 
+    // --- 1. TÍNH TOÁN CÁC GIÁ TRỊ HIỂN THỊ ---
+
+    // [QUAN TRỌNG] Dùng hàm này để lấy GIÁ NIÊM YẾT CHUẨN (kể cả khi đã sửa giá tay)
+    double originalUnitPrice = _getBasePriceForUnit(item.product, item.selectedUnit);
+
+    // Giá thực bán (Mặc định lấy giá trong giỏ - có thể là giá đã sửa tay hoặc giá gốc)
+    double sellingPrice = item.price;
+
+    // Tính toán giảm giá dựa trên Giá Niêm Yết hoặc Giá Bán (thường là giảm trên giá bán hiện tại)
+    // Nhưng để hiển thị đúng logic "Giá gốc gạch ngang", ta dùng originalUnitPrice làm mốc so sánh
+
+    double discountedUnitPrice = sellingPrice;
     String discountText = '';
+
     if (item.discountValue != null && item.discountValue! > 0) {
       if (item.discountUnit == '%') {
-        discountText = "(-${formatNumber(item.discountValue!)}%)";
+        // Giảm %
+        discountText = " (-${formatNumber(item.discountValue!)}%) ";
+        discountedUnitPrice = sellingPrice * (1 - item.discountValue! / 100);
       } else {
-        discountText = "(-${formatNumber(item.discountValue!)}đ)";
+        // Giảm tiền mặt
+        discountText = " (-${formatNumber(item.discountValue!)}đ) ";
+        discountedUnitPrice = sellingPrice - item.discountValue!;
       }
     }
 
-    final double basePriceForUnit = _getBasePriceForUnit(item.product, item.selectedUnit);
-    final bool priceHasChanged = (item.price - basePriceForUnit).abs() > 0.01;
+    // Làm tròn
+    discountedUnitPrice = discountedUnitPrice.roundToDouble();
+    if (discountedUnitPrice < 0) discountedUnitPrice = 0;
+
+    // Style gạch ngang đỏ
+    final redStrikeThroughStyle = textTheme.bodyMedium?.copyWith(
+        decoration: TextDecoration.lineThrough,
+        decorationColor: Colors.red,
+        color: Colors.red,
+        fontSize: 13,
+        fontWeight: FontWeight.normal
+    );
+    // ------------------------------------------
+
     final String taxText = _getTaxDisplayString(item.product);
+
     return Card(
       child: InkWell(
         onTap: () => _showEditItemDialog(cartId, item),
@@ -3152,6 +3471,7 @@ class _OrderScreenState extends State<OrderScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // === DÒNG 1: HEADER ===
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -3182,62 +3502,47 @@ class _OrderScreenState extends State<OrderScreen> {
                   Expanded(
                     child: Text.rich(
                       TextSpan(children: [
+                        // Tên món
                         TextSpan(
-                          text: '${item.product.productName} ',
+                          text: item.product.productName,
                           style: textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color:
-                            isCancelled ? Colors.grey : AppTheme.textColor,
-                            decoration: isCancelled
-                                ? TextDecoration.lineThrough
-                                : TextDecoration.none,
-                            decorationColor: Colors.grey,
-                            decorationThickness: 2.0,
+                            color: isCancelled ? Colors.grey : AppTheme.textColor,
+                            decoration: isCancelled ? TextDecoration.lineThrough : TextDecoration.none,
                           ),
                         ),
+                        // Đơn vị
                         if (item.selectedUnit.isNotEmpty)
                           TextSpan(
-                            text: '(${item.selectedUnit}) ',
+                            text: ' (${item.selectedUnit})',
                             style: textTheme.bodyMedium?.copyWith(
-                              color: isCancelled
-                                  ? Colors.grey
-                                  : Colors.grey.shade700,
-                              decoration: isCancelled
-                                  ? TextDecoration.lineThrough
-                                  : TextDecoration.none,
-                              decorationColor: Colors.grey,
-                              decorationThickness: 2.0,
+                              color: isCancelled ? Colors.grey : Colors.grey.shade700,
                             ),
                           ),
+                        // Thuế
                         if (taxText.isNotEmpty)
                           TextSpan(
-                            text: '$taxText ',
+                            text: ' $taxText',
                             style: textTheme.bodyMedium?.copyWith(
-                              color: isCancelled
-                                  ? Colors.grey
-                                  : Colors.grey.shade700,
-                              decoration: isCancelled
-                                  ? TextDecoration.lineThrough
-                                  : TextDecoration.none,
-                              decorationColor: Colors.grey,
-                              decorationThickness: 2.0,
+                                color: Colors.grey.shade700,
+                                fontSize: 12
                             ),
                           ),
-                        if (priceHasChanged && !isCancelled)
-                          TextSpan(
-                            text: currencyFormat.format(basePriceForUnit),
-                            style: textTheme.bodyMedium?.copyWith(
-                              color: Colors.red,
-                              decoration: TextDecoration.lineThrough,
-                              decorationColor: Colors.red,
-                            ),
-                          ),
+
+                        // --- PHẦN HIỂN THỊ GIẢM GIÁ ---
+                        // Badge (-10%)
                         if (discountText.isNotEmpty)
                           TextSpan(
-                            text: ' $discountText',
+                            text: discountText,
                             style: textTheme.bodyMedium?.copyWith(
-                                color: Colors.red,
+                              color: Colors.red,
                             ),
+                          ),
+                        // Giá Niêm Yết gạch ngang (Chỉ hiện khi có giảm giá HOẶC giá bán khác giá niêm yết)
+                        if (discountText.isNotEmpty || sellingPrice != originalUnitPrice)
+                          TextSpan(
+                            text: formatNumber(originalUnitPrice), // Sử dụng giá từ hàm getBasePrice
+                            style: redStrikeThroughStyle,
                           ),
                       ]),
                       overflow: TextOverflow.ellipsis,
@@ -3276,29 +3581,27 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                 ),
 
+              // === DÒNG 2: GIÁ ĐÃ GIẢM x SL = THÀNH TIỀN ===
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // Đơn giá ĐÃ GIẢM
                   SizedBox(
                     width: 100,
-                    child: Row(
-                      children: [
-                        Text(
-                          currencyFormat.format(item.price),
-                          style: textTheme.bodyMedium?.copyWith(
-                            color: isCancelled ? Colors.grey : (priceHasChanged ? Colors.orange.shade700 : null),
-                            fontWeight: priceHasChanged ? FontWeight.bold : null,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      currencyFormat.format(discountedUnitPrice),
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: isCancelled ? Colors.grey : null,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
 
+                  // Bộ đếm số lượng
                   Container(
                     decoration: BoxDecoration(
-                      color:
-                      isCancelled ? Colors.transparent : Colors.grey[100],
+                      color: isCancelled ? Colors.transparent : Colors.grey[100],
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -3310,21 +3613,21 @@ class _OrderScreenState extends State<OrderScreen> {
                               size: 18, color: Colors.red.shade400),
                           onPressed: () => _updateQuantity(cartId, -1),
                         ),
-
                         InkWell(
                           onTap: () => _showEditItemDialog(cartId, item),
                           child: Container(
                             decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(12.0),
-                                border: Border.all(color: Colors.grey.shade300, width: 0.5)
-                            ),
+                                border: Border.all(
+                                    color: Colors.grey.shade300, width: 0.5)),
                             alignment: Alignment.center,
                             constraints: const BoxConstraints(
                               minWidth: 40,
                               maxWidth: 65,
                             ),
-                            padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4.0, vertical: 1.0),
                             child: Text(
                               formatNumber(item.quantity),
                               style: textTheme.titleMedium?.copyWith(
@@ -3333,13 +3636,10 @@ class _OrderScreenState extends State<OrderScreen> {
                                 decoration: isCancelled
                                     ? TextDecoration.lineThrough
                                     : TextDecoration.none,
-                                decorationColor: Colors.grey,
-                                decorationThickness: 2.0,
                               ),
                             ),
                           ),
                         ),
-
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           splashRadius: 18,
@@ -3351,6 +3651,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                   ),
 
+                  // Thành tiền
                   SizedBox(
                     width: 120,
                     child: Text(
@@ -3362,8 +3663,6 @@ class _OrderScreenState extends State<OrderScreen> {
                         decoration: isCancelled
                             ? TextDecoration.lineThrough
                             : TextDecoration.none,
-                        decorationColor: Colors.grey,
-                        decorationThickness: 2.0,
                       ),
                     ),
                   ),
@@ -3413,8 +3712,7 @@ class _OrderScreenState extends State<OrderScreen> {
         );
 
     final startTime = item.addedAt.toDate();
-    final billableEndTime =
-    startTime.add(Duration(minutes: result.totalMinutesBilled));
+    final billableEndTime = startTime.add(Duration(minutes: result.totalMinutesBilled));
 
     String formatMinutes(int totalMinutes) {
       if (totalMinutes <= 0) return "0'";
@@ -3426,249 +3724,273 @@ class _OrderScreenState extends State<OrderScreen> {
       return "$minutes'";
     }
 
+    // --- TÍNH TOÁN GIÁ TRỊ GIẢM ---
     String discountText = '';
+    double hourlyDiscountAmount = 0; // Số tiền giảm trên mỗi giờ (VNĐ)
+    double percentDiscount = 0;      // Tỷ lệ giảm % (0.1 = 10%)
+
     if (item.discountValue != null && item.discountValue! > 0) {
       if (item.discountUnit == '%') {
-        discountText = "(-${formatNumber(item.discountValue!)}%)";
+        // [LOGIC %]: discountValue lưu số % (VD: 10)
+        // Safe guard: Nếu vô tình lưu số quá lớn (do chuyển từ VNĐ sang mà chưa convert), chặn max 100%
+        double rawPercent = item.discountValue!;
+        if (rawPercent > 100) rawPercent = 100;
+
+        percentDiscount = rawPercent / 100.0;
+        discountText = "(-${formatNumber(rawPercent)}%)";
       } else {
-        discountText = "(-${formatNumber(item.discountValue!)}đ)";
+        // [LOGIC VNĐ]: discountValue lưu TỔNG TIỀN GIẢM
+        // Cần quy đổi ra GIẢM/GIỜ để tính đơn giá hiển thị
+        double totalHours = result.totalMinutesBilled / 60.0;
+
+        if (totalHours > 0) {
+          hourlyDiscountAmount = item.discountValue! / totalHours;
+        } else {
+          // Trường hợp đặc biệt: Mới mở bàn 0 phút -> Chưa có tổng giờ
+          // Nếu muốn hiển thị đúng mức giảm (VD: 10k/h) ngay lúc này,
+          // ta cần dữ liệu gốc từ cấu hình khuyến mãi (nhưng ở đây chỉ có OrderItem).
+          // Tạm thời hiển thị 0 hoặc lấy giá trị gốc nếu logic lưu trữ cho phép.
+          // Với logic hiện tại (lưu Tổng tiền), khi 0 giờ thì Tổng tiền giảm = 0 -> hourly = 0 là đúng.
+          hourlyDiscountAmount = 0;
+        }
+
+        hourlyDiscountAmount = hourlyDiscountAmount.roundToDouble();
+        discountText = "(-${formatNumber(hourlyDiscountAmount)}đ/h)";
       }
     }
+    // -----------------------------
 
     return Card(
-        child: InkWell(
-          onTap: () => _showEditItemDialog(cartId, item),
-          borderRadius: BorderRadius.circular(12.0),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  // ... (Row icon pause/play và tên món) ...
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      splashRadius: 20,
-                      icon: Icon(
-                        item.isPaused
-                            ? Icons.play_circle_filled
-                            : Icons.pause_circle_filled,
-                        color: item.isPaused
-                            ? Colors.orange.shade700
-                            : AppTheme.primaryColor,
-                        size: 24,
-                      ),
-                      onPressed: () => _togglePauseTimeBasedItem(cartId),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text.rich( // Đổi thành Text.rich
-                        TextSpan(children: [
-                          TextSpan(
-                            text: item.product.productName,
-                            style: textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.bold, color: AppTheme.textColor),
-                          ),
-                          // --- HIỂN THỊ CHIẾT KHẤU ---
-                          if (discountText.isNotEmpty)
-                            TextSpan(
-                              text: ' $discountText',
-                              style: textTheme.bodyMedium?.copyWith(
-                                  color: Colors.red.shade700,
-                                  fontStyle: FontStyle.italic
-                              ),
-                            ),
-                        ]),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      splashRadius: 20,
-                      icon: const Icon(Icons.close, color: Colors.grey, size: 20),
-                      onPressed: () => _handleRemoveOrCancelItem(cartId),
-                    ),
-                  ],
-                ),
-
-                if (item.note != null && item.note!.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 12, top: 2, bottom: 4),
-                      child: Text(
-                        'Ghi chú: ${item.note}',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.red.shade700,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                  ),
-
-            if (result.blocks.isNotEmpty) ...[
-              ...result.blocks.map((block) {
-                final isLastBlock = block == result.blocks.last;
-                final blockEndTimeToShow =
-                isLastBlock ? billableEndTime : block.endTime;
-
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2.0),
-                  child: isDesktop
-                      ? Row(
-                    // Bố cục cho Desktop (giữ nguyên từ code của bạn)
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Icon(
-                        isLastBlock
-                            ? Icons.timer_outlined
-                            : Icons.access_time,
-                        color: isLastBlock
-                            ? AppTheme.primaryColor
-                            : Colors.grey.shade600,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 4,
-                        child: Text.rich(
-                          TextSpan(
-                            style: textTheme.bodyMedium,
-                            children: [
-                              TextSpan(
-                                  text:
-                                  '${timeFormat.format(block.startTime)} -> '),
-                              TextSpan(
-                                  text: timeFormat
-                                      .format(blockEndTimeToShow)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Center(
-                          child: Text(
-                            "${formatMinutes(block.minutes)} x ${formatNumber(block.ratePerHour)}đ/h",
-                            style: textTheme.bodyMedium,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Text(
-                          currencyFormat.format(block.cost),
-                          textAlign: TextAlign.end,
-                          style: textTheme.bodyMedium,
-                        ),
-                      ),
-                    ],
-                  )
-                  // --- SỬA ĐỔI: Bố cục 2 dòng cho Mobile ---
-                      : Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Icon(
-                        isLastBlock
-                            ? Icons.timer_outlined
-                            : Icons.access_time,
-                        color: isLastBlock
-                            ? AppTheme.primaryColor
-                            : Colors.grey.shade600,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Dòng 1: Khoảng thời gian
-                            Text.rich(
-                              TextSpan(
-                                style: textTheme.bodyMedium,
-                                children: [
-                                  TextSpan(
-                                      text:
-                                      '${timeFormat.format(block.startTime)} -> '),
-                                  TextSpan(
-                                      text: timeFormat
-                                          .format(blockEndTimeToShow)),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            // Dòng 2: Thời gian x Đơn giá
-                            Text(
-                              "${formatMinutes(block.minutes)} x ${formatNumber(block.ratePerHour)} đ/h",
-                              style: textTheme.bodyMedium,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Thành tiền của block (không bold)
-                      Text(
-                        currencyFormat.format(block.cost),
-                        style: textTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
-                );
-              }),
-              const Divider(
-                height: 8,
-                thickness: 0.5,
-                color: Colors.grey,
-              ),
-              // Thêm Divider ở đây
-            ],
-
-            Padding(
-              padding: const EdgeInsets.only(top: 4.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: InkWell(
+        onTap: () => _showEditItemDialog(cartId, item),
+        borderRadius: BorderRadius.circular(12.0),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // === DÒNG 1: HEADER ===
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    splashRadius: 20,
+                    icon: Icon(
+                      item.isPaused ? Icons.play_circle_filled : Icons.pause_circle_filled,
+                      color: item.isPaused ? Colors.orange.shade700 : AppTheme.primaryColor,
+                      size: 24,
+                    ),
+                    onPressed: () => _togglePauseTimeBasedItem(cartId),
+                  ),
                   const SizedBox(width: 8),
-                  Text.rich(
-                    TextSpan(
-                      style: textTheme.bodyMedium,
-                      children: [
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(children: [
                         TextSpan(
-                          text: timeFormat.format(startTime),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.red),
+                          text: item.product.productName,
+                          style: textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold, color: AppTheme.textColor),
                         ),
-                        const TextSpan(
-                          text: ' - ',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.grey),
-                        ),
-                        TextSpan(
-                          text: timeFormat.format(billableEndTime),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primaryColor),
-                        ),
-                      ],
+                        if (discountText.isNotEmpty)
+                          TextSpan(
+                            text: ' $discountText',
+                            style: textTheme.bodyMedium?.copyWith(color: Colors.red),
+                          ),
+                      ]),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text(
-                    // SỬA LẠI: Dùng item.subtotal
-                    currencyFormat.format(item.subtotal),
-                    style: textTheme.titleMedium?.copyWith(
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    splashRadius: 20,
+                    icon: const Icon(Icons.close, color: Colors.grey, size: 20),
+                    onPressed: () => _handleRemoveOrCancelItem(cartId),
                   ),
                 ],
               ),
-            ),
+
+              if (item.note != null && item.note!.isNotEmpty)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 12, top: 2, bottom: 4),
+                    child: Text(
+                      'Ghi chú: ${item.note}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.red.shade700,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ),
+
+              // === DÒNG 2: CHI TIẾT (BLOCKS) ===
+              if (result.blocks.isNotEmpty) ...[
+                ...result.blocks.map((block) {
+                  final isLastBlock = block == result.blocks.last;
+                  final blockEndTimeToShow = isLastBlock ? billableEndTime : block.endTime;
+
+                  // [TÍNH GIÁ HIỂN THỊ]
+                  double displayRate = block.ratePerHour;
+                  double displayCost = block.cost;
+
+                  if (item.discountValue != null && item.discountValue! > 0) {
+                    if (item.discountUnit == '%') {
+                      // Giảm %: Rate = Gốc * (1 - %)
+                      displayRate = block.ratePerHour * (1 - percentDiscount);
+                      displayCost = block.cost * (1 - percentDiscount);
+                    } else {
+                      // Giảm VNĐ: Rate = Gốc - (Tiền giảm/giờ)
+                      displayRate = block.ratePerHour - hourlyDiscountAmount;
+
+                      // Nếu giảm quá tay (Giảm > Giá gốc) -> Rate = 0
+                      if (displayRate < 0) displayRate = 0;
+
+                      // Cost = (Rate mới / 60) * phút
+                      displayCost = (displayRate / 60.0) * block.minutes;
+                    }
+                  }
+
+                  // Làm tròn
+                  displayRate = displayRate.roundToDouble();
+                  displayCost = displayCost.roundToDouble();
+                  if (displayCost < 0) displayCost = 0;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2.0),
+                    child: isDesktop
+                        ? Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Icon(
+                          isLastBlock ? Icons.timer_outlined : Icons.access_time,
+                          color: isLastBlock ? AppTheme.primaryColor : Colors.grey.shade600,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 4,
+                          child: Text.rich(
+                            TextSpan(
+                              style: textTheme.bodyMedium,
+                              children: [
+                                TextSpan(text: '${timeFormat.format(block.startTime)} -> '),
+                                TextSpan(text: timeFormat.format(blockEndTimeToShow)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Center(
+                            child: Text(
+                              // Hiển thị Đơn giá ĐÃ GIẢM
+                              "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
+                              style: textTheme.bodyMedium,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            currencyFormat.format(displayCost),
+                            textAlign: TextAlign.end,
+                            style: textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
+                    )
+                        : Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isLastBlock ? Icons.timer_outlined : Icons.access_time,
+                          color: isLastBlock ? AppTheme.primaryColor : Colors.grey.shade600,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text.rich(
+                                TextSpan(
+                                  style: textTheme.bodyMedium,
+                                  children: [
+                                    TextSpan(text: '${timeFormat.format(block.startTime)} -> '),
+                                    TextSpan(text: timeFormat.format(blockEndTimeToShow)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              // Hiển thị Đơn giá ĐÃ GIẢM
+                              Text(
+                                "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
+                                style: textTheme.bodyMedium?.copyWith(
+                                    color: Colors.grey[600],
+                                    fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                currencyFormat.format(displayCost),
+                                style: textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ]),
+                      ],
+                    ),
+                  );
+                }),
+                const Divider(height: 8, thickness: 0.5, color: Colors.grey),
               ],
-            ),
+
+              // === FOOTER ===
+              Padding(
+                padding: const EdgeInsets.only(top: 4.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const SizedBox(width: 8),
+                    Text.rich(
+                      TextSpan(
+                        style: textTheme.bodyMedium,
+                        children: [
+                          TextSpan(
+                            text: timeFormat.format(startTime),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                          const TextSpan(
+                            text: ' - ',
+                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
+                          ),
+                          TextSpan(
+                            text: timeFormat.format(billableEndTime),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      currencyFormat.format(item.subtotal),
+                      style: textTheme.titleMedium?.copyWith(
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
+      ),
     );
   }
 
@@ -3692,6 +4014,20 @@ class _OrderScreenState extends State<OrderScreen> {
       return note.productIds.isEmpty || note.productIds.contains(item.product.id);
     }).toList();
 
+    // 1. Chuẩn bị dữ liệu tính giờ (để lấy số giờ chơi)
+    TimePricingResult? timeResult;
+    if (item.product.serviceSetup?['isTimeBased'] == true) {
+      timeResult = _timeBasedDataCache[item.lineId] ??
+          TimeBasedPricingService.calculatePriceWithBreakdown(
+            product: item.product,
+            startTime: item.addedAt,
+            isPaused: item.isPaused,
+            pausedAt: item.pausedAt,
+            totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
+          );
+    }
+
+    // 2. Mở Dialog và chờ kết quả
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => EditOrderItemDialog(
@@ -3707,8 +4043,39 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() {
       final newNote = (result['note'] as String?).nullIfEmpty;
       final newCommissionStaff = result['commissionStaff'] as Map<String, String?>;
-
       final double newQuantity = result['quantity'] as double;
+
+      // LẤY GIÁ TRỊ THÔ TỪ DIALOG (Người dùng nhập gì lấy nấy)
+      double rawInputVal = result['discountValue'] as double;
+      String newDiscountUnit = result['discountUnit'] as String;
+
+      double finalDiscountValToSave = 0;
+
+      // --- LOGIC XỬ LÝ ĐƠN GIẢN HÓA ---
+
+      if (newDiscountUnit == '%') {
+        // TRƯỜNG HỢP 1: GIẢM THEO %
+        // Người dùng nhập 20 -> Lưu 20. Không quan tâm trước đó là gì.
+        finalDiscountValToSave = rawInputVal;
+
+        // Chặn lỗi nhập quá 100%
+        if (finalDiscountValToSave > 100) finalDiscountValToSave = 100;
+      }
+      else {
+        // TRƯỜNG HỢP 2: GIẢM THEO VNĐ
+        if (timeResult != null) {
+          // A. Dịch vụ tính giờ:
+          // Người dùng nhập: Mức giảm mỗi giờ (VD: 10.000)
+          // Cần lưu: Tổng tiền giảm (VD: 10.000 * 2.5 giờ)
+          double totalHours = timeResult.totalMinutesBilled / 60.0;
+          finalDiscountValToSave = rawInputVal * totalHours;
+        } else {
+          // B. Sản phẩm thường:
+          // Người dùng nhập 10.000 -> Lưu 10.000
+          finalDiscountValToSave = rawInputVal;
+        }
+      }
+      // ----------------------------------
 
       if (newQuantity < item.sentQuantity) {
         ToastService().show(
@@ -3719,11 +4086,22 @@ class _OrderScreenState extends State<OrderScreen> {
         return;
       }
 
+      // Cập nhật giá mới nhất (nếu là dịch vụ)
+      double currentPrice = item.price;
+      List<TimeBlock> currentBlocks = item.priceBreakdown;
+      if (timeResult != null) {
+        currentPrice = timeResult.totalPrice;
+        currentBlocks = timeResult.blocks;
+      } else {
+        currentPrice = result['price'] as double;
+      }
+
       _localChanges[cartId] = item.copyWith(
-        price: result['price'] as double,
+        price: currentPrice,
+        priceBreakdown: currentBlocks,
         quantity: newQuantity,
-        discountValue: result['discountValue'] as double,
-        discountUnit: result['discountUnit'] as String,
+        discountValue: finalDiscountValToSave, // Lưu giá trị đã xử lý
+        discountUnit: newDiscountUnit,
         note: () => newNote,
         commissionStaff: () => newCommissionStaff.isNotEmpty ? newCommissionStaff : null,
       );

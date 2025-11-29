@@ -218,10 +218,10 @@ class TimeBasedPricingService {
     }
 
     // Để tránh sai số làm tròn của double, làm tròn tổng chi phí cuối cùng
-    final finalTotalCost = (totalCost / 10).round() * 10;
+    final finalTotalCost = totalCost.round().toDouble();
 
     return TimePricingResult(
-      totalPrice: finalTotalCost.toDouble(),
+      totalPrice: finalTotalCost,
       blocks: blocks,
       totalDuration: totalDuration,
       totalMinutesBilled: totalMinutesBilled,

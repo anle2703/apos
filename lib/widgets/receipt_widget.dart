@@ -43,7 +43,7 @@ class ReceiptWidget extends StatelessWidget {
     final baseTextStyle = TextStyle(color: Colors.black, fontFamily: 'Roboto', height: 1.1);
     final boldTextStyle = baseTextStyle.copyWith(fontWeight: FontWeight.w900);
     final italicTextStyle = baseTextStyle.copyWith(fontStyle: FontStyle.italic);
-    final strikeThroughStyle = baseTextStyle.copyWith(decoration: TextDecoration.lineThrough);
+    final strikeThroughStyle = baseTextStyle.copyWith(decoration: TextDecoration.lineThrough,  decorationThickness: 2);
 
     // Font Sizes (đã nhân scale)
     final double fsHeader = settings.billHeaderSize * fontScale;
@@ -175,7 +175,7 @@ class ReceiptWidget extends StatelessWidget {
               }
             }
 
-            String taxStr = taxRate > 0 ? " ($taxLabel ${percentFormat.format(taxRate * 100)}%)" : "";
+            String taxStr = taxRate > 0 ? "($taxLabel ${percentFormat.format(taxRate * 100)}%) " : "";
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,10 +225,10 @@ class ReceiptWidget extends StatelessWidget {
                           style: boldTextStyle.copyWith(fontSize: fsItemName),
                           children: [
                             TextSpan(text: '${i + 1}. $itemName'),
-                            if (unit.isNotEmpty) TextSpan(text: ' ($unit)', style: baseTextStyle.copyWith(fontSize: fsItemName)),
+                            if (unit.isNotEmpty) TextSpan(text: ' ($unit) ', style: baseTextStyle.copyWith(fontSize: fsItemName)),
                             if (taxStr.isNotEmpty) TextSpan(text: taxStr, style: baseTextStyle.copyWith(fontSize: fsItemName)),
                             if (hasPriceChanged)
-                              TextSpan(text: ' ${currencyFormat.format(originalPrice)}', style: strikeThroughStyle.copyWith(fontSize: fsItemName)),
+                              TextSpan(text: currencyFormat.format(originalPrice), style: strikeThroughStyle.copyWith(fontSize: fsItemName)),
                           ],
                         ),
                       ),
@@ -304,9 +304,9 @@ class ReceiptWidget extends StatelessWidget {
 
             if (isSimplifiedMode)
               _buildRow('Tổng cộng:', currencyFormat.format(subtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
-
             const SizedBox(height: 12),
 
+            if (!isSimplifiedMode && isPaymentBill)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

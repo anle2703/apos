@@ -35,7 +35,7 @@ class VoucherModel {
       value: (data['value'] as num? ?? 0).toDouble(),
       isPercent: data['isPercent'] ?? false,
       quantity: (data['quantity'] as num?)?.toInt(),
-      quantityUsed: (data['quantityUsed'] as num?)?.toInt(),
+      quantityUsed: (data['usedCount'] as num?)?.toInt(),
       expiryAt: data['expiryAt'] as Timestamp?,
       startAt: data['startAt'] as Timestamp?,
       isActive: data['isActive'] ?? true,
