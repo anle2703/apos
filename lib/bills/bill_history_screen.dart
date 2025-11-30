@@ -798,7 +798,6 @@ class BillReceiptDialog extends StatefulWidget {
 
 class _BillReceiptDialogState extends State<BillReceiptDialog> {
   final ScreenshotController _screenshotController = ScreenshotController();
-  bool _isLoadingSettings = true;
   ReceiptTemplateModel? _templateSettings;
 
   bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -806,12 +805,8 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   @override
   void initState() {
     super.initState();
-    _loadSettings();
   }
 
-  Future<void> _loadSettings() async {
-    setState(() => _isLoadingSettings = false);
-  }
 
   Map<String, dynamic> _buildSummaryMap() {
     final eInvoiceInfo = widget.bill.eInvoiceInfo;

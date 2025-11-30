@@ -61,7 +61,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _printLabelOnPayment = false;
   double _labelWidth = 50.0;
   double _labelHeight = 30.0;
-  String _selectedLabelSizeOption = '50x30';
 
   String _serverListenModeOnDevice = 'server';
   String? _activeServerListenMode;
@@ -164,14 +163,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _printLabelOnPayment = s.printLabelOnPayment ?? false;
           _labelWidth = s.labelWidth ?? 50.0;
           _labelHeight = s.labelHeight ?? 30.0;
-
-          if (_labelWidth == 50 && _labelHeight == 30) {
-            _selectedLabelSizeOption = '50x30';
-          } else if (_labelWidth == 70 && _labelHeight == 22) {
-            _selectedLabelSizeOption = '70x22';
-          } else {
-            _selectedLabelSizeOption = 'custom';
-          }
         });
       }
     } catch (e) {
@@ -243,14 +234,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setString('print_server_ip', _serverIpController.text.trim());
 
       final settingsService = SettingsService();
-
-      if (_labelWidth == 50 && _labelHeight == 30) {
-        _selectedLabelSizeOption = '50x30';
-      } else if (_labelWidth == 70 && _labelHeight == 22) {
-        _selectedLabelSizeOption = '70x22';
-      } else {
-        _selectedLabelSizeOption = 'custom';
-      }
 
       await settingsService.updateStoreSettings(
         widget.currentUser.ownerUid ?? widget.currentUser.uid,
