@@ -60,10 +60,12 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
   StreamSubscription? _newActiveOrdersSubscription;
 
   Stream<Map<String, dynamic>> _getCombinedStream() {
+    // 1. Khởi tạo các Stream cần thiết
     final tablesStream = _firestoreService.getAllTablesStream(widget.currentUser.storeId);
     final ordersStream = _firestoreService.getActiveOrdersStream(widget.currentUser.storeId);
     final discountsStream = _discountService.getActiveDiscountsStream(widget.currentUser.storeId);
 
+    // Stream lấy dữ liệu thô của Order (để lấy tên khách, ghi chú...)
     final activeOrdersRawStream = FirebaseFirestore.instance
         .collection('orders')
         .where('storeId', isEqualTo: widget.currentUser.storeId)
@@ -71,15 +73,16 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
         .snapshots()
         .map((snapshot) => { for (var doc in snapshot.docs) doc.id : doc.data() });
 
+    // 2. Kết hợp các Stream lại với nhau
     return Rx.combineLatest7(
       tablesStream,
       _firestoreService.getAllTablesStream(widget.currentUser.storeId),
       ordersStream,
       _firestoreService.getTableGroups(widget.currentUser.storeId).asStream(),
-      Stream.periodic(const Duration(minutes: 1)).startWith(null),
+      Stream.periodic(const Duration(minutes: 1)).startWith(null), // Timer để cập nhật mỗi phút
       activeOrdersRawStream,
       discountsStream,
-          ( List<TableModel> allTablesRaw,
+          (List<TableModel> allTablesRaw,
           List<TableModel> tables,
           List<OrderModel> orders,
           List<TableGroupModel> groups,
@@ -88,20 +91,75 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
           List<DiscountModel> activeDiscounts,
           ) {
 
-            for (var order in orders) {
-              double recalculatedTotal = 0;
+        // 3. Vòng lặp tính toán lại giá tiền cho từng đơn hàng
+        for (var order in orders) {
+          double recalculatedTotal = 0;
 
-              for (var itemData in order.items) {
-                final itemMap = itemData as Map<String, dynamic>;
-                final product = ProductModel.fromMap(itemMap['product']);
+          for (var itemData in order.items) {
+            final itemMap = itemData as Map<String, dynamic>;
+            final product = ProductModel.fromMap(itemMap['product']);
 
-                // Lấy thông tin cơ bản
-                double itemFinalPrice = 0;
+            // --- [QUAN TRỌNG] XỬ LÝ HÀNG TẶNG KÈM ---
+            // Nếu là hàng tặng (Note bắt đầu bằng "Tặng kèm"), giữ nguyên giá đã lưu (thường là 0đ)
+            // Không tính toán lại để tránh bị áp dụng giảm giá hoặc về giá gốc.
+            final String? note = itemMap['note'];
+            if (note != null && note.startsWith("Tặng kèm")) {
+              final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+              final double qty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
 
-                // --- LOGIC TÍNH LẠI GIÁ ---
+              // Với hàng tặng, giá trị thường là 0, nhưng ta vẫn cộng vào cho chuẩn logic
+              recalculatedTotal += price * qty;
+              continue; // Bỏ qua các bước tính toán bên dưới cho món này
+            }
 
-                // 1. Dịch vụ tính giờ: Tính giá Real-time
+            double currentBaseTotal = 0; // Tổng tiền của món này trước khi giảm giá
+            double discountAmount = 0;   // Số tiền được giảm
+
+            // A. TÍNH TỔNG TIỀN GỐC (Base Total)
+            if (product.serviceSetup?['isTimeBased'] == true) {
+              // --- Dịch vụ tính giờ: Tính theo thời gian thực ---
+              final startTime = itemMap['addedAt'] as Timestamp;
+              final isPaused = itemMap['isPaused'] as bool? ?? false;
+              final pausedAt = itemMap['pausedAt'] as Timestamp?;
+              final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
+
+              final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
+                product: product,
+                startTime: startTime,
+                isPaused: isPaused,
+                pausedAt: pausedAt,
+                totalPausedDurationInSeconds: totalPausedDuration,
+              );
+              currentBaseTotal = timeResult.totalPrice;
+            } else {
+              // --- Món thường: Đơn giá * Số lượng ---
+              // Lấy giá gốc từ DB (itemMap['price'] ở đây là đơn giá đã lưu)
+              // Tuy nhiên, để chính xác nhất với giảm giá Realtime, ta nên lấy giá bán gốc từ ProductModel
+              // (trừ khi cho phép sửa giá tay, thì lấy giá trong itemMap).
+              // Ở đây ta lấy giá trong itemMap vì nó đại diện cho "Đơn giá gốc" tại thời điểm order.
+              final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+              final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+              currentBaseTotal = price * quantity;
+            }
+
+            // B. TÌM VÀ ÁP DỤNG KHUYẾN MÃI (Real-time)
+            final discountRule = _discountService.findBestDiscountForProduct(
+              product: product,
+              activeDiscounts: activeDiscounts,
+              customer: null, // Tạm thời null để tối ưu, nếu cần check nhóm khách thì truyền vào
+              checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
+            );
+
+            if (discountRule != null) {
+              // --- TRƯỜNG HỢP 1: CÓ KHUYẾN MÃI TỰ ĐỘNG ---
+              if (discountRule.isPercent) {
+                // Giảm %: Áp dụng giống nhau cho cả Món thường và Dịch vụ
+                discountAmount = currentBaseTotal * (discountRule.value / 100);
+              } else {
+                // Giảm Tiền mặt (VNĐ)
                 if (product.serviceSetup?['isTimeBased'] == true) {
+                  // Dịch vụ: Giảm VNĐ trên mỗi giờ (VD: Giảm 10k/h)
+                  // Cần tính lại số giờ
                   final startTime = itemMap['addedAt'] as Timestamp;
                   final isPaused = itemMap['isPaused'] as bool? ?? false;
                   final pausedAt = itemMap['pausedAt'] as Timestamp?;
@@ -114,73 +172,62 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
                     pausedAt: pausedAt,
                     totalPausedDurationInSeconds: totalPausedDuration,
                   );
-
-                  double currentRealTimeTotal = timeResult.totalPrice; // Tổng tiền giờ hiện tại
-                  double discountAmount = 0;
-
-                  // --- QUAN TRỌNG: TÌM LẠI KHUYẾN MÃI ĐANG CHẠY ĐỂ ÁP DỤNG REAL-TIME ---
-                  // (Thay vì lấy discountValue cũ rích trong DB)
-
-                  // Tìm khuyến mãi phù hợp nhất cho sản phẩm này trong danh sách activeDiscounts
-                  final discountRule = _discountService.findBestDiscountForProduct(
-                      product: product,
-                      activeDiscounts: activeDiscounts,
-                      customer: null,
-                      checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
-                  );
-
-                  if (discountRule != null) {
-                    if (discountRule.isPercent) {
-                      // Logic %: Giảm trên tổng tiền giờ
-                      // VD: Giờ hát 100k, giảm 10% -> giảm 10k
-                      discountAmount = currentRealTimeTotal * (discountRule.value / 100);
-                    } else {
-                      // Logic VNĐ cho Dịch vụ: Giảm trên Đơn giá/Giờ
-                      // Yêu cầu: "giảm 10.000/h"
-                      // Cách tính: Tổng giờ chơi * 10.000
-
-                      double totalHours = timeResult.totalMinutesBilled / 60.0;
-                      discountAmount = totalHours * discountRule.value;
-                    }
-                  } else {
-                    // Nếu không tìm thấy KM active, fallback về giá trị đang lưu trong DB (nếu có)
-                    // để tránh nhảy giá sốc nếu KM vừa hết hạn tức thì.
-                    // Tuy nhiên, với TimeBased, giá trị cũ thường sai lệch.
-                    // Tốt nhất: Nếu hết KM -> Không giảm nữa (hoặc giữ % cũ nếu muốn).
-                    // Ở đây tôi chọn an toàn: Lấy giá trị lưu DB nếu nó là loại tiền mặt cố định (trường hợp hiếm),
-                    // còn không thì coi như = 0 để đảm bảo tính đúng đắn real-time.
-                    discountAmount = 0;
-                  }
-
-                  itemFinalPrice = (currentRealTimeTotal - discountAmount).clamp(0, double.infinity);
-
+                  double totalHours = timeResult.totalMinutesBilled / 60.0;
+                  discountAmount = totalHours * discountRule.value;
+                } else {
+                  // Món thường: Giảm VNĐ trên mỗi đơn vị (VD: Giảm 5k/ly)
+                  final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+                  discountAmount = quantity * discountRule.value;
                 }
-                // 2. Món thường: Giữ nguyên logic lấy từ DB (vì giá không nhảy theo giây)
-                else {
-                  // Lấy subtotal đã tính sẵn lúc order, đảm bảo khớp 100%
-                  itemFinalPrice = (itemMap['subtotal'] as num?)?.toDouble() ?? 0.0;
-                }
-
-                recalculatedTotal += itemFinalPrice;
               }
+            } else {
+              // --- TRƯỜNG HỢP 2: KHÔNG CÓ KM TỰ ĐỘNG -> CHECK GIẢM GIÁ THỦ CÔNG ---
+              // (Lấy giá trị nhân viên đã nhập tay và lưu trong DB)
+              final double storedDiscountVal = (itemMap['discountValue'] as num?)?.toDouble() ?? 0.0;
+              final String storedDiscountUnit = (itemMap['discountUnit'] as String?) ?? '%';
 
-              // Cập nhật tổng tiền hiển thị trên Dashboard
-              order.totalAmount = recalculatedTotal;
+              if (storedDiscountVal > 0) {
+                if (storedDiscountUnit == '%') {
+                  discountAmount = currentBaseTotal * (storedDiscountVal / 100);
+                } else {
+                  // Nếu là giảm tiền mặt thủ công:
+                  // - Với món thường: storedDiscountVal thường là tổng tiền giảm hoặc đơn giá giảm tùy logic lưu.
+                  // - Với code hiện tại của bạn ở OrderScreen, discountValue thường lưu "Tổng giá trị giảm" hoặc "Giá trị giảm/đv".
+                  // Để an toàn nhất khi hiển thị bên ngoài, ta chấp nhận con số đã tính toán trong DB
+                  // nếu nó là tiền mặt cố định.
+
+                  // Tuy nhiên, cách đơn giản nhất để đồng bộ là lấy luôn storedDiscountVal
+                  // (Giả sử logic lưu trong OrderScreen là chính xác).
+                  discountAmount = storedDiscountVal;
+
+                  // Lưu ý: Nếu là dịch vụ tính giờ, storedDiscountVal dạng tiền mặt trong DB
+                  // sẽ không tự tăng theo thời gian. Đây là hạn chế chấp nhận được nếu không dùng KM tự động.
+                }
+              }
             }
 
+            // C. TÍNH GIÁ CUỐI CÙNG & CỘNG DỒN
+            double itemFinalPrice = (currentBaseTotal - discountAmount).clamp(0, double.infinity);
+            recalculatedTotal += itemFinalPrice;
+          }
+
+          // Cập nhật tổng tiền hiển thị trên Dashboard
+          order.totalAmount = recalculatedTotal;
+        }
+
+        // 4. Mapping dữ liệu bàn và đơn hàng
         final orderMap = {for (var order in orders) order.tableId: order};
 
         final tablesWithInfo = tables.map((table) {
           final orderModel = orderMap[table.id];
-          // Lấy raw data từ map thay vì getter
           Map<String, dynamic>? rawData;
           if (orderModel != null) {
             rawData = ordersRawDataMap[orderModel.id];
           }
-
           return TableWithOrderInfo(table: table, order: orderModel, rawData: rawData);
         }).toList();
 
+        // 5. Xử lý nhóm bàn Online (nếu có)
         final bool hasOnlineTables = tables.any((t) => t.tableGroup == 'Online');
         List<TableGroupModel> finalGroups = List.from(groups);
         if (hasOnlineTables && !groups.any((g) => g.name == 'Online')) {

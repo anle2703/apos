@@ -124,12 +124,16 @@ class _OrderScreenState extends State<OrderScreen> {
   Map<String, dynamic>? _storeTaxSettings;
   final Map<String, String> _productTaxMap = {};
   StreamSubscription? _manualUpdateSub;
+  List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
+  StreamSubscription? _buyXGetYSub;
 
   @override
   void initState() {
     super.initState();
-    _loadTaxSettings();
+    _loadTaxSettings(); // Load thuế
     _settingsService = SettingsService();
+
+    // 1. Lắng nghe Settings
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     _settingsSub = _settingsService.watchStoreSettings(settingsId).listen((s) {
       if (!mounted) return;
@@ -148,6 +152,8 @@ class _OrderScreenState extends State<OrderScreen> {
     }, onError: (e, st) {
       debugPrint('watchStoreSettings error: $e');
     }, cancelOnError: true);
+
+    // 2. Setup Keyboard & Order Stream
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     _currentOrder = widget.initialOrder;
     _isMenuView = widget.initialOrder == null;
@@ -162,6 +168,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _orderStream = _firestoreService.getOrderStreamForTable(widget.table.id);
     }
 
+    // 3. Setup Product & Search
     _productsStream =
         _firestoreService.getAllProductsStream(widget.currentUser.storeId);
 
@@ -174,28 +181,43 @@ class _OrderScreenState extends State<OrderScreen> {
       _numberOfCustomers = widget.initialOrder!.numberOfCustomers ?? 1;
     }
 
+    // 4. Timer cập nhật giá theo giờ (mỗi phút)
     _priceUpdateTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
       _updateTimeBasedPrices();
     });
 
+    // 5. Lắng nghe sự kiện update Discount thủ công
     _manualUpdateSub = DiscountService.onDiscountsChanged.listen((_) {
       if (mounted) {
         debugPrint(">>> [EVENT] Nhận tín hiệu Cập Nhật Giảm Giá chủ động!");
-        // 1. Nếu cần reload lại danh sách từ server cho chắc ăn (tùy chọn, nhưng nên làm để lấy data mới nhất)
-        // Nếu bạn tin tưởng luồng stream cũ thì chỉ cần gọi tính lại.
-        // Nhưng an toàn nhất là kích hoạt tính lại ngay:
         _recalculateCartDiscounts();
       }
     });
 
+    // 6. Load data phụ (Staff, QuickNotes)
     _fetchStaff();
     _listenQuickNotes();
+
+    // 7. Lắng nghe chương trình Giảm giá (Discounts)
     _discountsSub = _discountService.getActiveDiscountsStream(widget.currentUser.storeId).listen((discounts) {
       if (mounted) {
         setState(() {
           _activeDiscounts = discounts;
         });
         _recalculateCartDiscounts();
+      }
+    });
+
+    // 8. [MỚI] Lắng nghe chương trình Mua X Tặng Y
+    _buyXGetYSub = _firestoreService
+        .getActiveBuyXGetYPromotionsStream(widget.currentUser.storeId)
+        .listen((promos) {
+      if (mounted) {
+        setState(() {
+          _activeBuyXGetYPromos = promos;
+        });
+        // Tính toán lại ngay khi load xong khuyến mãi
+        _applyBuyXGetYLogic();
       }
     });
   }
@@ -210,7 +232,131 @@ class _OrderScreenState extends State<OrderScreen> {
     _priceUpdateTimer?.cancel();
     _discountsSub?.cancel();
     _manualUpdateSub?.cancel();
+
+    // [QUAN TRỌNG] Hủy lắng nghe Mua X Tặng Y để tránh lỗi
+    _buyXGetYSub?.cancel();
+
     super.dispose();
+  }
+
+  void _applyBuyXGetYLogic() {
+    if (_activeBuyXGetYPromos.isEmpty) return;
+
+    final Map<String, OrderItem> cartSnapshot = {..._cart, ..._localChanges};
+    cartSnapshot.removeWhere((key, item) => item.status == 'cancelled');
+
+    final Map<String, OrderItem> updates = {};
+
+    for (final promo in _activeBuyXGetYPromos) {
+      final String buyId = promo['buyProductId'];
+      final double buyQtyReq = (promo['buyQuantity'] as num).toDouble();
+
+      final String giftId = promo['giftProductId'];
+      final double giftQtyReward = (promo['giftQuantity'] as num).toDouble();
+
+      // Giá cứng đã cài trong giá Y (thường là 0)
+      final double giftPrice = (promo['giftPrice'] as num).toDouble();
+      final String promoName = promo['name'];
+
+      final String giftNote = "Tặng kèm ($promoName)";
+
+      // 1. Tính tổng số lượng hàng MUA
+      double currentBuyQty = 0;
+
+      // [FIX] Dùng vòng lặp for-in thay vì forEach
+      for (final item in cartSnapshot.values) {
+        if (item.product.id == buyId) {
+          // Không tính món có ghi chú là hàng tặng
+          if (item.note != giftNote) {
+            currentBuyQty += item.quantity;
+          }
+        }
+      }
+
+      // 2. Tính số lượng hàng TẶNG
+      int sets = 0;
+      if (buyQtyReq > 0) {
+        sets = (currentBuyQty / buyQtyReq).floor();
+      }
+      double totalGiftNeeded = sets * giftQtyReward;
+
+      // 3. Tìm hàng tặng trong giỏ
+      String? existingGiftLineId;
+      OrderItem? existingGiftItem;
+
+      // [FIX] Dùng vòng lặp for-in cho Map entries
+      for (final entry in cartSnapshot.entries) {
+        final key = entry.key;
+        final item = entry.value;
+
+        if (item.product.id == giftId && item.note == giftNote) {
+          existingGiftLineId = key;
+          existingGiftItem = item;
+          break; // Tìm thấy rồi thì break cho tối ưu
+        }
+      }
+
+      // 4. Đồng bộ
+      if (totalGiftNeeded > 0) {
+        if (existingGiftItem != null) {
+          // Cập nhật nếu số lượng hoặc giá sai lệch
+          if (existingGiftItem.quantity != totalGiftNeeded || existingGiftItem.price != giftPrice) {
+            updates[existingGiftLineId!] = existingGiftItem.copyWith(
+              quantity: totalGiftNeeded,
+              price: giftPrice,        // Set cứng giá Y
+              discountValue: 0,        // Không giảm giá thêm
+              discountUnit: 'VNĐ',
+            );
+          }
+        } else {
+          // Tạo mới
+          final productModel = _menuProducts.firstWhereOrNull((p) => p.id == giftId);
+
+          if (productModel != null) {
+            final newItem = OrderItem(
+              product: productModel,
+              price: giftPrice,        // Set cứng giá Y
+              quantity: totalGiftNeeded,
+              selectedUnit: promo['giftUnit'] ?? productModel.unit ?? '',
+              addedBy: "System",
+              addedAt: Timestamp.now(),
+              discountValue: 0,        // Không giảm giá thêm
+              discountUnit: 'VNĐ',
+              note: giftNote,
+              commissionStaff: {},
+            );
+            updates[newItem.lineId] = newItem;
+          }
+        }
+      } else {
+        // Xóa hàng tặng nếu không đủ điều kiện
+        if (existingGiftLineId != null) {
+          updates[existingGiftLineId] = existingGiftItem!.copyWith(
+              quantity: 0,
+              status: 'cancelled'
+          );
+        }
+      }
+    }
+
+    if (updates.isNotEmpty) {
+      setState(() {
+        // [FIX] Dùng vòng lặp for-in cho updates
+        for (final entry in updates.entries) {
+          final key = entry.key;
+          final item = entry.value;
+
+          if (item.status == 'cancelled' && item.sentQuantity == 0) {
+            _localChanges.remove(key);
+            if (_cart.containsKey(key)) {
+              _localChanges[key] = item;
+            }
+          } else {
+            _localChanges[key] = item;
+          }
+        }
+      });
+    }
   }
 
   Future<void> _loadTaxSettings() async {
@@ -236,18 +382,21 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   void _recalculateCartDiscounts() {
-    // [FIX QUAN TRỌNG] Chỉ cần có danh sách khuyến mãi là chạy.
-    // Không quan tâm giỏ hàng có rỗng hay không (vì _cart có thể có dữ liệu nhưng UI chưa vẽ).
-    if (_activeDiscounts.isEmpty) return;
-
     bool hasChanges = false;
     final Map<String, OrderItem> updates = {};
-
-    // Lấy tất cả item, ưu tiên dữ liệu đang chỉnh sửa cục bộ
     final allItems = {..._cart, ..._localChanges};
 
-    allItems.forEach((key, item) {
-      if (item.status == 'cancelled') return;
+    // [FIX] Dùng vòng lặp for-in thay vì forEach
+    for (final entry in allItems.entries) {
+      final key = entry.key;
+      final item = entry.value;
+
+      if (item.status == 'cancelled') continue;
+
+      // CHẶN GIẢM GIÁ VỚI HÀNG TẶNG KÈM
+      if (item.note != null && item.note!.startsWith("Tặng kèm (")) {
+        continue;
+      }
 
       final discountItem = _discountService.findBestDiscountForProduct(
         product: item.product,
@@ -265,8 +414,6 @@ class _OrderScreenState extends State<OrderScreen> {
       if (discountItem != null) {
         final double configValue = discountItem.value;
         final bool isPercent = discountItem.isPercent;
-
-        // Ép kiểu Unit theo cấu hình mới nhất
         newUnit = isPercent ? '%' : 'VNĐ';
 
         if (isPercent) {
@@ -274,7 +421,6 @@ class _OrderScreenState extends State<OrderScreen> {
         } else {
           final isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
           if (isTimeBased) {
-            // Logic tính cho món theo giờ
             final pricingResult = _timeBasedDataCache[key] ??
                 TimeBasedPricingService.calculatePriceWithBreakdown(
                   product: item.product,
@@ -286,17 +432,11 @@ class _OrderScreenState extends State<OrderScreen> {
             double totalHours = pricingResult.totalMinutesBilled / 60.0;
             newCalculatedAmount = configValue * totalHours;
           } else {
-            // Món thường: Giá trị giảm chính là giá trị cấu hình (VD: 5000)
             newCalculatedAmount = configValue;
           }
         }
-      } else {
-        // Không có KM hoặc hết hạn -> Reset về 0
-        newCalculatedAmount = 0;
-        newUnit = '%';
       }
 
-      // So sánh: Dùng sai số nhỏ cho double
       bool valueChanged = (currentItemVal - newCalculatedAmount).abs() > 0.001;
       bool unitChanged = currentItemUnit != newUnit;
 
@@ -307,11 +447,9 @@ class _OrderScreenState extends State<OrderScreen> {
         );
         hasChanges = true;
       }
-    });
+    }
 
     if (hasChanges) {
-      // [FIX QUAN TRỌNG] Gọi setState trực tiếp để đảm bảo UI cập nhật ngay.
-      // Kiểm tra mounted để tránh lỗi nếu màn hình đã đóng.
       if (mounted) {
         setState(() {
           _localChanges.addAll(updates);
@@ -705,7 +843,7 @@ class _OrderScreenState extends State<OrderScreen> {
         await _saveTimeBasedServiceOnly(newItem);
       }
 
-      return; // Kết thúc xử lý cho món tính giờ
+      return;
     }
 
     final relevantNotes = _quickNotes.where((note) {
@@ -804,6 +942,10 @@ class _OrderScreenState extends State<OrderScreen> {
       } else {
         _localChanges[newItem.lineId] = newItem;
       }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if(mounted) _applyBuyXGetYLogic();
     });
   }
 
@@ -1019,6 +1161,12 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   void _updateQuantity(String lineId, double change) {
+    final item = _displayCart[lineId];
+    if (item != null && item.note != null && item.note!.contains("Tặng kèm")) {
+      ToastService().show(message: "Đây là hàng tặng kèm tự động. Hãy sửa số lượng món mua.", type: ToastType.warning);
+      return;
+    }
+
     final currentItem = _displayCart[lineId];
     if (currentItem == null) return;
     final newQuantity = currentItem.quantity + change;
@@ -1031,6 +1179,7 @@ class _OrderScreenState extends State<OrderScreen> {
         _localChanges[lineId] = currentItem.copyWith(quantity: newQuantity);
       }
     });
+    _applyBuyXGetYLogic();
   }
 
   Future<bool> _sendToKitchen({
@@ -1505,6 +1654,12 @@ class _OrderScreenState extends State<OrderScreen> {
             }
             _lastKnownProducts = _menuProducts;
 
+            if (_menuProducts.isNotEmpty) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _recalculateCartDiscounts();
+              });
+            }
+
             return FutureBuilder<List<ProductGroupModel>>(
               future: _firestoreService
                   .getProductGroups(widget.currentUser.storeId),
@@ -1720,6 +1875,7 @@ class _OrderScreenState extends State<OrderScreen> {
       // Chạy các hàm tính toán lại để đảm bảo chính xác tuyệt đối
       _updateTimeBasedPrices();
       _recalculateCartDiscounts();
+      _applyBuyXGetYLogic();
     }
   }
 
@@ -1952,6 +2108,8 @@ class _OrderScreenState extends State<OrderScreen> {
           setState(() {
             _selectedCustomer = fullCustomer;
           });
+          // [FIX QUAN TRỌNG] Tính lại giảm giá ngay sau khi có thông tin chi tiết khách hàng (Nhóm khách, v.v.)
+          _recalculateCartDiscounts();
         }
       });
     } else {
@@ -1959,6 +2117,8 @@ class _OrderScreenState extends State<OrderScreen> {
         _selectedCustomer = null;
         _lastCustomerIdFromOrder = null;
       });
+      // [FIX QUAN TRỌNG] Tính lại giảm giá khi không có khách hàng (để áp dụng khuyến mãi cho khách lẻ nếu có)
+      _recalculateCartDiscounts();
     }
   }
 
@@ -2671,6 +2831,10 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> _handleRemoveOrCancelItem(String cartId) async {
     final item = _displayCart[cartId];
+    if (item != null && item.note != null && item.note!.contains("Tặng kèm")) {
+      ToastService().show(message: "Vui lòng xóa món mua chính, quà tặng sẽ tự hủy.", type: ToastType.warning);
+      return;
+    }
     if (item == null) return;
 
     final bool isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
@@ -2751,6 +2915,9 @@ class _OrderScreenState extends State<OrderScreen> {
       debugPrint("Lỗi khi hủy món: $e");
       ToastService().show(message: "Lỗi khi hủy món: ${e.toString()}", type: ToastType.error);
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _applyBuyXGetYLogic();
+    });
   }
 
   Future<bool> _saveOrder({bool onlyTimeBasedUpdates = false}) async {
@@ -3437,11 +3604,11 @@ class _OrderScreenState extends State<OrderScreen> {
     if (item.discountValue != null && item.discountValue! > 0) {
       if (item.discountUnit == '%') {
         // Giảm %
-        discountText = " (-${formatNumber(item.discountValue!)}%) ";
+        discountText = "(-${formatNumber(item.discountValue!)}%) ";
         discountedUnitPrice = sellingPrice * (1 - item.discountValue! / 100);
       } else {
         // Giảm tiền mặt
-        discountText = " (-${formatNumber(item.discountValue!)}đ) ";
+        discountText = "(-${formatNumber(item.discountValue!)}đ) ";
         discountedUnitPrice = sellingPrice - item.discountValue!;
       }
     }
@@ -3514,7 +3681,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         // Đơn vị
                         if (item.selectedUnit.isNotEmpty)
                           TextSpan(
-                            text: ' (${item.selectedUnit})',
+                            text: ' (${item.selectedUnit}) ',
                             style: textTheme.bodyMedium?.copyWith(
                               color: isCancelled ? Colors.grey : Colors.grey.shade700,
                             ),
@@ -3522,7 +3689,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         // Thuế
                         if (taxText.isNotEmpty)
                           TextSpan(
-                            text: ' $taxText',
+                            text: '$taxText ',
                             style: textTheme.bodyMedium?.copyWith(
                                 color: Colors.grey.shade700,
                                 fontSize: 12
@@ -3926,8 +4093,8 @@ class _OrderScreenState extends State<OrderScreen> {
                               const SizedBox(height: 2),
                               // Hiển thị Đơn giá ĐÃ GIẢM
                               Text(
-                                "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
-                                style: textTheme.bodyMedium
+                                  "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
+                                  style: textTheme.bodyMedium
                               ),
                             ],
                           ),

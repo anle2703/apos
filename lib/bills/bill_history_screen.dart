@@ -462,8 +462,6 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                 runSpacing: 16,
                 children: [
                   Text('Lọc Hóa Đơn', style: Theme.of(context).textTheme.headlineMedium),
-                  const Divider(),
-
                   // === GIAO DIỆN CHỌN NGÀY MỚI ===
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 4),

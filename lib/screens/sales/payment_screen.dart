@@ -226,6 +226,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   static double? _cachedEarnRate;
   static double? _cachedRedeemRate;
   static String? _cachedDefaultMethodId;
+  static String? _cachedDefaultVoucherCode;
 
   static void resetCache() {
     _cachedStoreTaxSettings = null;
@@ -233,6 +234,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     _cachedEarnRate = null;
     _cachedRedeemRate = null;
     _cachedDefaultMethodId = null;
+    _cachedDefaultVoucherCode = null;
   }
 
   final Map<String, String> _productTaxRateMap = {};
@@ -373,6 +375,20 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         _setupDefaultSelection();
       }
 
+      if (_voucherController.text.isEmpty &&
+          _cachedDefaultVoucherCode != null &&
+          _cachedDefaultVoucherCode!.isNotEmpty) {
+
+        // Điền mã vào ô
+        _voucherController.text = _cachedDefaultVoucherCode!;
+
+        // Gọi hàm kiểm tra (chế độ silent = true)
+        // Dùng addPostFrameCallback để tránh lỗi setState khi đang build
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _applyVoucher(silent: true);
+        });
+      }
+
       _calculateTotal(initialLoad: true);
     });
   }
@@ -382,22 +398,33 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
-      // Gọi song song 3 API
       final results = await Future.wait([
         SettingsService().getStoreSettings(ownerUid),
         FirestoreService().loadPointsSettings(widget.currentUser.storeId),
         _firestoreService.getStoreTaxSettings(widget.currentUser.storeId),
+        _firestoreService.getStoreDetails(widget.currentUser.storeId), // Hàm này của bạn trả về Map, cần sửa lại chút ở service nếu muốn lấy raw data, hoặc gọi trực tiếp DB ở đây
       ]);
+
+      final storeSnapshot = await FirebaseFirestore.instance
+          .collection('stores')
+          .doc(widget.currentUser.storeId)
+          .get();
 
       final settings = results[0] as dynamic;
       final pointsSettings = results[1] as Map<String, dynamic>;
       final taxSettings = results[2] as Map<String, dynamic>?;
 
-      // Lưu vào Cache Static
       _cachedEarnRate = pointsSettings['earnRate'] ?? 0.0;
       _cachedRedeemRate = pointsSettings['redeemRate'] ?? 0.0;
       _cachedDefaultMethodId = settings.defaultPaymentMethodId;
       _cachedStoreTaxSettings = taxSettings;
+
+      if (storeSnapshot.exists) {
+        final data = storeSnapshot.data();
+        _cachedDefaultVoucherCode = data?['defaultVoucherCode'];
+      } else {
+        _cachedDefaultVoucherCode = null;
+      }
 
     } catch (e) {
       debugPrint("Error loading settings: $e");
@@ -511,8 +538,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     super.dispose();
   }
 
-  Future<void> _applyVoucher() async {
+  Future<void> _applyVoucher({bool silent = false}) async {
     final code = _voucherController.text.trim();
+
+    // Nếu ô trống
     if (code.isEmpty) {
       if (_appliedVoucher != null) {
         setState(() {
@@ -526,7 +555,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
     final voucher = await FirestoreService()
         .validateVoucher(code, widget.currentUser.storeId);
+
+    if (!mounted) return;
+
     if (voucher != null) {
+      // --- TRƯỜNG HỢP VOUCHER HỢP LỆ ---
       setState(() {
         _appliedVoucher = voucher;
         if (voucher.isPercent) {
@@ -534,18 +567,42 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         } else {
           _voucherDiscountValue = voucher.value;
         }
-        ToastService().show(
-            message: "Đã áp dụng voucher: ${voucher.code}",
-            type: ToastType.success);
+
+        // Chỉ hiện Toast nếu người dùng tự nhập (không phải silent)
+        if (!silent) {
+          ToastService().show(
+              message: "Đã áp dụng voucher: ${voucher.code}",
+              type: ToastType.success);
+        }
       });
     } else {
+      // --- TRƯỜNG HỢP VOUCHER LỖI / HẾT HẠN ---
       setState(() {
         _appliedVoucher = null;
         _voucherDiscountValue = 0;
       });
-      ToastService().show(
-          message: "Voucher không hợp lệ hoặc đã hết hạn.",
-          type: ToastType.error);
+
+      if (silent) {
+        // [QUAN TRỌNG] Nếu đang chạy ngầm (tự động) mà thấy lỗi
+        // Kiểm tra xem mã đang nhập có phải mã mặc định không
+        if (code == _cachedDefaultVoucherCode) {
+          debugPrint(">>> Voucher mặc định ($code) đã hết hạn. Đang gỡ bỏ...");
+
+          // 1. Xóa text trên màn hình
+          _voucherController.clear();
+
+          // 2. Gỡ bỏ mặc định trong Database để lần sau không tự điền nữa
+          await FirestoreService().setDefaultVoucher(widget.currentUser.storeId, null);
+
+          // 3. Reset cache local
+          _cachedDefaultVoucherCode = null;
+        }
+      } else {
+        // Nếu người dùng tự nhập tay thì báo lỗi như bình thường
+        ToastService().show(
+            message: "Voucher không hợp lệ hoặc đã hết hạn.",
+            type: ToastType.error);
+      }
     }
     _calculateTotal();
   }
@@ -1025,7 +1082,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       // 4. Trừ kho (Inventory)
       try {
         await InventoryService().processStockDeductionForOrder(
-            List<Map<String, dynamic>>.from(widget.order.items),
+            billItems,
             widget.order.storeId);
       } catch (e) {
         debugPrint("Background Inventory Error: $e");

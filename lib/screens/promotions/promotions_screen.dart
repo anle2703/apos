@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import '../../widgets/custom_text_form_field.dart';
 import '../../models/discount_model.dart';
 import 'discount_form_screen.dart';
+import 'buy_x_get_y_form_screen.dart';
 
 // --- WIDGET CHÍNH ---
 class PromotionsScreen extends StatelessWidget {
@@ -42,7 +43,7 @@ class PromotionsScreen extends StatelessWidget {
             PointsSettingsTab(currentUser: currentUser),
             DiscountsTab(currentUser: currentUser),
             VouchersTab(currentUser: currentUser),
-            ComingSoonWidget(featureName: "Mua hàng tặng hàng"),
+            BuyXGetYTab(currentUser: currentUser),
           ],
         ),
       ),
@@ -273,102 +274,150 @@ class _VouchersTabState extends State<VouchersTab> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: StreamBuilder<List<VoucherModel>>(
-        stream: _firestoreService.getVouchersStream(widget.currentUser.storeId),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text("Lỗi: ${snapshot.error}"));
-          }
-          final vouchers = snapshot.data ?? [];
-          if (vouchers.isEmpty) {
-            return const Center(child: Text("Chưa có voucher nào."));
+      // 1. Stream Settings để lấy mã voucher mặc định hiện tại
+      // (Hàm getStoreSettingsStream phải được thêm vào FirestoreService như hướng dẫn trước)
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: _firestoreService.getStoreSettingsStream(widget.currentUser.storeId),
+        builder: (context, settingsSnapshot) {
+
+          String? currentDefaultCode;
+          // Parse dữ liệu từ settings để lấy mã đang active
+          if (settingsSnapshot.hasData && settingsSnapshot.data!.exists) {
+            final data = settingsSnapshot.data!.data() as Map<String, dynamic>?;
+            currentDefaultCode = data?['defaultVoucherCode'];
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: vouchers.length,
-            itemBuilder: (context, index) {
-              final v = vouchers[index];
-              final valueString = v.isPercent ? '${formatNumber(v.value)}%' : '${formatNumber(v.value)} đ';
-
-              String subtitle = "Giảm $valueString";
-              final quantityUsed = v.quantityUsed ?? 0;
-
-              if (v.quantity != null) {
-                subtitle += " - Còn: ${v.quantity} - Đã dùng: $quantityUsed";
-              } else {
-                subtitle += " - Đã dùng: $quantityUsed";
+          // 2. Stream Danh sách Voucher (Logic cũ)
+          return StreamBuilder<List<VoucherModel>>(
+            stream: _firestoreService.getVouchersStream(widget.currentUser.storeId),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text("Lỗi: ${snapshot.error}"));
+              }
+              final vouchers = snapshot.data ?? [];
+              if (vouchers.isEmpty) {
+                return const Center(child: Text("Chưa có voucher nào."));
               }
 
-              if (v.startAt != null) {
-                subtitle += "\nBắt đầu: ${DateFormat('dd/MM/yy HH:mm').format(v.startAt!.toDate())}";
-              }
-              if (v.expiryAt != null) {
-                subtitle += " - HSD: ${DateFormat('dd/MM/yy HH:mm').format(v.expiryAt!.toDate())}";
-              }
+              return ListView.builder(
+                padding: const EdgeInsets.all(8),
+                itemCount: vouchers.length,
+                itemBuilder: (context, index) {
+                  final v = vouchers[index];
 
-              final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: v.isActive ? Colors.green.shade700 : null, fontSize: 18, fontWeight: FontWeight.bold,
-              );
+                  // Logic hiển thị text (Giữ nguyên như code cũ của bạn)
+                  final valueString = v.isPercent ? '${formatNumber(v.value)}%' : '${formatNumber(v.value)} đ';
+                  String subtitle = "Giảm $valueString";
+                  final quantityUsed = v.quantityUsed ?? 0;
 
-              return Card(
-                clipBehavior: Clip.antiAlias, // Giúp InkWell có hiệu ứng bo góc
-                child: InkWell(
-                  onTap: () {
-                    if (_canSetupPromotions) {
-                      _showAddEditVoucherDialog(voucher: v);
-                    } else {
-                      ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
-                    }
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center, // Căn giữa icon và cột text
-                      children: [
-                        // Icon
-                        Icon(
-                          Icons.confirmation_number_outlined,
-                          color: v.isActive ? Colors.green.shade700 : Colors.grey,
-                          size: 32, // Cho icon lớn hơn một chút
-                        ),
-                        const SizedBox(width: 16.0),
-                        // Cột chứa Title và Subtitle
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start, // Căn chữ sang trái
-                            children: [
-                              Text(v.code, style: titleStyle),
-                              const SizedBox(height: 4.0),
-                              Text(
-                                subtitle,
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black),
+                  if (v.quantity != null) {
+                    subtitle += " - Còn: ${v.quantity} - Đã dùng: $quantityUsed";
+                  } else {
+                    subtitle += " - Đã dùng: $quantityUsed";
+                  }
+
+                  if (v.startAt != null) {
+                    subtitle += "\nBắt đầu: ${DateFormat('dd/MM/yy HH:mm').format(v.startAt!.toDate())}";
+                  }
+                  if (v.expiryAt != null) {
+                    subtitle += " - HSD: ${DateFormat('dd/MM/yy HH:mm').format(v.expiryAt!.toDate())}";
+                  }
+
+                  final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: v.isActive ? Colors.green.shade700 : null, fontSize: 18, fontWeight: FontWeight.bold,
+                  );
+
+                  // Kiểm tra xem voucher này có phải là voucher mặc định không
+                  final isDefault = currentDefaultCode == v.code;
+
+                  return Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () {
+                        if (_canSetupPromotions) {
+                          _showAddEditVoucherDialog(voucher: v);
+                        } else {
+                          ToastService().show(
+                              message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                              type: ToastType.warning);
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.confirmation_number_outlined,
+                              color: v.isActive ? Colors.green.shade700 : Colors.grey,
+                              size: 32,
+                            ),
+                            const SizedBox(width: 16.0),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(v.code, style: titleStyle),
+                                  const SizedBox(height: 4.0),
+                                  Text(
+                                    subtitle,
+                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+
+                            // --- NÚT NGÔI SAO (ĐẶT MẶC ĐỊNH) ---
+                            // Chỉ hiện nếu user có quyền và voucher đang kích hoạt
+                            if (_canSetupPromotions && v.isActive)
+                              IconButton(
+                                icon: Icon(
+                                  isDefault ? Icons.star : Icons.star_border,
+                                  color: isDefault ? Colors.orange : Colors.grey,
+                                  size: 30,
+                                ),
+                                tooltip: isDefault ? "Hủy mặc định" : "Đặt làm mặc định",
+                                onPressed: () async {
+                                  // Nếu đang là mặc định -> Bấm để hủy (gửi null)
+                                  // Nếu chưa -> Bấm để đặt (gửi code)
+                                  final newCode = isDefault ? null : v.code;
+
+                                  // Gọi hàm set trong FirestoreService
+                                  await _firestoreService.setDefaultVoucher(widget.currentUser.storeId, newCode);
+
+                                  if (mounted) {
+                                    ToastService().show(
+                                        message: isDefault
+                                            ? "Đã hủy voucher mặc định"
+                                            : "Đã đặt ${v.code} làm voucher mặc định",
+                                        type: ToastType.success
+                                    );
+                                  }
+                                },
+                              ),
+                            // -------------------------------------
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               );
             },
           );
         },
       ),
-        floatingActionButton: _canSetupPromotions
-            ? FloatingActionButton.extended(
-          onPressed: () => _showAddEditVoucherDialog(),
-          icon: const Icon(Icons.add),
-          label: const Text("Tạo Voucher"),
-          backgroundColor: AppTheme.primaryColor,
-        )
-            : null,
+      floatingActionButton: _canSetupPromotions
+          ? FloatingActionButton.extended(
+        onPressed: () => _showAddEditVoucherDialog(),
+        icon: const Icon(Icons.add),
+        label: const Text("Tạo Voucher"),
+        backgroundColor: AppTheme.primaryColor,
+      )
+          : null,
     );
   }
 }
@@ -689,15 +738,15 @@ class _DiscountsTabState extends State<DiscountsTab> {
               return Card(
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: discount.isActive ? Colors.blue.shade100 : Colors.grey.shade200,
-                    child: Icon(Icons.price_change, color: discount.isActive ? Colors.blue : Colors.grey),
+                    backgroundColor: discount.isActive ? AppTheme.primaryColor.withAlpha(25) : Colors.grey.shade200,
+                    child: Icon(Icons.price_change, color: discount.isActive ? AppTheme.primaryColor : Colors.grey),
                   ),
-                  title: Text(discount.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  title: Text(discount.name, style: const TextStyle(fontSize: 18,fontWeight: FontWeight.bold)),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("${discount.items.length} sản phẩm - $targetStr"),
-                      Text(timeStr, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      Text("${discount.items.length} sản phẩm - $targetStr", style: TextStyle(fontSize: 16)),
+                      Text(timeStr, style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
                     ],
                   ),
                   trailing: const Icon(Icons.chevron_right),
@@ -733,34 +782,178 @@ class _DiscountsTabState extends State<DiscountsTab> {
   }
 }
 
-// ---- WIDGET CHUNG CHO CÁC TAB CHƯA PHÁT TRIỂN ----
-class ComingSoonWidget extends StatelessWidget {
-  final String featureName;
-  const ComingSoonWidget({super.key, required this.featureName});
+// --- TAB DANH SÁCH MUA X TẶNG Y ---
+// --- [THÊM MỚI] TAB DANH SÁCH MUA X TẶNG Y ---
+class BuyXGetYTab extends StatefulWidget {
+  final UserModel currentUser;
+  const BuyXGetYTab({super.key, required this.currentUser});
+
+  @override
+  State<BuyXGetYTab> createState() => _BuyXGetYTabState();
+}
+
+class _BuyXGetYTabState extends State<BuyXGetYTab> {
+  final _firestoreService = FirestoreService();
+  bool _canSetupPromotions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Kiểm tra quyền
+    if (widget.currentUser.role == 'owner') {
+      _canSetupPromotions = true;
+    } else {
+      _canSetupPromotions = widget.currentUser.permissions?['promotions']?['canSetupPromotions'] ?? false;
+    }
+  }
+
+  // Hàm mở form (Thêm mới hoặc Sửa)
+  void _openForm({Map<String, dynamic>? item}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => BuyXGetYFormScreen(
+          currentUser: widget.currentUser,
+          initialData: item, // Nếu item null -> Thêm mới, Ngược lại -> Sửa
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.construction_outlined,
-            size: 60,
-            color: Colors.grey.shade400,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            "Tính năng $featureName",
-            style: AppTheme.boldTextStyle.copyWith(fontSize: 20),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Đang trong quá trình phát triển.",
-            style: AppTheme.regularGreyTextStyle,
-          ),
-        ],
+    return Scaffold(
+      // Stream lấy danh sách chương trình
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _firestoreService.getBuyXGetYStream(widget.currentUser.storeId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            // --- [THÊM ĐOẠN NÀY ĐỂ IN LINK INDEX] ---
+            debugPrint("======================================================================");
+            debugPrint(">>> [CẦN TẠO INDEX] Bấm vào link bên dưới để tạo index cho Mua X Tặng Y:");
+            debugPrint(snapshot.error.toString());
+            debugPrint("======================================================================");
+            // ----------------------------------------
+            return Center(child: Text("Lỗi: ${snapshot.error}"));
+          }
+
+          final promotions = snapshot.data ?? [];
+          if (promotions.isEmpty) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.card_giftcard, size: 60, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text("Chưa có chương trình Mua X Tặng Y nào."),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: promotions.length,
+            itemBuilder: (context, index) {
+              final promo = promotions[index];
+
+              // Lấy thông tin hiển thị
+              final String name = promo['name'] ?? 'Không tên';
+              final bool isActive = promo['isActive'] ?? true;
+
+              final String buyName = promo['buyProductName'] ?? '...';
+
+              final num rawBuyQty = promo['buyQuantity'] ?? 1;
+              final num rawGiftQty = promo['giftQuantity'] ?? 1;
+
+              final String buyQtyStr = formatNumber(rawBuyQty.toDouble());
+              final String giftQtyStr = formatNumber(rawGiftQty.toDouble());
+
+              final String giftName = promo['giftProductName'] ?? '...';
+
+              // Hiển thị thời gian ngắn gọn
+              String timeStr = "Cụ thể";
+              if (promo['timeType'] == 'daily') {timeStr = "Hàng ngày";}
+              else if (promo['timeType'] == 'weekly') {timeStr = "Hàng tuần";}
+              else if (promo['startAt'] != null && promo['endAt'] != null) {
+                timeStr = "${DateFormat('dd/MM').format((promo['startAt'] as Timestamp).toDate())} - ${DateFormat('dd/MM').format((promo['endAt'] as Timestamp).toDate())}";
+              }
+
+              return Card(
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () {
+                    if (_canSetupPromotions) {
+                      _openForm(item: promo);
+                    } else {
+                      ToastService().show(message: 'Bạn không có quyền chỉnh sửa.', type: ToastType.warning);
+                    }
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Row(
+                      children: [
+                        // Icon trạng thái
+                        CircleAvatar(
+                          backgroundColor: isActive ? Colors.orange.withAlpha(30) : Colors.grey.shade200,
+                          child: Icon(
+                              Icons.local_mall_outlined,
+                              color: isActive ? Colors.orange : Colors.grey
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // Nội dung chính
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
+                              const SizedBox(height: 4),
+                              RichText(
+                                text: TextSpan(
+                                  style: DefaultTextStyle.of(context).style,
+                                  children: [
+                                    const TextSpan(text: "Mua "),
+                                    // [SỬA] Dùng biến String đã format
+                                    TextSpan(text: "$buyQtyStr $buyName", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    const TextSpan(text: " tặng "),
+                                    // [SỬA] Dùng biến String đã format
+                                    TextSpan(text: "$giftQtyStr $giftName", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(Icons.access_time, size: 16, color: Colors.grey),
+                                  const SizedBox(width: 4),
+                                  Text(timeStr, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+                                ],
+                              )
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
       ),
+      // Nút Thêm Mới
+      floatingActionButton: _canSetupPromotions
+          ? FloatingActionButton.extended(
+        onPressed: () => _openForm(), // Gọi form với null data (Tạo mới)
+        icon: const Icon(Icons.add),
+        label: const Text("Tạo Mới"),
+        backgroundColor: AppTheme.primaryColor,
+      )
+          : null,
     );
   }
 }

@@ -236,9 +236,9 @@ class _ReportScreenState extends State<ReportScreen>
           tabs: const [
             Tab(text: 'Tổng quan'),
             Tab(text: 'Thu Chi'),
-            Tab(text: 'Tổng kết'),
+            Tab(text: 'Tổng kết cuối ngày'),
             Tab(text: 'Tồn Kho'),
-            Tab(text: 'Bảng Kê Bán Lẻ'),
+            Tab(text: 'Hàng hóa bán ra'),
           ],
         ),
       ),

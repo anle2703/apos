@@ -142,7 +142,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
               child: Wrap(
                 runSpacing: 16,
                 children: [
-                  Text('Lọc Bảng Kê Bán Lẻ',
+                  Text('Lọc Hàng hóa bán ra',
                       style: Theme.of(context).textTheme.headlineMedium),
                   TextField(
                     controller: _searchController,
