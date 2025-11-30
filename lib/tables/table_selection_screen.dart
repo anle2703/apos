@@ -60,6 +60,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
   StreamSubscription? _newActiveOrdersSubscription;
 
   Stream<Map<String, dynamic>> _getCombinedStream() {
+    // 1. Khởi tạo Stream
     final tablesStream = _firestoreService.getAllTablesStream(widget.currentUser.storeId);
     final ordersStream = _firestoreService.getActiveOrdersStream(widget.currentUser.storeId);
     final discountsStream = _discountService.getActiveDiscountsStream(widget.currentUser.storeId);
@@ -71,6 +72,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
         .snapshots()
         .map((snapshot) => { for (var doc in snapshot.docs) doc.id : doc.data() });
 
+    // 2. GOM DỮ LIỆU THÔ (Chưa tính toán gì ở bước này để chạy nhanh nhất)
     return Rx.combineLatest7(
       tablesStream,
       _firestoreService.getAllTablesStream(widget.currentUser.storeId),
@@ -87,139 +89,170 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
           Map<String, Map<String, dynamic>> ordersRawDataMap,
           List<DiscountModel> activeDiscounts,
           ) {
-
-        // [FIX] Sửa kiểu dữ liệu của Cache thành DiscountItem?
-        final Map<String, DiscountItem?> discountCache = {};
-
-        for (var order in orders) {
-          double recalculatedTotal = 0;
-
-          for (var itemData in order.items) {
-            final itemMap = itemData as Map<String, dynamic>;
-            final product = ProductModel.fromMap(itemMap['product']);
-
-            final String? note = itemMap['note'];
-            if (note != null && note.startsWith("Tặng kèm")) {
-              final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
-              final double qty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-              recalculatedTotal += price * qty;
-              continue;
-            }
-
-            double currentBaseTotal = 0;
-            double discountAmount = 0;
-
-            if (product.serviceSetup?['isTimeBased'] == true) {
-              final startTime = itemMap['addedAt'] as Timestamp;
-              final isPaused = itemMap['isPaused'] as bool? ?? false;
-              final pausedAt = itemMap['pausedAt'] as Timestamp?;
-              final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
-
-              final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
-                product: product,
-                startTime: startTime,
-                isPaused: isPaused,
-                pausedAt: pausedAt,
-                totalPausedDurationInSeconds: totalPausedDuration,
-              );
-              currentBaseTotal = timeResult.totalPrice;
-            } else {
-              final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
-              final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-              currentBaseTotal = price * quantity;
-            }
-
-            // [FIX] Sửa kiểu dữ liệu biến discountRule thành DiscountItem?
-            DiscountItem? discountRule;
-
-            if (discountCache.containsKey(product.id)) {
-              discountRule = discountCache[product.id];
-            } else {
-              discountRule = _discountService.findBestDiscountForProduct(
-                product: product,
-                activeDiscounts: activeDiscounts,
-                customer: null,
-                checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
-              );
-              discountCache[product.id] = discountRule;
-            }
-
-            if (discountRule != null) {
-              // Bây giờ biến discountRule đã là DiscountItem nên có thể gọi .isPercent và .value
-              if (discountRule.isPercent) {
-                discountAmount = currentBaseTotal * (discountRule.value / 100);
-              } else {
-                if (product.serviceSetup?['isTimeBased'] == true) {
-                  final startTime = itemMap['addedAt'] as Timestamp;
-                  final isPaused = itemMap['isPaused'] as bool? ?? false;
-                  final pausedAt = itemMap['pausedAt'] as Timestamp?;
-                  final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
-
-                  final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
-                    product: product,
-                    startTime: startTime,
-                    isPaused: isPaused,
-                    pausedAt: pausedAt,
-                    totalPausedDurationInSeconds: totalPausedDuration,
-                  );
-                  double totalHours = timeResult.totalMinutesBilled / 60.0;
-                  discountAmount = totalHours * discountRule.value;
-                } else {
-                  final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-                  discountAmount = quantity * discountRule.value;
-                }
-              }
-            } else {
-              final double storedDiscountVal = (itemMap['discountValue'] as num?)?.toDouble() ?? 0.0;
-              final String storedDiscountUnit = (itemMap['discountUnit'] as String?) ?? '%';
-
-              if (storedDiscountVal > 0) {
-                if (storedDiscountUnit == '%') {
-                  discountAmount = currentBaseTotal * (storedDiscountVal / 100);
-                } else {
-                  discountAmount = storedDiscountVal;
-                }
-              }
-            }
-
-            double itemFinalPrice = (currentBaseTotal - discountAmount).clamp(0, double.infinity);
-            recalculatedTotal += itemFinalPrice;
-          }
-          order.totalAmount = recalculatedTotal;
-        }
-
-        final orderMap = {for (var order in orders) order.tableId: order};
-
-        final tablesWithInfo = tables.map((table) {
-          final orderModel = orderMap[table.id];
-          Map<String, dynamic>? rawData;
-          if (orderModel != null) {
-            rawData = ordersRawDataMap[orderModel.id];
-          }
-          return TableWithOrderInfo(table: table, order: orderModel, rawData: rawData);
-        }).toList();
-
-        final bool hasOnlineTables = tables.any((t) => t.tableGroup == 'Online');
-        List<TableGroupModel> finalGroups = List.from(groups);
-        if (hasOnlineTables && !groups.any((g) => g.name == 'Online')) {
-          final onlineGroup = TableGroupModel(
-              id: 'virtual_online_group',
-              name: 'Online',
-              stt: -1,
-              storeId: widget.currentUser.storeId
-          );
-          finalGroups.insert(0, onlineGroup);
-        }
-
+        // Đóng gói dữ liệu thô và đẩy sang bước tiếp theo
         return {
           'allTablesRaw': allTablesRaw,
-          'tablesWithInfo': tablesWithInfo,
-          'groups': finalGroups,
-          'activeOrders': orders,
-          'allActiveOrdersRawDataMap': ordersRawDataMap,
+          'tables': tables,
+          'orders': orders,
+          'groups': groups,
+          'ordersRawDataMap': ordersRawDataMap,
+          'activeDiscounts': activeDiscounts,
         };
       },
-    ).debounceTime(const Duration(milliseconds: 100));
+    )
+    // [QUAN TRỌNG 1] Debounce: Chờ 200ms để gom các thay đổi liên tục và né animation lúc chuyển màn hình
+        .debounceTime(const Duration(milliseconds: 300))
+
+    // [QUAN TRỌNG 2] asyncMap: Thực hiện tính toán nặng ở đây
+        .asyncMap((data) async {
+      final allTablesRaw = data['allTablesRaw'] as List<TableModel>;
+      final tables = data['tables'] as List<TableModel>;
+      final orders = data['orders'] as List<OrderModel>;
+      final groups = data['groups'] as List<TableGroupModel>;
+      final ordersRawDataMap = data['ordersRawDataMap'] as Map<String, Map<String, dynamic>>;
+      final activeDiscounts = data['activeDiscounts'] as List<DiscountModel>;
+
+      final Map<String, DiscountItem?> discountCache = {};
+
+      // VÒNG LẶP TÍNH TOÁN (CÓ CHIA NHỎ TASK)
+      int processedCount = 0;
+      for (var order in orders) {
+        // [KỸ THUẬT TIME SLICING]
+        // Cứ sau mỗi 3 đơn hàng được tính toán, tạm dừng 0ms để nhường CPU cho UI vẽ Frame.
+        // Điều này giúp animation không bị khựng dù đang tính toán nặng.
+        processedCount++;
+        if (processedCount % 1 == 0) {
+          await Future.delayed(Duration(milliseconds: 1));
+        }
+
+        double recalculatedTotal = 0;
+
+        for (var itemData in order.items) {
+          final itemMap = itemData as Map<String, dynamic>;
+          final product = ProductModel.fromMap(itemMap['product']);
+
+          // Bỏ qua tính toán nếu là hàng tặng
+          final String? note = itemMap['note'];
+          if (note != null && note.startsWith("Tặng kèm")) {
+            final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+            final double qty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+            recalculatedTotal += price * qty;
+            continue;
+          }
+
+          double currentBaseTotal = 0;
+          double discountAmount = 0;
+
+          // A. Tính giá gốc
+          if (product.serviceSetup?['isTimeBased'] == true) {
+            final startTime = itemMap['addedAt'] as Timestamp;
+            final isPaused = itemMap['isPaused'] as bool? ?? false;
+            final pausedAt = itemMap['pausedAt'] as Timestamp?;
+            final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
+
+            final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
+              product: product,
+              startTime: startTime,
+              isPaused: isPaused,
+              pausedAt: pausedAt,
+              totalPausedDurationInSeconds: totalPausedDuration,
+            );
+            currentBaseTotal = timeResult.totalPrice;
+          } else {
+            final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+            final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+            currentBaseTotal = price * quantity;
+          }
+
+          // B. Tìm Discount (Có Cache)
+          DiscountItem? discountRule;
+          if (discountCache.containsKey(product.id)) {
+            discountRule = discountCache[product.id];
+          } else {
+            discountRule = _discountService.findBestDiscountForProduct(
+              product: product,
+              activeDiscounts: activeDiscounts,
+              customer: null,
+              checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
+            );
+            discountCache[product.id] = discountRule;
+          }
+
+          if (discountRule != null) {
+            if (discountRule.isPercent) {
+              discountAmount = currentBaseTotal * (discountRule.value / 100);
+            } else {
+              if (product.serviceSetup?['isTimeBased'] == true) {
+                // Tính lại giờ cho discount VNĐ
+                final startTime = itemMap['addedAt'] as Timestamp;
+                final isPaused = itemMap['isPaused'] as bool? ?? false;
+                final pausedAt = itemMap['pausedAt'] as Timestamp?;
+                final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
+                final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
+                  product: product,
+                  startTime: startTime,
+                  isPaused: isPaused,
+                  pausedAt: pausedAt,
+                  totalPausedDurationInSeconds: totalPausedDuration,
+                );
+                double totalHours = timeResult.totalMinutesBilled / 60.0;
+                discountAmount = totalHours * discountRule.value;
+              } else {
+                final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+                discountAmount = quantity * discountRule.value;
+              }
+            }
+          } else {
+            // Fallback giảm giá thủ công
+            final double storedDiscountVal = (itemMap['discountValue'] as num?)?.toDouble() ?? 0.0;
+            final String storedDiscountUnit = (itemMap['discountUnit'] as String?) ?? '%';
+            if (storedDiscountVal > 0) {
+              if (storedDiscountUnit == '%') {
+                discountAmount = currentBaseTotal * (storedDiscountVal / 100);
+              } else {
+                discountAmount = storedDiscountVal;
+              }
+            }
+          }
+
+          double itemFinalPrice = (currentBaseTotal - discountAmount).clamp(0, double.infinity);
+          recalculatedTotal += itemFinalPrice;
+        }
+        order.totalAmount = recalculatedTotal;
+      }
+
+      // 4. Mapping dữ liệu cuối cùng
+      final orderMap = {for (var order in orders) order.tableId: order};
+
+      final tablesWithInfo = tables.map((table) {
+        final orderModel = orderMap[table.id];
+        Map<String, dynamic>? rawData;
+        if (orderModel != null) {
+          rawData = ordersRawDataMap[orderModel.id];
+        }
+        return TableWithOrderInfo(table: table, order: orderModel, rawData: rawData);
+      }).toList();
+
+      final bool hasOnlineTables = tables.any((t) => t.tableGroup == 'Online');
+      List<TableGroupModel> finalGroups = List.from(groups);
+      if (hasOnlineTables && !groups.any((g) => g.name == 'Online')) {
+        final onlineGroup = TableGroupModel(
+            id: 'virtual_online_group',
+            name: 'Online',
+            stt: -1,
+            storeId: widget.currentUser.storeId
+        );
+        finalGroups.insert(0, onlineGroup);
+      }
+
+      return {
+        'allTablesRaw': allTablesRaw,
+        'tablesWithInfo': tablesWithInfo,
+        'groups': finalGroups,
+        'activeOrders': orders,
+        'allActiveOrdersRawDataMap': ordersRawDataMap,
+      };
+    });
   }
 
   @override
