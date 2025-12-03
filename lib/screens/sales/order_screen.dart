@@ -3773,7 +3773,6 @@ class _OrderScreenState extends State<OrderScreen> {
               ),
 
               if (item.toppings.isNotEmpty || (item.note != null && item.note!.isNotEmpty))
-                const SizedBox(height: 2),
               Padding(
                   padding: const EdgeInsets.only(left: 30),
                   child: Column(
@@ -3783,7 +3782,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         _buildToppingsList(item.toppings, currencyFormat),
                       if (item.note != null && item.note!.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(top: 0),
+                          padding: const EdgeInsets.only(top: 2),
                           child: Text(
                             '${item.note}',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(

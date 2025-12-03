@@ -1509,7 +1509,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     bool showOriginalPrice = (item.discountValue != null && item.discountValue! > 0) ||
         (sellingPrice != originalListingPrice);
 
+    // [FIX LỖI CRASH Ở ĐÂY] Phải check item.note != null trước
     final bool isGift = item.note != null && item.note!.contains("Tặng kèm");
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(
@@ -1518,10 +1520,11 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       ),
       child: InkWell(
         onTap: () {
+          // [CHẶN SỬA MÓN QUÀ TẶNG]
           if (isGift) {
             ToastService().show(
-              message: "Đây là quà tặng kèm, không thể chỉnh sửa trực tiếp.",
-              type: ToastType.warning,
+                message: "Đây là quà tặng kèm, không thể chỉnh sửa trực tiếp.",
+                type: ToastType.warning
             );
             return;
           }
@@ -1604,9 +1607,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               ),
 
               if (item.note != null && item.note!.isNotEmpty)
-                const SizedBox(height: 4),
-              Padding(
-                  padding: const EdgeInsets.only(top: 0, bottom: 0),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     item.note!,
                     style: textTheme.bodyMedium?.copyWith(
@@ -1614,9 +1616,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                     ),
                   ),
                 ),
-
               const SizedBox(height: 4),
-
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -1648,7 +1648,14 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                           onPressed: () => _updateQuantity(key, -1),
                         ),
                         InkWell(
-                          onTap: () => _showEditItemDialog(key, item),
+                          onTap: () {
+                            // [CHẶN SỬA MÓN QUÀ TẶNG - KHI BẤM VÀO SỐ LƯỢNG]
+                            if (isGift) {
+                              ToastService().show(message: "Không thể sửa món tặng kèm.", type: ToastType.warning);
+                              return;
+                            }
+                            _showEditItemDialog(key, item);
+                          },
                           child: Container(
                             decoration: BoxDecoration(
                                 color: Colors.white,
