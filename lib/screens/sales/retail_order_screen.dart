@@ -33,6 +33,7 @@ import '../../products/barcode_scanner_screen.dart';
 import '/screens/sales/payment_screen.dart';
 import '../../theme/string_extensions.dart';
 import '../../theme/number_utils.dart';
+import '../../models/quick_note_model.dart';
 
 // --- CLASS QUẢN LÝ SESSION ---
 class RetailTab {
@@ -107,6 +108,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   bool _printBillAfterPayment = true;
   bool _showPricesOnReceipt = true;
   bool _promptForCash = true;
+  List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
+  StreamSubscription? _buyXGetYSub;
 
   @override
   void initState() {
@@ -156,6 +159,18 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
     final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
+
+    _buyXGetYSub = _firestoreService
+        .getActiveBuyXGetYPromotionsStream(widget.currentUser.storeId)
+        .listen((promos) {
+      if (mounted) {
+        setState(() {
+          _activeBuyXGetYPromos = promos;
+        });
+        // Tính toán lại ngay khi load xong
+        _applyBuyXGetYLogic();
+      }
+    });
   }
 
   @override
@@ -166,10 +181,118 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     _discountsSub?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _buyXGetYSub?.cancel();
     super.dispose();
   }
 
-  // --- LOGIC QUẢN LÝ TAB ---
+  void _applyBuyXGetYLogic() {
+    if (_currentTab == null) return;
+    if (_activeBuyXGetYPromos.isEmpty) return;
+
+    final tab = _currentTab!;
+    final Map<String, OrderItem> updates = {};
+    bool hasChanges = false;
+
+    // Snapshot giỏ hàng hiện tại
+    final Map<String, OrderItem> cartSnapshot = Map.from(tab.items);
+
+    for (final promo in _activeBuyXGetYPromos) {
+      final String buyId = promo['buyProductId'];
+      final double buyQtyReq = (promo['buyQuantity'] as num).toDouble();
+      final String? buyUnitReq = promo['buyUnit']; // ĐVT yêu cầu
+
+      final String giftId = promo['giftProductId'];
+      final double giftQtyReward = (promo['giftQuantity'] as num).toDouble();
+      final double giftPrice = (promo['giftPrice'] as num).toDouble();
+      final String promoName = promo['name'];
+      final String giftNote = "Tặng kèm ($promoName)";
+
+      // 1. Tính tổng số lượng hàng MUA
+      double currentBuyQty = 0;
+      for (final item in cartSnapshot.values) {
+        if (item.product.id == buyId) {
+          if (item.note != giftNote) {
+            // Kiểm tra ĐVT
+            if (buyUnitReq != null && buyUnitReq.isNotEmpty) {
+              if (item.selectedUnit == buyUnitReq) {
+                currentBuyQty += item.quantity;
+              }
+            } else {
+              currentBuyQty += item.quantity;
+            }
+          }
+        }
+      }
+
+      // 2. Tính số lượng hàng TẶNG
+      int sets = 0;
+      if (buyQtyReq > 0) {
+        sets = (currentBuyQty / buyQtyReq).floor();
+      }
+      double totalGiftNeeded = sets * giftQtyReward;
+
+      // 3. Tìm hàng tặng trong giỏ
+      String? existingGiftLineId;
+      OrderItem? existingGiftItem;
+
+      for (final entry in cartSnapshot.entries) {
+        if (entry.value.product.id == giftId && entry.value.note == giftNote) {
+          existingGiftLineId = entry.key;
+          existingGiftItem = entry.value;
+          break;
+        }
+      }
+
+      // 4. Đồng bộ
+      if (totalGiftNeeded > 0) {
+        if (existingGiftItem != null) {
+          if (existingGiftItem.quantity != totalGiftNeeded || existingGiftItem.price != giftPrice) {
+            updates[existingGiftLineId!] = existingGiftItem.copyWith(
+              quantity: totalGiftNeeded,
+              price: giftPrice,
+              discountValue: 0,
+              discountUnit: 'VNĐ',
+            );
+            hasChanges = true;
+          }
+        } else {
+          // Tạo mới
+          final productModel = _menuProducts.firstWhereOrNull((p) => p.id == giftId);
+          if (productModel != null) {
+            final newItem = OrderItem(
+              product: productModel,
+              price: giftPrice,
+              quantity: totalGiftNeeded,
+              selectedUnit: promo['giftUnit'] ?? productModel.unit ?? '',
+              addedBy: "System",
+              addedAt: Timestamp.now(),
+              discountValue: 0,
+              discountUnit: 'VNĐ',
+              note: giftNote,
+              commissionStaff: {},
+            );
+            updates[newItem.lineId] = newItem;
+            hasChanges = true;
+          }
+        }
+      } else {
+        // Xóa hàng tặng (Xóa Y khi X bị xóa)
+        if (existingGiftLineId != null) {
+          // Trong Retail Mode, xóa trực tiếp khỏi Map
+          tab.items.remove(existingGiftLineId);
+          hasChanges = true;
+        }
+      }
+    }
+
+    if (hasChanges) {
+      setState(() {
+        tab.items.addAll(updates);
+      });
+      _cartUpdateController.add(null);
+    }
+  }
+
   Future<void> _confirmClearCart() async {
     if (_currentTab == null || _currentTab!.items.isEmpty) return;
 
@@ -248,8 +371,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     });
   }
 
-  // --- LOGIC LƯU ĐƠN LÊN CLOUD ---
-
   Future<void> _saveOrderToCloud() async {
     if (_currentTab == null) return;
     final tab = _currentTab!;
@@ -298,7 +419,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
   }
 
-  // --- THÊM HÀM NÀY ---
   Future<void> _deleteSavedOrder(String orderId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -327,7 +447,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       }
     }
   }
-  // --- LOGIC HIỂN THỊ & KHÔI PHỤC ĐƠN ĐÃ LƯU ---
 
   void _showSavedOrdersList() {
     showModalBottomSheet(
@@ -482,8 +601,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     ToastService().show(message: "Đã mở lại đơn hàng.", type: ToastType.success);
   }
 
-  // --- POPUP DANH SÁCH TAB ĐANG MỞ (MOBILE) ---
-
   void _showActiveTabsList() {
     showModalBottomSheet(
         context: context,
@@ -552,13 +669,13 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
-  // --- LOGIC GIỎ HÀNG (LOCAL) ---
-
-  void _addItemToCart(ProductModel product) {
+  Future<void> _addItemToCart(ProductModel product) async {
     if (_currentTab == null) return;
-
     final tab = _currentTab!;
 
+    // --- LOGIC CŨ: BỎ ĐOẠN CHECK needsOptionDialog VÀ GỌI DIALOG ---
+
+    // Tìm khuyến mãi giảm giá tốt nhất
     final discountItem = _discountService.findBestDiscountForProduct(
       product: product,
       activeDiscounts: _activeDiscounts,
@@ -573,10 +690,11 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       discountUnit = discountItem.isPercent ? '%' : 'VNĐ';
     }
 
+    // Tạo item mới với ĐVT mặc định
     final newItem = OrderItem(
       product: product,
       price: product.sellPrice,
-      selectedUnit: product.unit ?? '',
+      selectedUnit: product.unit ?? '', // Lấy ĐVT mặc định
       quantity: 1,
       addedAt: Timestamp.now(),
       addedBy: widget.currentUser.name ?? 'Staff',
@@ -599,11 +717,10 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       }
     });
 
-    ToastService().show(
-        message: "Đã thêm: ${product.productName}",
-        type: ToastType.success,
-        duration: const Duration(milliseconds: 700)
-    );
+    // Vẫn gọi hàm này để check xem món vừa thêm có kích hoạt quà tặng không
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _applyBuyXGetYLogic();
+    });
   }
 
   void _updateQuantity(String key, double change) {
@@ -612,6 +729,13 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     if (!tab.items.containsKey(key)) return;
 
     final item = tab.items[key]!;
+
+    // Chặn sửa số lượng hàng tặng (nếu muốn)
+    if (item.note != null && item.note!.contains("Tặng kèm")) {
+      ToastService().show(message: "Hàng tặng tự động cập nhật theo món chính.", type: ToastType.warning);
+      return;
+    }
+
     final newQty = item.quantity + change;
 
     setState(() {
@@ -622,21 +746,29 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       }
     });
 
-    // [THÊM] Báo cập nhật UI
     _cartUpdateController.add(null);
+
+    // [QUAN TRỌNG] Chạy lại logic sau khi đổi số lượng (để xóa/thêm quà)
+    _applyBuyXGetYLogic();
   }
 
   void _removeItem(String key) {
     if (_currentTab == null) return;
+    final item = _currentTab!.items[key];
+
+    if (item != null && item.note != null && item.note!.contains("Tặng kèm")) {
+      ToastService().show(message: "Vui lòng xóa món chính, quà tặng sẽ tự mất.", type: ToastType.warning);
+      return;
+    }
+
     setState(() {
       _currentTab!.items.remove(key);
     });
 
-    // [THÊM] Báo cập nhật UI
     _cartUpdateController.add(null);
+    // [QUAN TRỌNG] Chạy lại logic sau khi xóa
+    _applyBuyXGetYLogic();
   }
-
-  // --- LOGIC THANH TOÁN ---
 
   OrderModel _createOrderFromTab(RetailTab tab) {
     // [TỐI ƯU] Sử dụng ??= thay cho if (null)
@@ -728,7 +860,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
   }
 
-  // Hàm phụ trợ để chuyển màn hình Mobile (Tách ra cho gọn)
   void _navigateToPaymentMobile(OrderModel order, RetailTab tab) async {
     final result = await Navigator.of(context).push(MaterialPageRoute(
         builder: (ctx) => PaymentScreen(
@@ -1028,8 +1159,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       ),
     );
   }
-
-  // --- LAYOUTS ---
 
   Widget _buildDesktopLayout() {
     final cardDecoration = BoxDecoration(
@@ -1348,7 +1477,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
-  // Helper lấy giá gốc
   double _getBasePriceForUnit(ProductModel product, String selectedUnit) {
     if ((product.unit ?? '') == selectedUnit) {
       return product.sellPrice;
@@ -1381,8 +1509,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     bool showOriginalPrice = (item.discountValue != null && item.discountValue! > 0) ||
         (sellingPrice != originalListingPrice);
 
-    // [SỬA ĐỔI TẠI ĐÂY]
-    // Thay Container bằng Card để có shadow giống F&B
+    final bool isGift = item.note != null && item.note!.contains("Tặng kèm");
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(
@@ -1390,7 +1517,16 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         side: BorderSide(color: Colors.grey.shade200),
       ),
       child: InkWell(
-        onTap: () => _showEditItemDialog(key, item),
+        onTap: () {
+          if (isGift) {
+            ToastService().show(
+              message: "Đây là quà tặng kèm, không thể chỉnh sửa trực tiếp.",
+              type: ToastType.warning,
+            );
+            return;
+          }
+          _showEditItemDialog(key, item);
+        },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 12.0),
@@ -1856,6 +1992,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
             selectedUnit: result['selectedUnit'],
             note: () => (result['note'] as String?).nullIfEmpty);
       });
+      _applyBuyXGetYLogic();
     }
   }
 
@@ -1874,5 +2011,181 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       _searchFocusNode.requestFocus();
     }
     return false;
+  }
+}
+
+class _RetailProductOptionsDialog extends StatefulWidget {
+  final ProductModel product;
+  final List<ProductModel> allProducts;
+  final List<QuickNoteModel> relevantQuickNotes;
+
+  const _RetailProductOptionsDialog({
+    required this.product,
+    required this.allProducts,
+    required this.relevantQuickNotes,
+  });
+
+  @override
+  State<_RetailProductOptionsDialog> createState() => _RetailProductOptionsDialogState();
+}
+
+class _RetailProductOptionsDialogState extends State<_RetailProductOptionsDialog> {
+  late String _selectedUnit;
+  late Map<String, dynamic> _baseUnitData;
+  late List<Map<String, dynamic>> _allUnitOptions;
+  List<ProductModel> _accompanyingProducts = [];
+  final Map<String, double> _selectedToppings = {};
+  final List<QuickNoteModel> _selectedQuickNotes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _baseUnitData = {
+      'unitName': widget.product.unit ?? '',
+      'sellPrice': widget.product.sellPrice
+    };
+    _allUnitOptions = [_baseUnitData, ...widget.product.additionalUnits];
+    _selectedUnit = _baseUnitData['unitName'] as String;
+
+    final productMap = {for (var p in widget.allProducts) p.id: p};
+    _accompanyingProducts = widget.product.accompanyingItems
+        .map((item) => productMap[item['productId']])
+        .where((p) => p != null)
+        .cast<ProductModel>()
+        .toList();
+  }
+
+  void _onConfirm() {
+    final selectedUnitData =
+    _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
+    final priceForSelectedUnit =
+    (selectedUnitData['sellPrice'] as num).toDouble();
+
+    final Map<ProductModel, double> toppingsMap = {};
+    _selectedToppings.forEach((productId, quantity) {
+      if (quantity > 0) {
+        final product =
+        _accompanyingProducts.firstWhere((p) => p.id == productId);
+        toppingsMap[product] = quantity;
+      }
+    });
+
+    final String noteText = _selectedQuickNotes.map((n) => n.noteText).join(', ');
+
+    Navigator.of(context).pop({
+      'selectedUnit': _selectedUnit,
+      'price': priceForSelectedUnit,
+      'selectedToppings': toppingsMap,
+      'selectedNote': noteText,
+    });
+  }
+
+  void _updateToppingQuantity(String productId, double change) {
+    setState(() {
+      double currentQuantity = _selectedToppings[productId] ?? 0;
+      double newQuantity = currentQuantity + change;
+      if (newQuantity < 0) newQuantity = 0;
+      _selectedToppings[productId] = newQuantity;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasUnits = widget.product.additionalUnits.isNotEmpty;
+    final hasToppings = _accompanyingProducts.isNotEmpty;
+    final hasNotes = widget.relevantQuickNotes.isNotEmpty;
+
+    return AlertDialog(
+      title: Text(widget.product.productName, textAlign: TextAlign.center),
+      scrollable: true,
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 500),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasUnits) ...[
+              const Text('Đơn vị tính:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: _allUnitOptions.map((unitData) {
+                  final unitName = unitData['unitName'] as String;
+                  final price = (unitData['sellPrice'] as num).toDouble();
+                  final isSelected = _selectedUnit == unitName;
+                  return ChoiceChip(
+                    label: Text("$unitName (${formatNumber(price)})"),
+                    selected: isSelected,
+                    onSelected: (val) {
+                      setState(() => _selectedUnit = unitName);
+                    },
+                  );
+                }).toList(),
+              ),
+              const Divider(height: 24),
+            ],
+            if (hasToppings) ...[
+              const Text('Topping / Bán kèm:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Column(
+                children: _accompanyingProducts.map((topping) {
+                  final quantity = _selectedToppings[topping.id] ?? 0;
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text("${topping.productName} (+${formatNumber(topping.sellPrice)})"),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                            onPressed: () => _updateToppingQuantity(topping.id, -1),
+                          ),
+                          Text(formatNumber(quantity), style: const TextStyle(fontWeight: FontWeight.bold)),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_outline, color: Colors.green),
+                            onPressed: () => _updateToppingQuantity(topping.id, 1),
+                          ),
+                        ],
+                      )
+                    ],
+                  );
+                }).toList(),
+              ),
+              const Divider(height: 24),
+            ],
+            if (hasNotes) ...[
+              const Text('Ghi chú nhanh:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: widget.relevantQuickNotes.map((note) {
+                  final isSelected = _selectedQuickNotes.contains(note);
+                  return FilterChip(
+                    label: Text(note.noteText),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _selectedQuickNotes.add(note);
+                        } else {
+                          _selectedQuickNotes.remove(note);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ]
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
+        ElevatedButton(onPressed: _onConfirm, child: const Text('Thêm vào đơn')),
+      ],
+    );
   }
 }

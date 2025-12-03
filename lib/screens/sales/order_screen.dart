@@ -268,85 +268,88 @@ class _OrderScreenState extends State<OrderScreen> {
   void _applyBuyXGetYLogic() {
     if (_activeBuyXGetYPromos.isEmpty) return;
 
+    // Lấy snapshot giỏ hàng hiện tại (bao gồm cả thay đổi chưa lưu)
     final Map<String, OrderItem> cartSnapshot = {..._cart, ..._localChanges};
+
+    // [QUAN TRỌNG] Loại bỏ món đã hủy để không tính vào điều kiện mua
     cartSnapshot.removeWhere((key, item) => item.status == 'cancelled');
 
     final Map<String, OrderItem> updates = {};
 
     for (final promo in _activeBuyXGetYPromos) {
+      // ... (Logic lấy thông tin promo giữ nguyên) ...
       final String buyId = promo['buyProductId'];
       final double buyQtyReq = (promo['buyQuantity'] as num).toDouble();
+      final String? buyUnitReq = promo['buyUnit']; // ĐVT yêu cầu
 
       final String giftId = promo['giftProductId'];
       final double giftQtyReward = (promo['giftQuantity'] as num).toDouble();
-
-      // Giá cứng đã cài trong giá Y (thường là 0)
       final double giftPrice = (promo['giftPrice'] as num).toDouble();
-      final String promoName = promo['name'];
-
-      final String giftNote = "Tặng kèm ($promoName)";
+      final String giftNote = "Tặng kèm (${promo['name']})";
 
       // 1. Tính tổng số lượng hàng MUA
       double currentBuyQty = 0;
-
-      // [FIX] Dùng vòng lặp for-in thay vì forEach
       for (final item in cartSnapshot.values) {
-        if (item.product.id == buyId) {
-          // Không tính món có ghi chú là hàng tặng
-          if (item.note != giftNote) {
+        if (item.product.id == buyId && item.note != giftNote) {
+          // Kiểm tra ĐVT nếu cấu hình yêu cầu
+          if (buyUnitReq != null && buyUnitReq.isNotEmpty) {
+            if (item.selectedUnit == buyUnitReq) {
+              currentBuyQty += item.quantity;
+            }
+          } else {
             currentBuyQty += item.quantity;
           }
         }
       }
 
-      // 2. Tính số lượng hàng TẶNG
+      // 2. Tính toán quà tặng
       int sets = 0;
-      if (buyQtyReq > 0) {
-        sets = (currentBuyQty / buyQtyReq).floor();
-      }
+      if (buyQtyReq > 0) sets = (currentBuyQty / buyQtyReq).floor();
       double totalGiftNeeded = sets * giftQtyReward;
 
-      // 3. Tìm hàng tặng trong giỏ
+      // 3. Tìm món quà đang có trong giỏ (để cập nhật hoặc xóa)
       String? existingGiftLineId;
       OrderItem? existingGiftItem;
 
-      // [FIX] Dùng vòng lặp for-in cho Map entries
-      for (final entry in cartSnapshot.entries) {
-        final key = entry.key;
-        final item = entry.value;
-
-        if (item.product.id == giftId && item.note == giftNote) {
-          existingGiftLineId = key;
-          existingGiftItem = item;
-          break; // Tìm thấy rồi thì break cho tối ưu
+      // Tìm trong cartSnapshot (đã lọc món hủy) chưa đủ, phải tìm trong toàn bộ _cart + _localChanges
+      // để tìm ra món quà CẦN hủy nếu nó đang tồn tại.
+      final allItems = {..._cart, ..._localChanges};
+      for (final entry in allItems.entries) {
+        // Chỉ tìm món quà chưa bị hủy
+        if (entry.value.product.id == giftId &&
+            entry.value.note == giftNote &&
+            entry.value.status != 'cancelled') {
+          existingGiftLineId = entry.key;
+          existingGiftItem = entry.value;
+          break;
         }
       }
 
       // 4. Đồng bộ
       if (totalGiftNeeded > 0) {
+        // Cần có quà
         if (existingGiftItem != null) {
-          // Cập nhật nếu số lượng hoặc giá sai lệch
+          // Đã có -> Update số lượng
           if (existingGiftItem.quantity != totalGiftNeeded || existingGiftItem.price != giftPrice) {
             updates[existingGiftLineId!] = existingGiftItem.copyWith(
               quantity: totalGiftNeeded,
-              price: giftPrice,        // Set cứng giá Y
-              discountValue: 0,        // Không giảm giá thêm
+              price: giftPrice,
+              discountValue: 0,
               discountUnit: 'VNĐ',
             );
           }
         } else {
-          // Tạo mới
+          // Chưa có -> Tạo mới
           final productModel = _menuProducts.firstWhereOrNull((p) => p.id == giftId);
-
           if (productModel != null) {
             final newItem = OrderItem(
               product: productModel,
-              price: giftPrice,        // Set cứng giá Y
+              price: giftPrice,
               quantity: totalGiftNeeded,
               selectedUnit: promo['giftUnit'] ?? productModel.unit ?? '',
               addedBy: "System",
               addedAt: Timestamp.now(),
-              discountValue: 0,        // Không giảm giá thêm
+              discountValue: 0,
               discountUnit: 'VNĐ',
               note: giftNote,
               commissionStaff: {},
@@ -355,7 +358,8 @@ class _OrderScreenState extends State<OrderScreen> {
           }
         }
       } else {
-        // Xóa hàng tặng nếu không đủ điều kiện
+        // Không đủ điều kiện (currentBuyQty giảm hoặc xóa hết)
+        // -> Xóa quà nếu đang tồn tại
         if (existingGiftLineId != null) {
           updates[existingGiftLineId] = existingGiftItem!.copyWith(
               quantity: 0,
@@ -367,20 +371,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     if (updates.isNotEmpty) {
       setState(() {
-        // [FIX] Dùng vòng lặp for-in cho updates
-        for (final entry in updates.entries) {
-          final key = entry.key;
-          final item = entry.value;
-
-          if (item.status == 'cancelled' && item.sentQuantity == 0) {
-            _localChanges.remove(key);
-            if (_cart.containsKey(key)) {
-              _localChanges[key] = item;
-            }
-          } else {
-            _localChanges[key] = item;
-          }
-        }
+        _localChanges.addAll(updates);
       });
     }
   }
@@ -407,7 +398,6 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  // 1. Tìm hàm _recalculateCartDiscounts và thay bằng đoạn này:
   void _recalculateCartDiscounts() {
     bool hasChanges = false;
     final Map<String, OrderItem> updates = {};
@@ -478,7 +468,6 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  // 2. Tìm hàm _updateTimeBasedPrices và thay bằng đoạn này:
   void _updateTimeBasedPrices() {
     if (!mounted) return;
     bool needsUpdate = false;
@@ -565,7 +554,6 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  // --- THÊM HÀM: Lấy chuỗi hiển thị thuế ---
   String _getTaxDisplayString(ProductModel product) {
     if (_storeTaxSettings == null) return '';
 
@@ -2864,22 +2852,29 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> _handleRemoveOrCancelItem(String cartId) async {
     final item = _displayCart[cartId];
+
+    // Nếu bấm xóa trực tiếp vào món quà tặng (Y) -> Chặn lại
     if (item != null && item.note != null && item.note!.contains("Tặng kèm")) {
       ToastService().show(message: "Vui lòng xóa món mua chính, quà tặng sẽ tự hủy.", type: ToastType.warning);
       return;
     }
+
     if (item == null) return;
 
     final bool isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
     final bool wasSaved = _cart.containsKey(cartId);
 
+    // TRƯỜNG HỢP 1: Món chưa lưu vào Firestore (mới thêm ở local) -> Xóa luôn
     if (!wasSaved) {
       setState(() {
         _localChanges.remove(cartId);
       });
+      // [QUAN TRỌNG] Tính lại quà ngay sau khi xóa local
+      _applyBuyXGetYLogic();
       return;
     }
 
+    // TRƯỜNG HỢP 2: Món đã lưu -> Cần xác nhận hủy
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2893,15 +2888,16 @@ class _OrderScreenState extends State<OrderScreen> {
     );
     if (confirmed != true) return;
 
-    // --- LOGIC ĐÃ SỬA ---
+    // --- XỬ LÝ HỦY ---
 
-    // 1. Kiểm tra xem có cần in hủy hay không TRƯỚC KHI LƯU
+    // 1. Kiểm tra in bếp (giữ nguyên logic cũ)
     final bool needsCancelPrint = item.sentQuantity > 0 && !isTimeBased;
-    Map<String, dynamic>? cancelPayload; // Lưu payload tạm thời
+    Map<String, dynamic>? cancelPayload;
 
     try {
       OrderItem itemToCancel = item;
       if (isTimeBased) {
+        // Logic tính giá time-based giữ nguyên
         final result = TimeBasedPricingService.calculatePriceWithBreakdown(
             product: item.product,
             startTime: item.addedAt,
@@ -2911,14 +2907,10 @@ class _OrderScreenState extends State<OrderScreen> {
         itemToCancel = item.copyWith(price: result.totalPrice);
       }
 
-      // 2. Chuẩn bị payload TRƯỚC KHI LƯU, vì _currentOrder có thể bị null SAU KHI LƯU
-      // (Chúng ta biết _currentOrder không null ở đây vì wasSaved == true)
+      // Chuẩn bị payload in
       if (needsCancelPrint && _currentOrder != null) {
         final itemPrintMap = itemToCancel.toMap();
-
-        // Gửi đi SỐ LƯỢNG ĐÃ BÁO BẾP
         itemPrintMap['quantity'] = item.sentQuantity;
-
         cancelPayload = {
           'storeId': widget.currentUser.storeId,
           'tableName': _currentOrder!.tableName,
@@ -2927,7 +2919,7 @@ class _OrderScreenState extends State<OrderScreen> {
         };
       }
 
-      // 3. Cập nhật trạng thái local và LƯU VÀO DATABASE
+      // 2. Cập nhật trạng thái 'cancelled' cho món X
       setState(() {
         _localChanges[cartId] = itemToCancel.copyWith(
           quantity: 0,
@@ -2935,11 +2927,16 @@ class _OrderScreenState extends State<OrderScreen> {
         );
       });
 
-      final success = await _saveOrder(); // Hàm này CÓ THỂ set _currentOrder = null
+      // [QUAN TRỌNG NHẤT - FIX LỖI]
+      // Gọi hàm này NGAY SAU KHI set status='cancelled' cho X.
+      // Hàm này sẽ thấy X bị hủy -> Giảm tổng mua -> Thấy thừa quà Y -> Set Y thành 'cancelled' vào _localChanges.
+      _applyBuyXGetYLogic();
 
-      // 4. Kiểm tra kết quả lưu VÀ payload đã chuẩn bị
+      // 3. Lưu tất cả thay đổi (Gồm X đã hủy và Y vừa bị hủy theo) lên Firestore
+      final success = await _saveOrder();
+
+      // 4. In phiếu hủy nếu cần
       if (success && cancelPayload != null) {
-        // Chỉ khi lưu thành công VÀ có payload, chúng ta mới gửi lệnh in
         PrintQueueService().addJob(PrintJobType.cancel, cancelPayload);
         ToastService().show(message: "Đã gửi lệnh hủy món.", type: ToastType.success);
       }
@@ -2948,9 +2945,6 @@ class _OrderScreenState extends State<OrderScreen> {
       debugPrint("Lỗi khi hủy món: $e");
       ToastService().show(message: "Lỗi khi hủy món: ${e.toString()}", type: ToastType.error);
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _applyBuyXGetYLogic();
-    });
   }
 
   Future<bool> _saveOrder({bool onlyTimeBasedUpdates = false}) async {
@@ -3654,10 +3648,19 @@ class _OrderScreenState extends State<OrderScreen> {
         (sellingPrice != originalUnitPrice);
 
     final String taxText = _getTaxDisplayString(item.product);
-
+    final bool isGift = item.note != null && item.note!.contains("Tặng kèm");
     return Card(
       child: InkWell(
-        onTap: () => _showEditItemDialog(cartId, item),
+        onTap: () {
+          if (isGift) {
+            ToastService().show(
+                message: "Đây là quà tặng kèm, không thể chỉnh sửa trực tiếp.",
+                type: ToastType.warning
+            );
+            return;
+          }
+          _showEditItemDialog(cartId, item);
+        },
         borderRadius: BorderRadius.circular(12.0),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 12.0),
@@ -3784,7 +3787,6 @@ class _OrderScreenState extends State<OrderScreen> {
                             '${item.note}',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: Colors.red,
-                              fontStyle: FontStyle.italic,
                             ),
                           ),
                         ),
@@ -4290,9 +4292,11 @@ class _OrderScreenState extends State<OrderScreen> {
         quantity: newQuantity,
         discountValue: finalDiscountValToSave, // Lưu giá trị đã xử lý
         discountUnit: newDiscountUnit,
+        selectedUnit: result['selectedUnit'],
         note: () => newNote,
         commissionStaff: () => newCommissionStaff.isNotEmpty ? newCommissionStaff : null,
       );
+      _applyBuyXGetYLogic();
     });
   }
 
