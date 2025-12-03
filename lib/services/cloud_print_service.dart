@@ -630,23 +630,21 @@ class CloudPrintService {
         return Response.internalServerError(body: e.toString());
       }
     });
+
     router.post('/print/label', (Request request) async {
       try {
         final data = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
         final configuredPrinters = await _getConfiguredPrintersFromPrefs() ?? [];
 
-        // FIX: Kiểm tra tableName (nếu null thì fallback)
         final String tableName = data['tableName']?.toString() ?? 'Tem';
 
         final printingService = PrintingService(
             tableName: tableName,
-            userName: 'System' // Tem không quan trọng user
+            userName: 'System'
         );
 
-        // Chuẩn hóa dữ liệu items
         final normalizedItems = _normalizeItemsData(data['items'] as List);
 
-        // FIX: Kiểm tra createdAt an toàn
         DateTime createdAt;
         if (data['createdAt'] != null) {
           try {
@@ -658,15 +656,21 @@ class CloudPrintService {
           createdAt = DateTime.now();
         }
 
+        // [SỬA LỖI] Lấy các tham số quan trọng từ request
         final bool isRetail = data['isRetailMode'] ?? false;
+        final String? settingsJson = data['templateSettingsJson'];
+
         final success = await printingService.printLabels(
           items: normalizedItems,
           tableName: tableName,
           createdAt: createdAt,
           configuredPrinters: configuredPrinters,
-          width: (data['labelWidth'] as num?)?.toDouble() ?? 50.0,
-          height: (data['labelHeight'] as num?)?.toDouble() ?? 30.0,
+          width: (data['width'] ?? data['labelWidth'] ?? 50.0).toDouble(),
+          height: (data['height'] ?? data['labelHeight'] ?? 30.0).toDouble(),
+
+          // Truyền vào service
           isRetailMode: isRetail,
+          templateSettingsJson: settingsJson,
         );
 
         return success ? Response.ok('OK') : Response.internalServerError(body: 'In Tem thất bại');

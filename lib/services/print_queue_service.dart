@@ -803,6 +803,8 @@ class PrintQueueService {
           configuredPrinters: configuredPrinters,
           width: (data['labelWidth'] as num?)?.toDouble() ?? 50.0,
           height: (data['labelHeight'] as num?)?.toDouble() ?? 30.0,
+          isRetailMode: data['isRetailMode'] ?? false,
+          templateSettingsJson: data['templateSettingsJson'],
         );
     }
   }

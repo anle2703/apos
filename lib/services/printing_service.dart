@@ -339,10 +339,11 @@ class PrintingService {
     required String tableName,
     required DateTime createdAt,
     required List<ConfiguredPrinter> configuredPrinters,
-    required double width,
-    required double height,
+    required double width,   // Tham số này sẽ bị ghi đè bởi settings
+    required double height,  // Tham số này sẽ bị ghi đè bởi settings
     bool isRetailMode = false,
     String? billCode,
+    String? templateSettingsJson,
   }) async {
     try {
       final labelPrinter = configuredPrinters.firstWhere(
@@ -350,50 +351,80 @@ class PrintingService {
         orElse: () => throw Exception('Chưa cấu hình "Máy in Tem".'),
       );
 
-      final bool isDesktop =
-          !kIsWeb && (Platform.isWindows || Platform.isMacOS);
-      final prefs = await SharedPreferences.getInstance();
-      LabelTemplateModel settings = LabelTemplateModel();
-      final jsonStr = prefs.getString('label_template_settings');
-      if (jsonStr != null) {
-        settings = LabelTemplateModel.fromJson(jsonStr);
+      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS);
+
+      // --- BƯỚC 1: LOAD VÀ ƯU TIÊN SETTINGS ---
+      LabelTemplateModel settings;
+
+      // 1.1. Thử load từ JSON gửi kèm (Ưu tiên cao nhất)
+      if (templateSettingsJson != null && templateSettingsJson.isNotEmpty) {
+        try {
+          settings = LabelTemplateModel.fromJson(templateSettingsJson);
+        } catch (e) {
+          debugPrint("Lỗi parse templateSettingsJson: $e");
+          // Fallback nếu lỗi
+          settings = LabelTemplateModel(labelWidth: width, labelHeight: height);
+        }
       } else {
-        settings.labelWidth = width;
-        settings.labelHeight = height;
-        settings.labelColumns = (width >= 65) ? 2 : 1;
+        // 1.2. Nếu không có, load từ bộ nhớ máy (Fallback)
+        final prefs = await SharedPreferences.getInstance();
+        final jsonStr = prefs.getString('label_template_settings');
+        if (jsonStr != null) {
+          settings = LabelTemplateModel.fromJson(jsonStr);
+        } else {
+          // 1.3. Mặc định cuối cùng
+          settings = LabelTemplateModel(labelWidth: width, labelHeight: height);
+          settings.labelColumns = (width >= 65) ? 2 : 1;
+        }
       }
 
+      // --- BƯỚC 2: CHUẨN HÓA KÍCH THƯỚC (QUAN TRỌNG) ---
+      // Bắt buộc dùng kích thước trong settings để đảm bảo giống hệt lúc In Test
+      final double finalWidth = settings.labelWidth;
+      final double finalHeight = settings.labelHeight;
       final int columns = settings.labelColumns;
 
+      // --- BƯỚC 3: XỬ LÝ DỮ LIỆU ---
       List<LabelItemData> allLabelsQueue = [];
       int grandTotalQty = items.fold(
           0, (tong, item) => tong + (OrderItem.fromMap(item).quantity).ceil());
       final int dailySeq = await _getNextLabelSequence();
+
       int globalCurrentIndex = 0;
-      String headerDisplay =
-      (billCode != null && billCode.isNotEmpty) ? billCode : tableName;
 
       for (var itemData in items) {
         final item = OrderItem.fromMap(itemData);
         final int itemQty = item.quantity.ceil();
+
+        // Header
+        String headerDisplay = (billCode != null && billCode.isNotEmpty) ? billCode : tableName;
+        if (itemData['headerTitle'] != null) {
+          headerDisplay = itemData['headerTitle'];
+        }
+
+        int startIndex = itemData['labelIndex'] ?? (globalCurrentIndex + 1);
+        int totalInBatch = itemData['labelTotal'] ?? grandTotalQty;
+
         for (int i = 1; i <= itemQty; i++) {
-          globalCurrentIndex++;
           allLabelsQueue.add(LabelItemData(
             item: item,
             headerTitle: headerDisplay,
-            index: globalCurrentIndex,
-            total: grandTotalQty,
+            index: startIndex,
+            total: totalInBatch,
             dailySeq: dailySeq,
           ));
+          startIndex++;
         }
+        globalCurrentIndex += itemQty;
       }
 
       final ScreenshotController localController = ScreenshotController();
       List<Uint8List> desktopImageBytesList = [];
       List<int> totalTsplCommands = [];
 
-      double targetWidthPx = width * 8.0;
-      double targetHeightPx = height * 8.0;
+      // Tính toán pixel dựa trên kích thước chuẩn hóa (8 dots/mm)
+      double targetWidthPx = finalWidth * 8.0;
+      double targetHeightPx = finalHeight * 8.0;
 
       for (int i = 0; i < allLabelsQueue.length; i += columns) {
         List<LabelItemData?> rowItems = [];
@@ -404,20 +435,23 @@ class PrintingService {
             rowItems.add(null);
           }
         }
+
+        // Mobile cần pixelRatio thấp hơn để tránh tràn bộ nhớ máy in cũ
         double capturePixelRatio = isDesktop ? 4.0 : 2.0;
 
         final Uint8List imageBytes = await localController.captureFromWidget(
           Directionality(
             textDirection: ui.TextDirection.ltr,
             child: MediaQuery(
+              // Ép buộc kích thước Widget đúng theo settings
               data: MediaQueryData(size: Size(targetWidthPx, targetHeightPx)),
               child: LabelRowWidget(
                 items: rowItems,
-                widthMm: width,
-                heightMm: height,
+                widthMm: finalWidth,   // Dùng finalWidth
+                heightMm: finalHeight, // Dùng finalHeight
                 gapMm: 2.0,
                 isRetailMode: isRetailMode,
-                settings: settings,
+                settings: settings,    // Truyền settings đã load để chỉnh font/margin
               ),
             ),
           ),
@@ -432,12 +466,14 @@ class PrintingService {
           final List<int> commands =
           await compute(_processLabelImageInIsolate, {
             'bytes': imageBytes,
-            'width': width,
-            'height': height,
+            'width': finalWidth,   // Gửi kích thước chuẩn xuống Isolate
+            'height': finalHeight, // Gửi kích thước chuẩn xuống Isolate
           });
           totalTsplCommands.addAll(commands);
         }
       }
+
+      // --- BƯỚC 4: GỬI LỆNH IN ---
 
       if (isDesktop) {
         if (desktopImageBytesList.isEmpty) return true;
@@ -446,7 +482,7 @@ class PrintingService {
           final image = pw.MemoryImage(imgBytes);
           pdf.addPage(pw.Page(
               pageFormat: PdfPageFormat(
-                  width * PdfPageFormat.mm, height * PdfPageFormat.mm,
+                  finalWidth * PdfPageFormat.mm, finalHeight * PdfPageFormat.mm,
                   marginAll: 0),
               build: (ctx) {
                 return pw.Center(child: pw.Image(image, fit: pw.BoxFit.fill));

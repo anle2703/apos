@@ -24,6 +24,7 @@ import 'invoice/e_invoice_settings_screen.dart';
 import '../tables/qr_order_management_screen.dart';
 import 'tax_management_screen.dart';
 import 'sales/retail_order_screen.dart';
+import '../products/labels/product_label_print_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -265,6 +266,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         message:
                         'Bạn chưa được cấp quyền sử dụng tính năng này.',
                         type: ToastType.warning);
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.print_outlined),
+                title: const Text('In tem sản phẩm'),
+                onTap: () {
+                  if (_currentUser != null) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => ProductLabelPrintScreen(
+                              currentUser: _currentUser!)),
+                    );
                   }
                 },
               ),
