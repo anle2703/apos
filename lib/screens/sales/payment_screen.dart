@@ -1406,7 +1406,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       }
 
       // --- Phần logic in bên dưới giữ nguyên ---
-      final bool shouldPrintLabel = settings?.printLabelOnPayment ?? false;
+      final bool shouldPrintLabel = (settings?.printLabelOnPayment ?? false) && !widget.isRetailMode;
 
       // 1. IN TEM
       if (shouldPrintLabel) {
