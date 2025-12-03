@@ -1604,8 +1604,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               ),
 
               if (item.note != null && item.note!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 4),
+                const SizedBox(height: 4),
+              Padding(
+                  padding: const EdgeInsets.only(top: 0, bottom: 0),
                   child: Text(
                     item.note!,
                     style: textTheme.bodyMedium?.copyWith(

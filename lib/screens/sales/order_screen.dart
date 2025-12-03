@@ -3794,7 +3794,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     ],
                   ),
                 ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               // === DÒNG 2: GIÁ ĐÃ GIẢM x SL = THÀNH TIỀN ===
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
