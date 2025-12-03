@@ -15,6 +15,7 @@ import '../../widgets/custom_text_form_field.dart';
 import '../../models/discount_model.dart';
 import 'discount_form_screen.dart';
 import 'buy_x_get_y_form_screen.dart';
+import '../sales/payment_screen.dart';
 
 // --- WIDGET CHÍNH ---
 class PromotionsScreen extends StatelessWidget {
@@ -236,6 +237,7 @@ class _PointsSettingsTabState extends State<PointsSettingsTab> {
 }
 
 // --- TAB VOUCHER (Đã cập nhật theo yêu cầu) ---
+// --- TAB VOUCHER (Đã sửa lại: Lưu settings chung vào collection promotions) ---
 class VouchersTab extends StatefulWidget {
   final UserModel currentUser;
   const VouchersTab({super.key, required this.currentUser});
@@ -271,25 +273,48 @@ class _VouchersTabState extends State<VouchersTab> {
     );
   }
 
+  // [HÀM MỚI] Cập nhật voucher mặc định vào document Settings trong collection promotions
+  Future<void> _updateDefaultVoucher(String? newCode) async {
+    // Tạo ID document cài đặt cố định theo storeId (VD: 4cash_PromoSettings)
+    final String settingsDocId = '${widget.currentUser.storeId}_PromoSettings';
+
+    final docRef = FirebaseFirestore.instance
+        .collection('promotions') // Lưu chung vào root collection promotions
+        .doc(settingsDocId);
+
+    // Sử dụng set với merge: true để tạo mới nếu chưa có, hoặc cập nhật nếu đã có
+    await docRef.set({
+      'storeId': widget.currentUser.storeId,
+      'defaultVoucherCode': newCode,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'type': 'settings', // Đánh dấu đây là doc settings để phân biệt với voucher
+    }, SetOptions(merge: true));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // 1. Stream Settings để lấy mã voucher mặc định hiện tại
-      // (Hàm getStoreSettingsStream phải được thêm vào FirestoreService như hướng dẫn trước)
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: _firestoreService.getStoreSettingsStream(widget.currentUser.storeId),
-        builder: (context, settingsSnapshot) {
+    final String settingsDocId = '${widget.currentUser.storeId}_PromoSettings';
 
+    return Scaffold(
+      // 1. [SỬA] Stream lắng nghe document Settings cụ thể trong collection promotions
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('promotions')
+            .doc(settingsDocId)
+            .snapshots(),
+        builder: (context, settingsSnapshot) {
           String? currentDefaultCode;
-          // Parse dữ liệu từ settings để lấy mã đang active
+
+          // Lấy mã voucher mặc định từ document settings
           if (settingsSnapshot.hasData && settingsSnapshot.data!.exists) {
-            final data = settingsSnapshot.data!.data() as Map<String, dynamic>?;
-            currentDefaultCode = data?['defaultVoucherCode'];
+            final data = settingsSnapshot.data!.data() as Map<String, dynamic>;
+            currentDefaultCode = data['defaultVoucherCode'];
           }
 
-          // 2. Stream Danh sách Voucher (Logic cũ)
+          // 2. Stream Danh sách Voucher (Giữ nguyên)
           return StreamBuilder<List<VoucherModel>>(
-            stream: _firestoreService.getVouchersStream(widget.currentUser.storeId),
+            stream:
+            _firestoreService.getVouchersStream(widget.currentUser.storeId),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -297,7 +322,13 @@ class _VouchersTabState extends State<VouchersTab> {
               if (snapshot.hasError) {
                 return Center(child: Text("Lỗi: ${snapshot.error}"));
               }
-              final vouchers = snapshot.data ?? [];
+              // Lọc bỏ các document không phải là voucher (ví dụ các doc settings)
+              // Giả sử VoucherModel của bạn có logic fromMap xử lý an toàn hoặc query của bạn đã lọc theo type
+              // Nếu getVouchersStream của bạn query `where('type', isEqualTo: 'voucher')` thì không cần lọc thêm.
+              // Nếu query lấy tất cả, bạn cần lọc ở đây:
+              final allDocs = snapshot.data ?? [];
+              final vouchers = allDocs.where((v) => v.code.isNotEmpty).toList(); // Ví dụ lọc đơn giản
+
               if (vouchers.isEmpty) {
                 return const Center(child: Text("Chưa có voucher nào."));
               }
@@ -308,26 +339,33 @@ class _VouchersTabState extends State<VouchersTab> {
                 itemBuilder: (context, index) {
                   final v = vouchers[index];
 
-                  // Logic hiển thị text (Giữ nguyên như code cũ của bạn)
-                  final valueString = v.isPercent ? '${formatNumber(v.value)}%' : '${formatNumber(v.value)} đ';
+                  final valueString = v.isPercent
+                      ? '${formatNumber(v.value)}%'
+                      : '${formatNumber(v.value)} đ';
                   String subtitle = "Giảm $valueString";
                   final quantityUsed = v.quantityUsed ?? 0;
 
                   if (v.quantity != null) {
-                    subtitle += " - Còn: ${v.quantity} - Đã dùng: $quantityUsed";
+                    subtitle +=
+                    " - Còn: ${v.quantity} - Đã dùng: $quantityUsed";
                   } else {
                     subtitle += " - Đã dùng: $quantityUsed";
                   }
 
                   if (v.startAt != null) {
-                    subtitle += "\nBắt đầu: ${DateFormat('dd/MM/yy HH:mm').format(v.startAt!.toDate())}";
+                    subtitle +=
+                    "\nBắt đầu: ${DateFormat('dd/MM/yy HH:mm').format(v.startAt!.toDate())}";
                   }
                   if (v.expiryAt != null) {
-                    subtitle += " - HSD: ${DateFormat('dd/MM/yy HH:mm').format(v.expiryAt!.toDate())}";
+                    subtitle +=
+                    " - HSD: ${DateFormat('dd/MM/yy HH:mm').format(v.expiryAt!.toDate())}";
                   }
 
-                  final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: v.isActive ? Colors.green.shade700 : null, fontSize: 18, fontWeight: FontWeight.bold,
+                  final titleStyle =
+                  Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: v.isActive ? Colors.green.shade700 : null,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   );
 
                   // Kiểm tra xem voucher này có phải là voucher mặc định không
@@ -341,18 +379,22 @@ class _VouchersTabState extends State<VouchersTab> {
                           _showAddEditVoucherDialog(voucher: v);
                         } else {
                           ToastService().show(
-                              message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                              message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                               type: ToastType.warning);
                         }
                       },
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16.0, vertical: 12.0),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Icon(
                               Icons.confirmation_number_outlined,
-                              color: v.isActive ? Colors.green.shade700 : Colors.grey,
+                              color: v.isActive
+                                  ? Colors.green.shade700
+                                  : Colors.grey,
                               size: 32,
                             ),
                             const SizedBox(width: 16.0),
@@ -364,41 +406,46 @@ class _VouchersTabState extends State<VouchersTab> {
                                   const SizedBox(height: 4.0),
                                   Text(
                                     subtitle,
-                                    style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(color: Colors.black),
                                   ),
                                 ],
                               ),
                             ),
 
-                            // --- NÚT NGÔI SAO (ĐẶT MẶC ĐỊNH) ---
-                            // Chỉ hiện nếu user có quyền và voucher đang kích hoạt
+                            // --- NÚT NGÔI SAO ---
                             if (_canSetupPromotions && v.isActive)
                               IconButton(
                                 icon: Icon(
                                   isDefault ? Icons.star : Icons.star_border,
-                                  color: isDefault ? Colors.orange : Colors.grey,
+                                  color:
+                                  isDefault ? Colors.orange : Colors.grey,
                                   size: 30,
                                 ),
-                                tooltip: isDefault ? "Hủy mặc định" : "Đặt làm mặc định",
+                                tooltip: isDefault
+                                    ? "Hủy mặc định"
+                                    : "Đặt làm mặc định",
                                 onPressed: () async {
-                                  // Nếu đang là mặc định -> Bấm để hủy (gửi null)
-                                  // Nếu chưa -> Bấm để đặt (gửi code)
                                   final newCode = isDefault ? null : v.code;
 
-                                  // Gọi hàm set trong FirestoreService
-                                  await _firestoreService.setDefaultVoucher(widget.currentUser.storeId, newCode);
+                                  // 1. Gọi hàm update vào collection promotions
+                                  await _updateDefaultVoucher(newCode);
+
+                                  // 2. [THÊM MỚI] Xóa Cache của màn hình thanh toán ngay lập tức
+                                  // Để lần sau mở Payment lên nó sẽ tải lại cài đặt mới nhất
+                                  PaymentScreen.clearCache();
 
                                   if (mounted) {
                                     ToastService().show(
                                         message: isDefault
                                             ? "Đã hủy voucher mặc định"
                                             : "Đã đặt ${v.code} làm voucher mặc định",
-                                        type: ToastType.success
-                                    );
+                                        type: ToastType.success);
                                   }
                                 },
                               ),
-                            // -------------------------------------
                           ],
                         ),
                       ),

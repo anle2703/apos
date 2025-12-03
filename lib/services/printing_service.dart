@@ -133,11 +133,21 @@ class PrintingService {
 
       if (type == PrinterType.usb) {
         if (!kIsWeb && Platform.isAndroid) {
-          final nativeService = NativePrinterService();
-          return await nativeService.print(device.address!, Uint8List.fromList(printCommands));
+          // Logic dành riêng cho máy POS Android có tích hợp sẵn service in
+          try {
+            final nativeService = NativePrinterService();
+            return await nativeService.print(device.address!, Uint8List.fromList(printCommands));
+          } catch (e) {
+            debugPrint("Lỗi in Native USB (Android): $e");
+            // Fallback sang thư viện thường nếu native fail
+            return await _sendToPrinterManager(printer, printCommands);
+          }
+        } else {
+          debugPrint(">>> Cảnh báo: In USB chỉ hỗ trợ trên Android POS. Bỏ qua lệnh in.");
+          return false; // Trả về false thay vì cố in gây lỗi
         }
-        return await _sendToPrinterManager(printer, printCommands);
-      } else if (type == PrinterType.network) {
+      }
+      else if (type == PrinterType.network) {
         return await _sendBytesViaSocket(device.address!, printCommands);
       } else {
         return await _sendToPrinterManager(printer, printCommands);
@@ -147,10 +157,6 @@ class PrintingService {
       rethrow;
     }
   }
-
-  // ===========================================================================
-  // CÁC HÀM IN NGHIỆP VỤ
-  // ===========================================================================
 
   // 1. IN HÓA ĐƠN
   Future<bool> printReceiptBill({
@@ -169,23 +175,26 @@ class PrintingService {
       // --- LOGIC TẠO QR DATA ---
       String? qrDataString;
 
+      // [SỬA] Đổi tên biến local thành displayTableName để tránh trùng tên với biến class
+      // Khi đó không cần dùng 'this.tableName' nữa mà dùng 'tableName' trực tiếp.
+      final String displayTableName = (summary['tableName'] ?? tableName).toString();
+
       try {
         final Map<String, dynamic>? bankDetails = (summary['bankDetails'] as Map<String, dynamic>?);
         final double totalPayable = (summary['totalPayable'] as num?)?.toDouble() ?? 0.0;
 
-        // Lấy tên bàn, xử lý tiếng Việt có dấu thành không dấu nếu cần (ở đây lấy nguyên)
-        final String tableName = (summary['tableName'] ?? this.tableName).toString();
-
         if (bankDetails != null && totalPayable > 0) {
-          // Lấy BIN và Account an toàn
           final String bin = (bankDetails['bankBin'] ?? '').toString();
           final String acc = (bankDetails['bankAccount'] ?? '').toString();
 
           if (bin.isNotEmpty && acc.isNotEmpty) {
             final String amount = totalPayable.toInt().toString();
-            final String addInfo = "TT $tableName";
 
-            // Gọi Generator mới
+            // Sử dụng biến local mới
+            final String addInfo = displayTableName.trim().isNotEmpty
+                ? "TT $displayTableName"
+                : "Thanh toan";
+
             qrDataString = VietQrGenerator.generate(
               bankBin: bin,
               bankAccount: acc,
@@ -209,11 +218,12 @@ class PrintingService {
         items: items.where((i) => i.quantity > 0).toList(),
         summary: summary,
         userName: userName,
-        tableName: tableName,
+        // Truyền biến local mới vào Widget
+        tableName: displayTableName,
         showPrices: true,
         isSimplifiedMode: false,
         templateSettings: settings,
-        qrData: qrDataString, // Truyền chuỗi vừa tạo vào đây
+        qrData: qrDataString,
       );
 
       return await _printFromWidget(widgetToPrint: widget, printer: cashierPrinter);

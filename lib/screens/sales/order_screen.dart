@@ -5,34 +5,34 @@ import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../models/order_item_model.dart';
-import '../models/order_model.dart';
-import '../models/product_group_model.dart';
-import '../models/product_model.dart';
-import '../models/table_model.dart';
-import '../models/user_model.dart';
-import '../services/firestore_service.dart';
-import '../services/toast_service.dart';
-import '../theme/app_theme.dart';
+import '../../models/order_item_model.dart';
+import '../../models/order_model.dart';
+import '../../models/product_group_model.dart';
+import '../../models/product_model.dart';
+import '../../models/table_model.dart';
+import '../../models/user_model.dart';
+import '../../services/firestore_service.dart';
+import '../../services/toast_service.dart';
+import '../../theme/app_theme.dart';
 import 'dart:async';
-import '../products/barcode_scanner_screen.dart';
-import '../models/print_job_model.dart';
-import '../services/print_queue_service.dart';
+import '../../products/barcode_scanner_screen.dart';
+import '../../models/print_job_model.dart';
+import '../../services/print_queue_service.dart';
 import '/screens/sales/payment_screen.dart';
-import '../theme/number_utils.dart';
-import '../models/customer_model.dart';
-import '../services/settings_service.dart';
-import '../models/store_settings_model.dart';
-import '../services/pricing_service.dart';
-import '../widgets/customer_selector.dart';
-import '../widgets/edit_order_item_dialog.dart';
-import '../theme/string_extensions.dart';
-import '../models/quick_note_model.dart';
-import '../screens/quick_notes_screen.dart';
-import '../tables/table_transfer_screen.dart';
+import '../../theme/number_utils.dart';
+import '../../models/customer_model.dart';
+import '../../services/settings_service.dart';
+import '../../models/store_settings_model.dart';
+import '../../services/pricing_service.dart';
+import '../../widgets/customer_selector.dart';
+import '../../widgets/edit_order_item_dialog.dart';
+import '../../theme/string_extensions.dart';
+import '../../models/quick_note_model.dart';
+import '../quick_notes_screen.dart';
+import '../../tables/table_transfer_screen.dart';
 import 'package:flutter/services.dart';
-import '../services/discount_service.dart';
-import '../models/discount_model.dart';
+import '../../services/discount_service.dart';
+import '../../models/discount_model.dart';
 
 class OrderScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -126,12 +126,33 @@ class _OrderScreenState extends State<OrderScreen> {
   StreamSubscription? _manualUpdateSub;
   List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
   StreamSubscription? _buyXGetYSub;
+// [THÊM MỚI] Biến này để chặn OrderScreen tự lưu đè lên trạng thái 'paid'
+  bool _hasCompletedPayment = false;
+
+  // [THÊM MỚI] Cache nhóm món ăn để không phải load lại liên tục
+  List<ProductGroupModel>? _cachedGroups;
 
   @override
   void initState() {
     super.initState();
     _loadTaxSettings(); // Load thuế
     _settingsService = SettingsService();
+
+    _firestoreService.getProductGroups(widget.currentUser.storeId).then((groups) {
+      if (mounted) {
+        setState(() {
+          _menuGroups = groups; // Lưu vào biến state chính
+
+          // Logic xử lý nhóm "Khác"
+          final hasOrphanProducts = _menuProducts.any(
+                  (p) => p.productGroup == null || p.productGroup!.isEmpty);
+          if (hasOrphanProducts && !_menuGroups.any((g) => g.name == 'Khác')) {
+            _menuGroups.add(ProductGroupModel(id: 'khac', name: 'Khác', stt: 999));
+          }
+          _cachedGroups = _menuGroups; // Đánh dấu đã load xong
+        });
+      }
+    });
 
     // 1. Lắng nghe Settings
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -219,6 +240,11 @@ class _OrderScreenState extends State<OrderScreen> {
         // Tính toán lại ngay khi load xong khuyến mãi
         _applyBuyXGetYLogic();
       }
+    });
+
+    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
     });
   }
 
@@ -381,22 +407,18 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
+  // 1. Tìm hàm _recalculateCartDiscounts và thay bằng đoạn này:
   void _recalculateCartDiscounts() {
     bool hasChanges = false;
     final Map<String, OrderItem> updates = {};
     final allItems = {..._cart, ..._localChanges};
 
-    // [FIX] Dùng vòng lặp for-in thay vì forEach
     for (final entry in allItems.entries) {
       final key = entry.key;
       final item = entry.value;
 
       if (item.status == 'cancelled') continue;
-
-      // CHẶN GIẢM GIÁ VỚI HÀNG TẶNG KÈM
-      if (item.note != null && item.note!.startsWith("Tặng kèm (")) {
-        continue;
-      }
+      if (item.note != null && item.note!.startsWith("Tặng kèm (")) continue;
 
       final discountItem = _discountService.findBestDiscountForProduct(
         product: item.product,
@@ -419,19 +441,14 @@ class _OrderScreenState extends State<OrderScreen> {
         if (isPercent) {
           newCalculatedAmount = configValue;
         } else {
+          // [SỬA LỖI TẠI ĐÂY]
           final isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
           if (isTimeBased) {
-            final pricingResult = _timeBasedDataCache[key] ??
-                TimeBasedPricingService.calculatePriceWithBreakdown(
-                  product: item.product,
-                  startTime: item.addedAt,
-                  isPaused: item.isPaused,
-                  pausedAt: item.pausedAt,
-                  totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
-                );
-            double totalHours = pricingResult.totalMinutesBilled / 60.0;
-            newCalculatedAmount = configValue * totalHours;
+            // Logic cũ: newCalculatedAmount = configValue * totalHours; (SAI)
+            // Logic mới: Giữ nguyên giá trị cấu hình làm giá giảm/giờ
+            newCalculatedAmount = configValue;
           } else {
+            // Món thường: Vẫn giữ nguyên logic cũ (Tổng tiền giảm)
             newCalculatedAmount = configValue;
           }
         }
@@ -440,7 +457,10 @@ class _OrderScreenState extends State<OrderScreen> {
       bool valueChanged = (currentItemVal - newCalculatedAmount).abs() > 0.001;
       bool unitChanged = currentItemUnit != newUnit;
 
-      if (valueChanged || unitChanged) {
+      // Chỉ cập nhật nếu có sự thay đổi từ cấu hình Khuyến mãi tự động
+      // Nếu người dùng đã sửa tay (User override), cần cân nhắc logic khác,
+      // nhưng ở đây ta ưu tiên logic tự động nếu có.
+      if ((valueChanged || unitChanged) && discountItem != null) {
         updates[key] = item.copyWith(
           discountValue: newCalculatedAmount,
           discountUnit: newUnit,
@@ -455,6 +475,93 @@ class _OrderScreenState extends State<OrderScreen> {
           _localChanges.addAll(updates);
         });
       }
+    }
+  }
+
+  // 2. Tìm hàm _updateTimeBasedPrices và thay bằng đoạn này:
+  void _updateTimeBasedPrices() {
+    if (!mounted) return;
+    bool needsUpdate = false;
+
+    _displayCart.forEach((lineId, item) {
+      final serviceSetup = item.product.serviceSetup;
+
+      if (serviceSetup != null && serviceSetup['isTimeBased'] == true && !item.isPaused) {
+
+        // 1. Tính giá gốc chuẩn theo thời gian
+        final pricingResult = TimeBasedPricingService.calculatePriceWithBreakdown(
+          product: item.product,
+          startTime: item.addedAt,
+          isPaused: item.isPaused,
+          pausedAt: item.pausedAt,
+          totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
+        );
+
+        // 2. Tìm khuyến mãi (nếu có)
+        final discountItem = _discountService.findBestDiscountForProduct(
+          product: item.product,
+          activeDiscounts: _activeDiscounts,
+          customer: _selectedCustomer,
+          checkTime: item.addedAt.toDate(),
+        );
+
+        double newDiscountVal = item.discountValue ?? 0;
+        String newDiscountUnit = item.discountUnit ?? '%';
+
+        if (discountItem != null) {
+          newDiscountUnit = discountItem.isPercent ? '%' : 'VNĐ';
+          newDiscountVal = discountItem.value;
+        }
+
+        // 3. [LOGIC MỚI QUAN TRỌNG]
+        double priceToStore = pricingResult.totalPrice;
+
+        if (newDiscountUnit == 'VNĐ' && newDiscountVal > 0) {
+          // Nếu giảm theo VNĐ/h:
+          // Bước A: Tính tổng tiền thực tế phải trả (Real Cost)
+          double realTotalCost = 0;
+          for (var block in pricingResult.blocks) {
+            double reducedRate = block.ratePerHour - newDiscountVal;
+            if (reducedRate < 0) reducedRate = 0;
+            // Tính tiền từng block với giá đã giảm
+            realTotalCost += (reducedRate / 60.0) * block.minutes;
+          }
+
+          // Bước B: Điều chỉnh giá lưu (Price) để khớp với công thức Subtotal
+          // Vì Subtotal = Price - Discount
+          // Nên ta lưu: Price = RealCost + Discount
+          priceToStore = realTotalCost + newDiscountVal;
+        }
+
+        // Kiểm tra thay đổi
+        bool priceChanged = (priceToStore - item.price).abs() > 0.01;
+        bool valChanged = (newDiscountVal - (item.discountValue ?? 0)).abs() > 0.01;
+
+        // 4. Cập nhật nếu có thay đổi
+        if (priceChanged || valChanged || item.discountUnit != newDiscountUnit) {
+          final updatedItem = item.copyWith(
+            price: priceToStore, // Lưu giá đã điều chỉnh
+            priceBreakdown: pricingResult.blocks,
+            discountValue: newDiscountVal,
+            discountUnit: newDiscountUnit,
+          );
+
+          _timeBasedDataCache[lineId] = pricingResult;
+
+          if (_localChanges.containsKey(lineId)) {
+            _localChanges[lineId] = updatedItem;
+            needsUpdate = true;
+          } else if (_cart.containsKey(lineId)) {
+            _localChanges[lineId] = updatedItem;
+            needsUpdate = true;
+          }
+        }
+      }
+    });
+
+    if (needsUpdate) {
+      setState(() {});
+      _saveOrder(onlyTimeBasedUpdates: true);
     }
   }
 
@@ -647,90 +754,6 @@ class _OrderScreenState extends State<OrderScreen> {
         }
       },
     );
-  }
-
-  void _updateTimeBasedPrices() {
-    if (!mounted) return;
-    bool needsUpdate = false;
-
-    _displayCart.forEach((lineId, item) {
-      final serviceSetup = item.product.serviceSetup;
-
-      // Chỉ xử lý món tính giờ đang chạy (chưa pause)
-      if (serviceSetup != null && serviceSetup['isTimeBased'] == true && !item.isPaused) {
-
-        // 1. Tính toán giá tiền giờ mới nhất (theo thời gian thực)
-        final pricingResult = TimeBasedPricingService.calculatePriceWithBreakdown(
-          product: item.product,
-          startTime: item.addedAt,
-          isPaused: item.isPaused,
-          pausedAt: item.pausedAt,
-          totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
-        );
-
-        // 2. [FIX QUAN TRỌNG] Tìm lại khuyến mãi tốt nhất hiện tại
-        // Việc này đảm bảo nếu bạn vừa chuyển từ VNĐ sang %, logic tính giờ sẽ nhận diện được ngay
-        final discountItem = _discountService.findBestDiscountForProduct(
-          product: item.product,
-          activeDiscounts: _activeDiscounts,
-          customer: _selectedCustomer,
-          checkTime: item.addedAt.toDate(),
-        );
-
-        double newDiscountVal = item.discountValue ?? 0;
-        String newDiscountUnit = item.discountUnit ?? '%';
-
-        if (discountItem != null) {
-          // Luôn cập nhật Unit theo cấu hình mới nhất (tránh việc giữ cache cũ)
-          newDiscountUnit = discountItem.isPercent ? '%' : 'VNĐ';
-
-          if (discountItem.isPercent) {
-            // Nếu là %, giá trị giảm giữ nguyên theo cấu hình (VD: 10 => 10%)
-            // Lưu ý: Không nhân với giờ chơi
-            newDiscountVal = discountItem.value;
-          } else {
-            // Nếu là VNĐ, tính lại Tổng tiền giảm theo số giờ đã chơi
-            // VD: Giảm 10k/h -> Chơi 2h -> Giảm 20k
-            double totalHours = pricingResult.totalMinutesBilled / 60.0;
-            newDiscountVal = discountItem.value * totalHours;
-          }
-        }
-
-        // 3. So sánh xem có thay đổi gì không để trigger update UI
-        // Dùng sai số nhỏ (epsilon) khi so sánh double
-        bool priceChanged = (pricingResult.totalPrice - item.price).abs() > 0.01;
-        bool discountValChanged = ((item.discountValue ?? 0) - newDiscountVal).abs() > 0.001;
-        bool discountUnitChanged = item.discountUnit != newDiscountUnit;
-
-        if (priceChanged || discountValChanged || discountUnitChanged) {
-          // Cập nhật Item với giá trị mới
-          final updatedItem = item.copyWith(
-            price: pricingResult.totalPrice,
-            priceBreakdown: pricingResult.blocks,
-            discountValue: newDiscountVal,
-            discountUnit: newDiscountUnit, // Cập nhật đơn vị mới
-          );
-
-          // Cập nhật Cache kết quả tính toán
-          _timeBasedDataCache[lineId] = pricingResult;
-
-          // Logic ưu tiên cập nhật vào _localChanges
-          if (_localChanges.containsKey(lineId)) {
-            _localChanges[lineId] = updatedItem;
-          } else if (_cart.containsKey(lineId)) {
-            // Nếu item đang nằm trong cart gốc, copy sang localChanges để UI render cái mới
-            _localChanges[lineId] = updatedItem;
-          }
-
-          needsUpdate = true;
-        }
-      }
-    });
-
-    if (needsUpdate) {
-      setState(() {});
-      _saveOrder(onlyTimeBasedUpdates: true);
-    }
   }
 
   void _togglePauseTimeBasedItem(String lineId) {
@@ -1565,13 +1588,29 @@ class _OrderScreenState extends State<OrderScreen> {
         );
 
         _isFinalizingPayment = false;
-        if (result is PaymentState) {
-          if (_currentOrder != null) _paymentStateCache[_currentOrder!.id] = result;
-        } else if (result == true) {
+        if (result == true || result is PaymentResult) {
+          debugPrint(">>> [ORDER] Thanh toán thành công. Dọn dẹp...");
+
+          _hasCompletedPayment = true; // Bật cờ chặn lưu
+
+          // Xóa ngay lập tức mọi dữ liệu giỏ hàng
+          setState(() {
+            _localChanges.clear();
+            _cart.clear();
+            _currentOrder = null; // Gán null luôn để chắc chắn
+          });
+
+          // Xóa cache
           if (_currentOrder != null) _paymentStateCache.remove(_currentOrder!.id);
+
+          // Thoát màn hình ngay
+          if (mounted) Navigator.of(context).pop();
+        }
+        else if (result is PaymentState) {
+          // Trường hợp chỉ in tạm tính hoặc lưu nháp (chưa thanh toán xong)
+          if (_currentOrder != null) _paymentStateCache[_currentOrder!.id] = result;
         }
       }
-
     } catch (e) {
       debugPrint("Lỗi chuẩn bị thanh toán: $e");
       ToastService().show(message: "Lỗi: $e", type: ToastType.error);
@@ -1601,9 +1640,10 @@ class _OrderScreenState extends State<OrderScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-        canPop: false,
+        canPop: _hasCompletedPayment,
         onPopInvokedWithResult: (didPop, result) async {
           if (didPop) return;
+
           final bool isBookingTable = widget.table.id.startsWith('schedule_');
 
           if (_hasUnsentItems && !isBookingTable) {
@@ -1613,6 +1653,7 @@ class _OrderScreenState extends State<OrderScreen> {
               if (context.mounted) Navigator.of(context).pop();
             }
           } else if (_localChanges.isNotEmpty) {
+            // Logic cũ: Tự động lưu khi thoát
             if (isBookingTable) {
               _saveOrder();
               if (context.mounted) Navigator.of(context).pop(result);
@@ -1660,111 +1701,92 @@ class _OrderScreenState extends State<OrderScreen> {
               });
             }
 
-            return FutureBuilder<List<ProductGroupModel>>(
-              future: _firestoreService
-                  .getProductGroups(widget.currentUser.storeId),
-              builder: (context, groupSnapshot) {
-                if (groupSnapshot.connectionState == ConnectionState.done &&
-                    groupSnapshot.hasData) {
-                  _menuGroups = groupSnapshot.data!
-                      .where((g) =>
-                      _menuProducts.any((p) => p.productGroup == g.name))
-                      .toList();
+            // --- BẮT ĐẦU ĐOẠN SỬA ---
+// 1. Xử lý logic nhóm món ăn ngay lập tức (dùng dữ liệu đã cache ở initState)
+// Không dùng FutureBuilder ở đây nữa để tránh load lại.
+
+            if (_cachedGroups != null) {
+              // Lọc các nhóm có chứa sản phẩm hiện tại
+              _menuGroups = _cachedGroups!
+                  .where((g) => _menuProducts.any((p) => p.productGroup == g.name))
+                  .toList();
+
+              // Kiểm tra xem có sản phẩm nào không thuộc nhóm nào không (Orphan)
+              final bool hasOrphanProducts = _menuProducts.any(
+                      (p) => p.productGroup == null || p.productGroup!.isEmpty);
+
+              // Nếu có, thêm nhóm "Khác" vào cuối
+              if (hasOrphanProducts) {
+                // Chỉ thêm nếu chưa có
+                if (!_menuGroups.any((g) => g.name == 'Khác')) {
+                  _menuGroups.add(ProductGroupModel(
+                      id: 'khac_group_id',
+                      name: 'Khác',
+                      stt: 99999
+                  ));
                 }
-                return FutureBuilder<List<ProductGroupModel>>(
-                  future: _firestoreService
-                      .getProductGroups(widget.currentUser.storeId),
-                  builder: (context, groupSnapshot) {
-                    if (groupSnapshot.connectionState == ConnectionState.done &&
-                        groupSnapshot.hasData) {
+              }
+            }
 
-                      // 1. Lọc các nhóm có sản phẩm (như cũ)
-                      _menuGroups = groupSnapshot.data!
-                          .where((g) =>
-                          _menuProducts.any((p) => p.productGroup == g.name))
-                          .toList();
+// 2. Trả về StreamBuilder lắng nghe đơn hàng luôn
+            return StreamBuilder<DocumentSnapshot>(
+              stream: _orderStream,
+              builder: (context, orderSnapshot) {
+                if (orderSnapshot.connectionState == ConnectionState.active &&
+                    orderSnapshot.hasData) {
+                  final doc = orderSnapshot.data!;
+                  List<Map<String, dynamic>> newItemsFromFirestore = [];
 
-                      // 2. (THÊM MỚI) Kiểm tra xem có sản phẩm nào không có nhóm không
-                      final bool hasOrphanProducts = _menuProducts.any(
-                              (p) => p.productGroup == null || p.productGroup!.isEmpty);
+                  if (doc.exists &&
+                      (doc.data() as Map<String, dynamic>)['status'] == 'active') {
+                    final data = doc.data() as Map<String, dynamic>;
+                    _currentOrder = OrderModel.fromFirestore(doc);
 
-                      // 3. (THÊM MỚI) Nếu có, thêm nhóm "Khác" vào cuối danh sách
-                      if (hasOrphanProducts) {
-                        final otherGroup = ProductGroupModel(
-                            id: 'khac_group_id',
-                            name: 'Khác',
-                            stt: 99999
-                        );
-                        if (!_menuGroups.any((g) => g.name == 'Khác')) {
-                          _menuGroups.add(otherGroup);
-                        }
-                      }
+                    _customerNameFromOrder = data['customerName'] as String?;
+                    _customerPhoneFromOrder = data['customerPhone'] as String?;
+                    _customerAddressFromOrder = data['guestAddress'] as String?;
+                    _customerNoteFromOrder = data['guestNote'] as String?;
+
+                    final String? cid = data['customerId'] as String?;
+                    if (cid != _lastCustomerIdFromOrder) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _updateSelectedCustomer(cid, data);
+                      });
                     }
 
-                    // Phần còn lại của code giữ nguyên
-                    return StreamBuilder<DocumentSnapshot>(
-                      stream: _orderStream,
-                      builder: (context, orderSnapshot) {
-                        if (orderSnapshot.connectionState ==
-                            ConnectionState.active &&
-                            orderSnapshot.hasData) {
-                          final doc = orderSnapshot.data!;
-                          List<Map<String, dynamic>> newItemsFromFirestore = [];
+                    newItemsFromFirestore = List<Map<String, dynamic>>.from(
+                        (data['items'] ?? []) as List);
+                  } else {
+                    if (_displayCart.isEmpty) {
+                      _currentOrder = null;
+                    }
+                    _customerNameFromOrder = null;
+                    _customerPhoneFromOrder = null;
+                    _customerAddressFromOrder = null;
+                    _customerNoteFromOrder = null;
+                  }
 
-                          if (doc.exists &&
-                              (doc.data() as Map<String, dynamic>)['status'] ==
-                                  'active') {
-                            final data = doc.data() as Map<String, dynamic>;
-                            _currentOrder = OrderModel.fromFirestore(doc);
+                  final bool hasChanges = !const DeepCollectionEquality()
+                      .equals(newItemsFromFirestore, _lastFirestoreItems);
 
-                            _customerNameFromOrder = data['customerName'] as String?;
-                            _customerPhoneFromOrder = data['customerPhone'] as String?;
-                            _customerAddressFromOrder = data['guestAddress'] as String?;
-                            _customerNoteFromOrder = data['guestNote'] as String?;
+                  if (hasChanges) {
+                    _lastFirestoreItems = newItemsFromFirestore;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      _rebuildCartFromFirestore(newItemsFromFirestore);
+                      if (_suppressInitialToast) {
+                        _suppressInitialToast = false;
+                      }
+                    });
+                  }
+                }
 
-                            final String? cid = data['customerId'] as String?;
-                            if (cid != _lastCustomerIdFromOrder) {
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                _updateSelectedCustomer(cid, data);
-                              });
-                            }
-
-                            newItemsFromFirestore = List<Map<String, dynamic>>.from(
-                                (data['items'] ?? []) as List);
-                          } else {
-                            if (_displayCart.isEmpty) {
-                              _currentOrder = null;
-                            }
-                            _customerNameFromOrder = null;
-                            _customerPhoneFromOrder = null;
-                            _customerAddressFromOrder = null;
-                            _customerNoteFromOrder = null;
-                          }
-
-                          final bool hasChanges = !const DeepCollectionEquality()
-                              .equals(newItemsFromFirestore, _lastFirestoreItems);
-
-                          if (hasChanges) {
-                            _lastFirestoreItems = newItemsFromFirestore;
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _rebuildCartFromFirestore(newItemsFromFirestore);
-                              if (_suppressInitialToast) {
-                                _suppressInitialToast = false;
-                              }
-                            });
-                          }
-                        }
-
-                        return isDesktop
-                            ? _buildDesktopLayout()
-                            : _buildMobileLayout();
-                      },
-                    );
-                  },
-                );
+                return isDesktop
+                    ? _buildDesktopLayout()
+                    : _buildMobileLayout();
               },
             );
+// --- KẾT THÚC ĐOẠN SỬA ---
           },
         ));
   }
@@ -1952,10 +1974,23 @@ class _OrderScreenState extends State<OrderScreen> {
                       _isFinalizingPayment = false;
                     },
                     onConfirmPayment: (result) {
+                      debugPrint(">>> [DESKTOP] Thanh toán thành công.");
+
+                      _hasCompletedPayment = true; // Bật cờ
+
+                      // Dọn dẹp dữ liệu
+                      setState(() {
+                        _localChanges.clear();
+                        _cart.clear();
+                        _currentOrder = null;
+                        _isPaymentView = false;
+                      });
+
                       final orderId = _currentOrder?.id;
                       if (orderId != null) {
                         _paymentStateCache.remove(orderId);
                       }
+
                       _isFinalizingPayment = false;
                       if (mounted) Navigator.of(context).pop();
                     },
@@ -2412,7 +2447,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                     children: [
                                       Icon(Icons.phone_outlined, size: 16, color: Colors.grey.shade700),
                                       const SizedBox(width: 8),
-                                      Text(guestPhone, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                      Text(guestPhone, style: textTheme.bodyMedium),
                                     ],
                                   ),
 
@@ -2429,7 +2464,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                             Flexible(
                                               child: ConstrainedBox(
                                                 constraints: BoxConstraints(maxWidth: constraints.maxWidth - 60),
-                                                child: Text(guestAddress!, style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+                                                child: Text(guestAddress!, style: textTheme.bodyMedium),
                                               ),
                                             )
                                           ],
@@ -2441,7 +2476,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                     mainAxisSize: MainAxisSize.min,
                                     crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.note_alt_outlined, size: 16, color: Colors.grey.shade700),
+                                      Icon(Icons.note_alt_outlined, size: 16, color: Colors.red),
                                       const SizedBox(width: 8),
                                       Flexible(
                                         child: ConstrainedBox(
@@ -2449,9 +2484,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                           child: Text(
                                               guestNote,
                                               style: textTheme.bodyMedium?.copyWith(
-                                                  color: Colors.red,
-                                                  fontStyle: FontStyle.italic
-                                              )
+                                                  color: Colors.red)
                                           ),
                                         ),
                                       )
@@ -2921,8 +2954,12 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<bool> _saveOrder({bool onlyTimeBasedUpdates = false}) async {
-    final bool useMergeStrategy =
-        kIsWeb || !Platform.isIOS && !Platform.isAndroid;
+    // [FIX TUYỆT ĐỐI] Nếu đã thanh toán, CHẶN MỌI THAO TÁC LƯU
+    if (_hasCompletedPayment) {
+      return true;
+    }
+
+    final bool useMergeStrategy = kIsWeb || !Platform.isIOS && !Platform.isAndroid;
     if (useMergeStrategy) {
       return await _saveOrderWithMerge(onlyTimeBasedUpdates: onlyTimeBasedUpdates);
     } else {
@@ -2931,6 +2968,7 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<bool> _saveOrderWithMerge({bool onlyTimeBasedUpdates = false}) async {
+    if (_hasCompletedPayment) return true;
     if (_currentOrder != null &&
         ['paid', 'cancelled'].contains(_currentOrder!.status)) {
       return true;
@@ -3088,6 +3126,7 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<bool> _saveOrderWithTransaction({bool onlyTimeBasedUpdates = false}) async {
+    if (_hasCompletedPayment) return true;
     if (_currentOrder != null &&
         ['paid', 'cancelled'].contains(_currentOrder!.status)) {
       return true;
@@ -3433,26 +3472,29 @@ class _OrderScreenState extends State<OrderScreen> {
     const stockManagedTypes = {'Hàng hóa'};
     final bool showStock = stockManagedTypes.contains(product.productType);
 
+    // Tính tổng số lượng món này đã chọn trong giỏ
     final cartItemsForProduct = _displayCart.values
         .where((item) => item.product.id == product.id)
         .toList();
     final quantityInCart = cartItemsForProduct.fold<double>(
         0.0, (total, item) => total + item.quantity);
+
+    // Số lượng đã gửi bếp (để hiện nút xóa nếu chưa gửi)
     final sentQuantity = cartItemsForProduct.fold<double>(
         0.0, (total, item) => total + item.sentQuantity);
 
     return GestureDetector(
       onTap: () => _addItemToCart(product),
       child: Stack(
-        clipBehavior: Clip.none,
+        clipBehavior: Clip.none, // Để badge hiện ra ngoài nếu cần
         children: [
           Card(
             clipBehavior: Clip.antiAlias,
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // 1. Tên món (Trên cùng - Giống Retail)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                   child: Text(
@@ -3464,25 +3506,23 @@ class _OrderScreenState extends State<OrderScreen> {
                         fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
+                // 2. Hình ảnh
                 Expanded(
-                  child: (product.imageUrl != null &&
-                      product.imageUrl!.isNotEmpty)
+                  child: (product.imageUrl != null && product.imageUrl!.isNotEmpty)
                       ? Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
                     child: CachedNetworkImage(
                       imageUrl: product.imageUrl!,
                       fit: BoxFit.contain,
                       placeholder: (context, url) => const Center(
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2.0)),
+                          child: CircularProgressIndicator(strokeWidth: 2.0)),
                       errorWidget: (context, url, error) => const Icon(
-                          Icons.image_not_supported,
-                          color: Colors.grey),
+                          Icons.image_not_supported, color: Colors.grey),
                     ),
                   )
-                      : const Icon(Icons.fastfood,
-                      size: 50, color: Colors.grey),
+                      : const Icon(Icons.fastfood, size: 40, color: Colors.grey),
                 ),
+                // 3. Giá & Tồn kho
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                   child: Row(
@@ -3490,8 +3530,8 @@ class _OrderScreenState extends State<OrderScreen> {
                     children: [
                       if (showStock)
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          margin: const EdgeInsets.only(right: 4),
                           decoration: BoxDecoration(
                             color: Colors.grey[200],
                             borderRadius: BorderRadius.circular(12),
@@ -3500,17 +3540,14 @@ class _OrderScreenState extends State<OrderScreen> {
                             NumberFormat('#,##0.##').format(product.stock),
                             style: TextStyle(
                               color: Colors.grey[700],
-                              fontSize: 12,
+                              fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                      const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '${formatNumber(product.sellPrice)} đ',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          formatNumber(product.sellPrice),
                           textAlign: TextAlign.right,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
@@ -3525,45 +3562,50 @@ class _OrderScreenState extends State<OrderScreen> {
               ],
             ),
           ),
+
+          // [MỚI] Badge Số lượng (Góc phải trên - Giống Retail)
           if (quantityInCart > 0)
             Positioned(
-              top: -2,
-              right: -2,
+              top: -6,
+              right: -6,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   color: Colors.red,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white, width: 1.5),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
                 ),
-                child: Text(
-                  formatNumber(quantityInCart),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
+                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                child: Center(
+                  child: Text(
+                    formatNumber(quantityInCart),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
             ),
+
+          // Nút Xóa nhanh trên Mobile (Chỉ hiện nếu chưa gửi bếp)
           if (isMobile && quantityInCart > sentQuantity)
             Positioned(
-              top: -2,
-              left: -2,
+              top: -6,
+              left: -6,
               child: GestureDetector(
                 onTap: () => _clearProductFromCart(product.id),
                 child: Container(
-                  padding: const EdgeInsets.all(2),
+                  padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade700,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
                   ),
-                  child: const Icon(
-                    Icons.close,
-                    color: Colors.white,
-                    size: 17,
-                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 16),
                 ),
               ),
             ),
@@ -3589,43 +3631,27 @@ class _OrderScreenState extends State<OrderScreen> {
 
     // --- 1. TÍNH TOÁN CÁC GIÁ TRỊ HIỂN THỊ ---
 
-    // [QUAN TRỌNG] Dùng hàm này để lấy GIÁ NIÊM YẾT CHUẨN (kể cả khi đã sửa giá tay)
+    // Lấy GIÁ NIÊM YẾT CHUẨN
     double originalUnitPrice = _getBasePriceForUnit(item.product, item.selectedUnit);
-
-    // Giá thực bán (Mặc định lấy giá trong giỏ - có thể là giá đã sửa tay hoặc giá gốc)
+    // Giá đang bán (có thể là giá đã sửa tay)
     double sellingPrice = item.price;
 
-    // Tính toán giảm giá dựa trên Giá Niêm Yết hoặc Giá Bán (thường là giảm trên giá bán hiện tại)
-    // Nhưng để hiển thị đúng logic "Giá gốc gạch ngang", ta dùng originalUnitPrice làm mốc so sánh
-
+    // Tính giá sau giảm để hiển thị ở cột Thành tiền
     double discountedUnitPrice = sellingPrice;
-    String discountText = '';
-
     if (item.discountValue != null && item.discountValue! > 0) {
       if (item.discountUnit == '%') {
-        // Giảm %
-        discountText = "(-${formatNumber(item.discountValue!)}%) ";
         discountedUnitPrice = sellingPrice * (1 - item.discountValue! / 100);
       } else {
-        // Giảm tiền mặt
-        discountText = "(-${formatNumber(item.discountValue!)}đ) ";
         discountedUnitPrice = sellingPrice - item.discountValue!;
       }
     }
-
     // Làm tròn
     discountedUnitPrice = discountedUnitPrice.roundToDouble();
     if (discountedUnitPrice < 0) discountedUnitPrice = 0;
 
-    // Style gạch ngang đỏ
-    final redStrikeThroughStyle = textTheme.bodyMedium?.copyWith(
-        decoration: TextDecoration.lineThrough,
-        decorationColor: Colors.red,
-        color: Colors.red,
-        fontSize: 13,
-        fontWeight: FontWeight.normal
-    );
-    // ------------------------------------------
+    // Logic hiển thị giá gốc gạch ngang (Giống Retail)
+    bool showOriginalPrice = (item.discountValue != null && item.discountValue! > 0) ||
+        (sellingPrice != originalUnitPrice);
 
     final String taxText = _getTaxDisplayString(item.product);
 
@@ -3691,25 +3717,43 @@ class _OrderScreenState extends State<OrderScreen> {
                           TextSpan(
                             text: '$taxText ',
                             style: textTheme.bodyMedium?.copyWith(
-                                color: Colors.grey.shade700,
-                                fontSize: 12
+                              color: Colors.grey.shade700,
                             ),
                           ),
 
-                        // --- PHẦN HIỂN THỊ GIẢM GIÁ ---
-                        // Badge (-10%)
-                        if (discountText.isNotEmpty)
+                        // --- [SỬA ĐỔI]: GIAO DIỆN GIÁ GỐC GIỐNG RETAIL ---
+                        if (showOriginalPrice)
                           TextSpan(
-                            text: discountText,
+                            text: formatNumber(originalUnitPrice),
                             style: textTheme.bodyMedium?.copyWith(
+                              decoration: TextDecoration.lineThrough,
+                              decorationColor: Colors.red,
                               color: Colors.red,
                             ),
                           ),
-                        // Giá Niêm Yết gạch ngang (Chỉ hiện khi có giảm giá HOẶC giá bán khác giá niêm yết)
-                        if (discountText.isNotEmpty || sellingPrice != originalUnitPrice)
-                          TextSpan(
-                            text: formatNumber(originalUnitPrice), // Sử dụng giá từ hàm getBasePrice
-                            style: redStrikeThroughStyle,
+
+                        // --- [SỬA ĐỔI]: BADGE GIẢM GIÁ (KHUNG ĐỎ) GIỐNG RETAIL ---
+                        if (item.discountValue != null && item.discountValue! > 0)
+                          WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.red.shade100)
+                              ),
+                              child: Text(
+                                item.discountUnit == '%'
+                                    ? "-${formatNumber(item.discountValue ?? 0)}%"
+                                    : "-${formatNumber(item.discountValue ?? 0)}",
+                                style: const TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
                           ),
                       ]),
                       overflow: TextOverflow.ellipsis,
@@ -3753,7 +3797,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Đơn giá ĐÃ GIẢM
+                  // Đơn giá ĐÃ GIẢM (Hiển thị giá cuối cùng khách phải trả)
                   SizedBox(
                     width: 100,
                     child: Text(
@@ -3869,6 +3913,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final textTheme = Theme.of(context).textTheme;
     final timeFormat = DateFormat('HH:mm dd/MM');
 
+    // Lấy kết quả tính toán gốc (Chứa giá gốc chuẩn chưa bị xào nấu)
     final result = _timeBasedDataCache[item.lineId] ??
         TimeBasedPricingService.calculatePriceWithBreakdown(
           product: item.product,
@@ -3877,6 +3922,8 @@ class _OrderScreenState extends State<OrderScreen> {
           pausedAt: item.pausedAt,
           totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
         );
+
+    // Giá gốc thực tế để hiển thị gạch ngang
 
     final startTime = item.addedAt.toDate();
     final billableEndTime = startTime.add(Duration(minutes: result.totalMinutesBilled));
@@ -3892,40 +3939,21 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     // --- TÍNH TOÁN GIÁ TRỊ GIẢM ---
-    String discountText = '';
-    double hourlyDiscountAmount = 0; // Số tiền giảm trên mỗi giờ (VNĐ)
-    double percentDiscount = 0;      // Tỷ lệ giảm % (0.1 = 10%)
+    String badgeText = '';
+    double percentDiscount = 0;
+    double reductionPerHour = 0;
 
     if (item.discountValue != null && item.discountValue! > 0) {
       if (item.discountUnit == '%') {
-        // [LOGIC %]: discountValue lưu số % (VD: 10)
-        // Safe guard: Nếu vô tình lưu số quá lớn (do chuyển từ VNĐ sang mà chưa convert), chặn max 100%
         double rawPercent = item.discountValue!;
         if (rawPercent > 100) rawPercent = 100;
-
         percentDiscount = rawPercent / 100.0;
-        discountText = "(-${formatNumber(rawPercent)}%)";
+        badgeText = "-${formatNumber(rawPercent)}%";
       } else {
-        // [LOGIC VNĐ]: discountValue lưu TỔNG TIỀN GIẢM
-        // Cần quy đổi ra GIẢM/GIỜ để tính đơn giá hiển thị
-        double totalHours = result.totalMinutesBilled / 60.0;
-
-        if (totalHours > 0) {
-          hourlyDiscountAmount = item.discountValue! / totalHours;
-        } else {
-          // Trường hợp đặc biệt: Mới mở bàn 0 phút -> Chưa có tổng giờ
-          // Nếu muốn hiển thị đúng mức giảm (VD: 10k/h) ngay lúc này,
-          // ta cần dữ liệu gốc từ cấu hình khuyến mãi (nhưng ở đây chỉ có OrderItem).
-          // Tạm thời hiển thị 0 hoặc lấy giá trị gốc nếu logic lưu trữ cho phép.
-          // Với logic hiện tại (lưu Tổng tiền), khi 0 giờ thì Tổng tiền giảm = 0 -> hourly = 0 là đúng.
-          hourlyDiscountAmount = 0;
-        }
-
-        hourlyDiscountAmount = hourlyDiscountAmount.roundToDouble();
-        discountText = "(-${formatNumber(hourlyDiscountAmount)}đ/h)";
+        reductionPerHour = item.discountValue!;
+        badgeText = "-${formatNumber(reductionPerHour)}đ/h";
       }
     }
-    // -----------------------------
 
     return Card(
       child: InkWell(
@@ -3940,6 +3968,7 @@ class _OrderScreenState extends State<OrderScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // ... (Icon Pause/Play giữ nguyên) ...
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     splashRadius: 20,
@@ -3959,10 +3988,26 @@ class _OrderScreenState extends State<OrderScreen> {
                           style: textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold, color: AppTheme.textColor),
                         ),
-                        if (discountText.isNotEmpty)
-                          TextSpan(
-                            text: ' $discountText',
-                            style: textTheme.bodyMedium?.copyWith(color: Colors.red),
+                        // Badge giảm giá
+                        if (badgeText.isNotEmpty)
+                          WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.red.shade100)
+                              ),
+                              child: Text(
+                                badgeText,
+                                style: const TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
                           ),
                       ]),
                       overflow: TextOverflow.ellipsis,
@@ -3985,8 +4030,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     child: Text(
                       'Ghi chú: ${item.note}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.red.shade700,
-                        fontStyle: FontStyle.italic,
+                        color: Colors.red,
                       ),
                     ),
                   ),
@@ -3995,26 +4039,20 @@ class _OrderScreenState extends State<OrderScreen> {
               // === DÒNG 2: CHI TIẾT (BLOCKS) ===
               if (result.blocks.isNotEmpty) ...[
                 ...result.blocks.map((block) {
+                  // ... (Logic tính toán displayRate, displayCost như đã sửa trước đó) ...
                   final isLastBlock = block == result.blocks.last;
                   final blockEndTimeToShow = isLastBlock ? billableEndTime : block.endTime;
 
-                  // [TÍNH GIÁ HIỂN THỊ]
                   double displayRate = block.ratePerHour;
                   double displayCost = block.cost;
 
                   if (item.discountValue != null && item.discountValue! > 0) {
                     if (item.discountUnit == '%') {
-                      // Giảm %: Rate = Gốc * (1 - %)
                       displayRate = block.ratePerHour * (1 - percentDiscount);
                       displayCost = block.cost * (1 - percentDiscount);
                     } else {
-                      // Giảm VNĐ: Rate = Gốc - (Tiền giảm/giờ)
-                      displayRate = block.ratePerHour - hourlyDiscountAmount;
-
-                      // Nếu giảm quá tay (Giảm > Giá gốc) -> Rate = 0
+                      displayRate = block.ratePerHour - reductionPerHour;
                       if (displayRate < 0) displayRate = 0;
-
-                      // Cost = (Rate mới / 60) * phút
                       displayCost = (displayRate / 60.0) * block.minutes;
                     }
                   }
@@ -4022,7 +4060,6 @@ class _OrderScreenState extends State<OrderScreen> {
                   // Làm tròn
                   displayRate = displayRate.roundToDouble();
                   displayCost = displayCost.roundToDouble();
-                  if (displayCost < 0) displayCost = 0;
 
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2.0),
@@ -4127,21 +4164,13 @@ class _OrderScreenState extends State<OrderScreen> {
                       TextSpan(
                         style: textTheme.bodyMedium,
                         children: [
-                          TextSpan(
-                            text: timeFormat.format(startTime),
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
-                          ),
-                          const TextSpan(
-                            text: ' - ',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey),
-                          ),
-                          TextSpan(
-                            text: timeFormat.format(billableEndTime),
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
-                          ),
+                          TextSpan(text: timeFormat.format(startTime), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                          const TextSpan(text: ' - ', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                          TextSpan(text: timeFormat.format(billableEndTime), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor)),
                         ],
                       ),
                     ),
+                    // item.subtotal sẽ trả về đúng Real Cost nhờ "thủ thuật" ở bước 1
                     Text(
                       currencyFormat.format(item.subtotal),
                       style: textTheme.titleMedium?.copyWith(
@@ -4229,14 +4258,8 @@ class _OrderScreenState extends State<OrderScreen> {
       else {
         // TRƯỜNG HỢP 2: GIẢM THEO VNĐ
         if (timeResult != null) {
-          // A. Dịch vụ tính giờ:
-          // Người dùng nhập: Mức giảm mỗi giờ (VD: 10.000)
-          // Cần lưu: Tổng tiền giảm (VD: 10.000 * 2.5 giờ)
-          double totalHours = timeResult.totalMinutesBilled / 60.0;
-          finalDiscountValToSave = rawInputVal * totalHours;
+          finalDiscountValToSave = rawInputVal;
         } else {
-          // B. Sản phẩm thường:
-          // Người dùng nhập 10.000 -> Lưu 10.000
           finalDiscountValToSave = rawInputVal;
         }
       }

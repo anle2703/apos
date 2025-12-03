@@ -25,6 +25,13 @@ class OrderModel {
   final Timestamp? updatedAt;
   final double? finalAmount;
 
+  // [THÊM MỚI] Thông tin khách hàng
+  final String? customerId;
+  final String? customerName;
+  final String? customerPhone;
+  final String? guestAddress;
+  final String? guestNote;
+
   double get totalItemQuantity {
     try {
       return items.fold<double>(0.0, (total, raw) {
@@ -58,6 +65,12 @@ class OrderModel {
     this.finalAmount,
     this.provisionalBillSource,
     this.numberOfCustomers,
+    // [THÊM MỚI]
+    this.customerId,
+    this.customerName,
+    this.customerPhone,
+    this.guestAddress,
+    this.guestNote,
   });
 
   factory OrderModel.fromFirestore(DocumentSnapshot doc) {
@@ -83,7 +96,12 @@ class OrderModel {
       finalAmount: (data['finalAmount'] as num?)?.toDouble(),
       provisionalBillSource: data['provisionalBillSource'] as String?,
       numberOfCustomers: data['numberOfCustomers'],
-
+      // [THÊM MỚI]
+      customerId: data['customerId'] as String?,
+      customerName: data['customerName'] as String?,
+      customerPhone: data['customerPhone'] as String?,
+      guestAddress: data['guestAddress'] as String?,
+      guestNote: data['guestNote'] as String?,
     );
   }
 
@@ -109,6 +127,12 @@ class OrderModel {
       finalAmount: (map['finalAmount'] as num?)?.toDouble(),
       provisionalBillSource: map['provisionalBillSource'] as String?,
       numberOfCustomers: map['numberOfCustomers'],
+      // [THÊM MỚI]
+      customerId: map['customerId'] as String?,
+      customerName: map['customerName'] as String?,
+      customerPhone: map['customerPhone'] as String?,
+      guestAddress: map['guestAddress'] as String?,
+      guestNote: map['guestNote'] as String?,
     );
   }
 
@@ -133,7 +157,12 @@ class OrderModel {
       'finalAmount': finalAmount,
       'provisionalBillSource': provisionalBillSource,
       'numberOfCustomers': numberOfCustomers,
-
+      // [THÊM MỚI]
+      'customerId': customerId,
+      'customerName': customerName,
+      'customerPhone': customerPhone,
+      'guestAddress': guestAddress,
+      'guestNote': guestNote,
     };
   }
 
@@ -158,7 +187,12 @@ class OrderModel {
     double? finalAmount,
     int? version,
     int? numberOfCustomers,
-
+    // [THÊM MỚI]
+    String? customerId,
+    String? customerName,
+    String? customerPhone,
+    String? guestAddress,
+    String? guestNote,
   }) {
     return OrderModel(
       id: id ?? this.id,
@@ -181,7 +215,12 @@ class OrderModel {
       updatedAt: updatedAt ?? this.updatedAt,
       finalAmount: finalAmount ?? this.finalAmount,
       numberOfCustomers: numberOfCustomers ?? this.numberOfCustomers,
-
+      // [THÊM MỚI]
+      customerId: customerId ?? this.customerId,
+      customerName: customerName ?? this.customerName,
+      customerPhone: customerPhone ?? this.customerPhone,
+      guestAddress: guestAddress ?? this.guestAddress,
+      guestNote: guestNote ?? this.guestNote,
     );
   }
 }

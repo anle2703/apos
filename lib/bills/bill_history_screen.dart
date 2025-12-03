@@ -23,6 +23,19 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/receipt_template_model.dart';
 import '../widgets/receipt_widget.dart';
+import 'dart:async';
+import '../models/store_settings_model.dart';
+import '../services/settings_service.dart';
+
+enum TimeRange {
+  today,
+  yesterday,
+  thisWeek,
+  lastWeek,
+  thisMonth,
+  lastMonth,
+  custom
+}
 
 class BillService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -358,7 +371,8 @@ class BillHistoryScreen extends StatefulWidget {
 class _BillHistoryScreenState extends State<BillHistoryScreen> {
   late Future<Map<String, String>?> _storeInfoFuture;
   final BillService _billService = BillService();
-
+  TimeRange _selectedRange = TimeRange.today;
+  TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
   DateTime? _selectedStartDate;
   DateTime? _selectedEndDate;
   String? _selectedTable;
@@ -366,20 +380,158 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
   String? _selectedCustomer;
   String? _selectedStatus;
   String? _selectedDebtStatus;
-
+  Stream<List<BillModel>>? _billsStream;
   bool _isLoadingFilters = true;
   List<String> _tableOptions = [];
   List<String> _userOptions = [];
   List<String> _customerOptions = [];
   final List<String> _statusOptions = ['Tất cả', 'Hoàn thành', 'Đã hủy'];
   final List<String> _debtOptions = ['Tất cả', 'Có', 'Không'];
-
+  StreamSubscription<StoreSettings>? _settingsSub;
 
   @override
   void initState() {
     super.initState();
     _storeInfoFuture = FirestoreService().getStoreDetails(widget.currentUser.storeId);
+
+    // --- LẮNG NGHE CÀI ĐẶT ---
+    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+
+    // Đảm bảo SettingsService() có dấu ngoặc ()
+    _settingsSub = SettingsService().watchStoreSettings(settingsId).listen((settings) {
+      if (!mounted) return;
+
+      final newCutoff = TimeOfDay(
+        hour: settings.reportCutoffHour ?? 0,
+        minute: settings.reportCutoffMinute ?? 0,
+      );
+
+      if (newCutoff != _reportCutoffTime) {
+        setState(() {
+          _reportCutoffTime = newCutoff; // Bây giờ dòng này sẽ hết lỗi
+          _updateDateRange();
+          _updateBillsStream();
+        });
+      }
+    });
+
+    _updateDateRange();
+    _updateBillsStream();
     _loadFilterData();
+  }
+
+  @override
+  void dispose() {
+    _settingsSub?.cancel(); // <--- THÊM DÒNG NÀY
+    super.dispose();
+  }
+  // --- COPY HÀM TÍNH NGÀY TỪ FILE MẪU ---
+  void _updateDateRange() {
+    if (_selectedRange == TimeRange.custom) {
+      if (_selectedStartDate == null || _selectedEndDate == null) {
+        _selectedRange = TimeRange.today;
+      }
+    }
+
+    if (_selectedRange != TimeRange.custom) {
+      final now = DateTime.now();
+      final cutoff = _reportCutoffTime;
+
+      DateTime startOfReportDay(DateTime date) {
+        return DateTime(date.year, date.month, date.day, cutoff.hour, cutoff.minute);
+      }
+
+      DateTime endOfReportDay(DateTime date) {
+        return startOfReportDay(date)
+            .add(const Duration(days: 1))
+            .subtract(const Duration(milliseconds: 1));
+      }
+
+      DateTime todayCutoffTime = startOfReportDay(now);
+      DateTime effectiveDate = now;
+      if (now.isBefore(todayCutoffTime)) {
+        effectiveDate = now.subtract(const Duration(days: 1));
+      }
+
+      switch (_selectedRange) {
+        case TimeRange.today:
+          _selectedStartDate = startOfReportDay(effectiveDate);
+          _selectedEndDate = endOfReportDay(effectiveDate);
+          break;
+        case TimeRange.yesterday:
+          final yesterday = effectiveDate.subtract(const Duration(days: 1));
+          _selectedStartDate = startOfReportDay(yesterday);
+          _selectedEndDate = endOfReportDay(yesterday);
+          break;
+        case TimeRange.thisWeek:
+          final startOfWeek = effectiveDate.subtract(Duration(days: effectiveDate.weekday - DateTime.monday));
+          final endOfWeek = effectiveDate.add(Duration(days: DateTime.daysPerWeek - effectiveDate.weekday));
+          _selectedStartDate = startOfReportDay(startOfWeek);
+          _selectedEndDate = endOfReportDay(endOfWeek);
+          break;
+        case TimeRange.lastWeek:
+          final endOfLastWeekDay = effectiveDate.subtract(Duration(days: effectiveDate.weekday));
+          final startOfLastWeekDay = endOfLastWeekDay.subtract(const Duration(days: 6));
+          _selectedStartDate = startOfReportDay(startOfLastWeekDay);
+          _selectedEndDate = endOfReportDay(endOfLastWeekDay);
+          break;
+        case TimeRange.thisMonth:
+          final startOfMonth = DateTime(effectiveDate.year, effectiveDate.month, 1);
+          final endOfMonth = DateTime(effectiveDate.year, effectiveDate.month + 1, 0);
+          _selectedStartDate = startOfReportDay(startOfMonth);
+          _selectedEndDate = endOfReportDay(endOfMonth);
+          break;
+        case TimeRange.lastMonth:
+          final endOfLastMonth = DateTime(effectiveDate.year, effectiveDate.month, 0);
+          final startOfLastMonth = DateTime(endOfLastMonth.year, endOfLastMonth.month, 1);
+          _selectedStartDate = startOfReportDay(startOfLastMonth);
+          _selectedEndDate = endOfReportDay(endOfLastMonth);
+          break;
+        case TimeRange.custom:
+          break;
+      }
+    }
+  }
+
+  String _getTimeRangeText(TimeRange range) {
+    switch (range) {
+      case TimeRange.custom: return 'Tùy chọn...';
+      case TimeRange.today: return 'Hôm nay';
+      case TimeRange.yesterday: return 'Hôm qua';
+      case TimeRange.thisWeek: return 'Tuần này';
+      case TimeRange.lastWeek: return 'Tuần trước';
+      case TimeRange.thisMonth: return 'Tháng này';
+      case TimeRange.lastMonth: return 'Tháng trước';
+    }
+  }
+
+  // Hàm phụ trợ để chọn ngày Custom
+  Future<List<DateTime>?> _selectCustomDateTimeRange(DateTime? initialStart, DateTime? initialEnd) async {
+    return await showOmniDateTimeRangePicker(
+      context: context,
+      startInitialDate: initialStart ?? DateTime.now(),
+      endInitialDate: initialEnd,
+      startFirstDate: DateTime(2020),
+      startLastDate: DateTime.now().add(const Duration(days: 365)),
+      endFirstDate: initialStart ?? DateTime(2020),
+      endLastDate: DateTime.now().add(const Duration(days: 365)),
+      is24HourMode: true,
+      isShowSeconds: false,
+      type: OmniDateTimePickerType.dateAndTime,
+    );
+  }
+
+  void _updateBillsStream() {
+    _billsStream = _billService.getBillsStream(
+      storeId: widget.currentUser.storeId,
+      startDate: _selectedStartDate,
+      endDate: _selectedEndDate,
+      tableName: _selectedTable,
+      employeeName: _selectedEmployee,
+      customerName: _selectedCustomer,
+      status: _selectedStatus,
+      debtStatus: _selectedDebtStatus,
+    );
   }
 
   Future<void> _loadFilterData() async {
@@ -401,11 +553,14 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
       }
     }
   }
-  
+
   void _showFilterModal() {
-    // Lưu trạng thái tạm thời của bộ lọc
+    // Lưu trạng thái tạm thời
+    TimeRange tempSelectedRange = _selectedRange; // <--- Dùng biến này
     DateTime? tempStartDate = _selectedStartDate;
     DateTime? tempEndDate = _selectedEndDate;
+
+    // Các biến khác giữ nguyên
     String? tempTable = _selectedTable;
     String? tempEmployee = _selectedEmployee;
     String? tempCustomer = _selectedCustomer;
@@ -420,41 +575,6 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
-            final dateFormat = DateFormat('HH:mm dd/MM/yyyy');
-
-            // Hàm gọi Omni Picker mới
-            Future<void> pickDateRange() async {
-              if (!mounted) return;
-              List<DateTime>? pickedRange = await showOmniDateTimeRangePicker(
-                context: context,
-                startInitialDate: tempStartDate ?? DateTime.now(),
-                endInitialDate: tempEndDate,
-                startFirstDate: DateTime(2020),
-                startLastDate: DateTime.now().add(const Duration(days: 365)),
-                endFirstDate: tempStartDate ?? DateTime(2020),
-                endLastDate: DateTime.now().add(const Duration(days: 365)),
-                is24HourMode: true,
-                isShowSeconds: false,
-                type: OmniDateTimePickerType.dateAndTime,
-              );
-
-              if (pickedRange != null && pickedRange.length == 2) {
-                setModalState(() {
-                  tempStartDate = pickedRange[0];
-                  tempEndDate = pickedRange[1];
-                });
-              }
-            }
-
-            // Tạo Subtitle cho ListTile
-            String subtitleText;
-            if (tempStartDate == null && tempEndDate == null) {
-              subtitleText = 'Chưa chọn';
-            } else {
-              final start = tempStartDate != null ? dateFormat.format(tempStartDate!) : '...';
-              final end = tempEndDate != null ? dateFormat.format(tempEndDate!) : '...';
-              subtitleText = '$start - $end';
-            }
 
             return Padding(
               padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
@@ -462,29 +582,52 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                 runSpacing: 16,
                 children: [
                   Text('Lọc Hóa Đơn', style: Theme.of(context).textTheme.headlineMedium),
-                  // === GIAO DIỆN CHỌN NGÀY MỚI ===
-                  ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                    leading: const Icon(Icons.calendar_month, color: AppTheme.primaryColor),
-                    title: Text('Khoảng thời gian', style: AppTheme.regularGreyTextStyle),
-                    subtitle: Text(
-                      subtitleText,
-                      style: AppTheme.boldTextStyle.copyWith(fontSize: 16),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: pickDateRange,
-                    trailing: (tempStartDate != null || tempEndDate != null)
-                        ? IconButton(
-                      icon: const Icon(Icons.clear, size: 20),
-                      onPressed: () => setModalState(() {
-                        tempStartDate = null;
-                        tempEndDate = null;
-                      }),
-                    )
-                        : null,
-                  ),
 
-                  // Các dropdown không thay đổi
+                  // === THAY THẾ LISTTILE CŨ BẰNG DROPDOWN MỚI ===
+                  AppDropdown<TimeRange>(
+                    labelText: 'Khoảng thời gian',
+                    prefixIcon: Icons.calendar_today,
+                    value: tempSelectedRange,
+                    items: TimeRange.values.map((range) {
+                      return DropdownMenuItem<TimeRange>(
+                        value: range,
+                        child: Text(_getTimeRangeText(range)),
+                      );
+                    }).toList(),
+                    onChanged: (TimeRange? newValue) {
+                      if (newValue == TimeRange.custom) {
+                        _selectCustomDateTimeRange(tempStartDate, tempEndDate).then((pickedRange) {
+                          if (pickedRange != null && pickedRange.length == 2) {
+                            setModalState(() {
+                              tempStartDate = pickedRange[0];
+                              tempEndDate = pickedRange[1];
+                              tempSelectedRange = TimeRange.custom;
+                            });
+                          }
+                        });
+                      } else if (newValue != null) {
+                        setModalState(() {
+                          tempSelectedRange = newValue;
+                        });
+                      }
+                    },
+                    selectedItemBuilder: (context) {
+                      return TimeRange.values.map((range) {
+                        if (range == TimeRange.custom &&
+                            tempSelectedRange == TimeRange.custom &&
+                            tempStartDate != null &&
+                            tempEndDate != null) {
+                          final start = DateFormat('dd/MM/yy').format(tempStartDate!);
+                          final end = DateFormat('dd/MM/yy').format(tempEndDate!);
+                          return Text('$start - $end', overflow: TextOverflow.ellipsis);
+                        }
+                        return Text(_getTimeRangeText(range));
+                      }).toList();
+                    },
+                  ),
+                  // ===============================================
+
+                  // Các dropdown khác giữ nguyên
                   Row(children: [
                     Expanded(child: AppDropdown<String>(
                       labelText: 'Trạng thái', value: tempStatus,
@@ -498,6 +641,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                       onChanged: (value) => setModalState(() => tempDebtStatus = (value == 'Tất cả') ? null : value),
                     )),
                   ]),
+                  // ... (Giữ nguyên các AppDropdown Table, Employee, Customer) ...
                   AppDropdown<String>(
                     labelText: 'Tên bàn', value: tempTable,
                     items: _tableOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
@@ -513,15 +657,23 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                     items: _customerOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
                     onChanged: (value) => setModalState(() => tempCustomer = (value == 'Tất cả') ? null : value),
                   ),
+
+                  // Nút hành động
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
                         onPressed: () {
                           setState(() {
-                            _selectedStartDate = null; _selectedEndDate = null; _selectedTable = null;
+                            // --- SỬA NÚT XÓA: Reset về Hôm nay ---
+                            _selectedRange = TimeRange.today;
+                            _updateDateRange(); // Tính lại ngày
+
+                            _selectedTable = null;
                             _selectedEmployee = null; _selectedCustomer = null; _selectedStatus = null;
                             _selectedDebtStatus = null;
+
+                            _updateBillsStream();
                           });
                           Navigator.of(ctx).pop();
                         },
@@ -531,10 +683,23 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                       ElevatedButton(
                         onPressed: () {
                           setState(() {
-                            _selectedStartDate = tempStartDate; _selectedEndDate = tempEndDate;
+                            // --- SỬA NÚT ÁP DỤNG: Cập nhật Range ---
+                            _selectedRange = tempSelectedRange;
+
+                            // Nếu là custom thì lấy ngày từ modal, ngược lại thì tính toán tự động
+                            if (_selectedRange == TimeRange.custom) {
+                              _selectedStartDate = tempStartDate;
+                              _selectedEndDate = tempEndDate;
+                            } else {
+                              // Tính toán lại ngày dựa trên Range vừa chọn (Hôm qua, Tuần này...)
+                              _updateDateRange();
+                            }
+
                             _selectedTable = tempTable; _selectedEmployee = tempEmployee;
                             _selectedCustomer = tempCustomer; _selectedStatus = tempStatus;
                             _selectedDebtStatus = tempDebtStatus;
+
+                            _updateBillsStream();
                           });
                           Navigator.of(ctx).pop();
                         },
@@ -579,16 +744,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
           final storeInfo = storeSnapshot.data!;
 
           return StreamBuilder<List<BillModel>>(
-            stream: _billService.getBillsStream(
-              storeId: widget.currentUser.storeId,
-              startDate: _selectedStartDate,
-              endDate: _selectedEndDate,
-              tableName: _selectedTable,
-              employeeName: _selectedEmployee,
-              customerName: _selectedCustomer,
-              status: _selectedStatus,
-              debtStatus: _selectedDebtStatus,
-            ),
+            stream: _billsStream,
             builder: (context, billSnapshot) {
               if (billSnapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
@@ -704,10 +860,31 @@ class _BillCard extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    '${bill.tableName} - ${bill.billCode}',
-                                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                                    overflow: TextOverflow.ellipsis,
+                                  // --- LOGIC HIỂN THỊ TIÊU ĐỀ CARD ---
+                                  Builder(
+                                      builder: (context) {
+                                        final String safeTableName = (bill.tableName).trim();
+                                        final String safeCustomerName = (bill.customerName ?? '').trim();
+
+                                        // Logic kiểm tra y hệt bên trên
+                                        bool isRetailBill = false;
+                                        if (safeTableName.toLowerCase().startsWith('đơn hàng') || safeTableName.isEmpty) {
+                                          isRetailBill = true;
+                                        }
+                                        if (safeTableName.isNotEmpty && safeTableName == safeCustomerName) {
+                                          isRetailBill = true;
+                                        }
+
+                                        final String displayTitle = isRetailBill
+                                            ? bill.billCode
+                                            : '$safeTableName - ${bill.billCode}';
+
+                                        return Text(
+                                          displayTitle,
+                                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                          overflow: TextOverflow.ellipsis,
+                                        );
+                                      }
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -1019,7 +1196,22 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
     final screenHeight = MediaQuery.of(context).size.height;
     final bool isCancelled = widget.bill.status == 'cancelled';
 
-    // Widget dùng để in (Scale chuẩn 1.8 mặc định trong ReceiptWidget)
+    // --- 1. CHUẨN BỊ DỮ LIỆU ---
+    final String safeTableName = (widget.bill.tableName).trim();
+    final String safeCustomerName = (widget.bill.customerName ?? '').trim();
+
+    // --- 2. LOGIC NHẬN DIỆN BÁN LẺ (RETAIL) ---
+    bool isRetailBill = false;
+
+    // Trường hợp A: Tên bàn mặc định của Retail ("Đơn hàng 1", "Đơn hàng...")
+    if (safeTableName.toLowerCase().startsWith('đơn hàng') || safeTableName.isEmpty) {
+      isRetailBill = true;
+    }
+
+    if (safeTableName.isNotEmpty && safeTableName == safeCustomerName) {
+      isRetailBill = true;
+    }
+
     final Widget receiptWidget = ReceiptWidget(
       title: 'HÓA ĐƠN',
       storeInfo: widget.storeInfo,
@@ -1027,7 +1219,9 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
           .map((itemData) => OrderItem.fromMap(itemData)).toList(),
       summary: _buildSummaryMap(),
       userName: widget.bill.createdByName ?? 'N/A',
-      tableName: widget.bill.tableName,
+
+      tableName: isRetailBill ? '' : widget.bill.tableName,
+
       showPrices: true,
       isSimplifiedMode: false,
       templateSettings: _templateSettings,

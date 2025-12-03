@@ -21,7 +21,7 @@ import 'package:omni_datetime_picker/omni_datetime_picker.dart';
 import '../../models/customer_model.dart';
 import '../../models/order_model.dart';
 import '../../models/table_model.dart';
-import 'package:app_4cash/tables/order_screen.dart';
+import 'package:app_4cash/screens/sales/order_screen.dart';
 import '../contacts/add_edit_customer_dialog.dart';
 import '../../theme/string_extensions.dart';
 

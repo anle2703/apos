@@ -33,6 +33,8 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
   String? _selectedLevel1;
   String? _selectedLevel2;
   String? _selectedLevel3;
+  late String _selectedUnit;
+  late List<Map<String, dynamic>> _availableUnits;
 
   late double _initialQuantity;
   late TextEditingController _addQtyController;
@@ -42,11 +44,20 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
   @override
   void initState() {
     super.initState();
-
     final item = widget.initialItem;
+    _availableUnits = [
+      {'unitName': item.product.unit ?? 'Cơ bản', 'sellPrice': item.product.sellPrice}
+    ];
+    if (item.product.additionalUnits.isNotEmpty) {
+      _availableUnits.addAll(item.product.additionalUnits);
+    }
+    _selectedUnit = item.selectedUnit.isNotEmpty ? item.selectedUnit : (item.product.unit ?? '');
+    if (!_availableUnits.any((u) => u['unitName'] == _selectedUnit) && _availableUnits.isNotEmpty) {
+      _selectedUnit = _availableUnits.first['unitName'];
+    }
     _priceController = TextEditingController(text: formatNumber(item.price));
-    _discountValueController =
-        TextEditingController(text: formatNumber(item.discountValue ?? 0));
+
+    _discountValueController = TextEditingController(text: formatNumber(item.discountValue ?? 0));
     _noteController = TextEditingController(text: item.note ?? '');
     String rawUnit = item.discountUnit ?? '%';
     if (rawUnit == 'VND') rawUnit = 'VNĐ';
@@ -64,8 +75,7 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
     _initialQuantity = item.quantity;
     _addQtyController = TextEditingController();
     _subtractQtyController = TextEditingController();
-    _totalQtyController =
-        TextEditingController(text: formatNumber(_initialQuantity));
+    _totalQtyController = TextEditingController(text: formatNumber(_initialQuantity));
   }
 
   @override
@@ -77,6 +87,22 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
     _subtractQtyController.dispose();
     _totalQtyController.dispose();
     super.dispose();
+  }
+
+  void _onUnitChanged(String? newUnit) {
+    if (newUnit == null || newUnit == _selectedUnit) return;
+
+    // Tìm giá của đơn vị mới
+    final unitData = _availableUnits.firstWhere(
+          (u) => u['unitName'] == newUnit,
+      orElse: () => _availableUnits.first,
+    );
+    final double newPrice = (unitData['sellPrice'] as num).toDouble();
+
+    setState(() {
+      _selectedUnit = newUnit;
+      _priceController.text = formatNumber(newPrice);
+    });
   }
 
   void _onConfirm() {
@@ -111,17 +137,14 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
       'quantity': newQuantity,
       'discountValue': discountValue,
       'discountUnit': _discountUnit,
+      'selectedUnit': _selectedUnit,
       'note': note.isEmpty ? null : note,
       'commissionStaff': commissionStaff,
     });
   }
 
-  // [SỬA] - Gửi bạn hàm build đã được cập nhật
   @override
   Widget build(BuildContext context) {
-    final bool canEditPrice =
-        widget.initialItem.product.serviceSetup?['isTimeBased'] != true;
-
     return AlertDialog(
       // 1. Thêm scrollable: true de AlertDialg tu quan ly cuon
       //    Title va Content se cuon cung nhau
@@ -139,18 +162,31 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CustomTextFormField(
-              controller: _priceController,
-              decoration: InputDecoration(
-                labelText: 'Đơn giá',
-                enabled: canEditPrice,
+            if (_availableUnits.length > 1) ...[
+              AppDropdown<String>(
+                labelText: 'Đơn vị tính',
+                value: _selectedUnit,
+                items: _availableUnits.map((u) {
+                  return DropdownMenuItem<String>(
+                    value: u['unitName'] as String,
+                    child: Text(u['unitName'] as String),
+                  );
+                }).toList(),
+                onChanged: _onUnitChanged,
               ),
-              keyboardType:
-              const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [ThousandDecimalInputFormatter()],
-              readOnly: !canEditPrice,
-            ),
-            const SizedBox(height: 8),
+              const SizedBox(height: 12),
+            ],
+            if (widget.initialItem.product.serviceSetup?['isTimeBased'] != true) ...[
+              CustomTextFormField(
+                controller: _priceController,
+                decoration: const InputDecoration(
+                  labelText: 'Đơn giá',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [ThousandDecimalInputFormatter()],
+              ),
+              const SizedBox(height: 8),
+            ],
             if (widget.initialItem.product.serviceSetup?['isTimeBased'] !=
                 true) ...[
               Text('Chỉnh sửa số lượng',

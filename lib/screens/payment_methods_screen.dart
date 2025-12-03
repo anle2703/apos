@@ -44,11 +44,20 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     try {
       final dynamic newDefaultId = isCurrentlyDefault ? null : methodId;
 
+      // 1. Cập nhật Settings trên Firestore
       await _settingsService.updateStoreSettings(
-          widget.currentUser.ownerUid ?? widget.currentUser.uid, // <-- SỬA DÒNG NÀY
+          widget.currentUser.ownerUid ?? widget.currentUser.uid,
           {'defaultPaymentMethodId': newDefaultId}
       );
+
+      // 2. [QUAN TRỌNG] Xóa cache bên màn hình thanh toán
+      // Để lần sau mở PaymentScreen lên, nó buộc phải tải lại Settings mới nhất
       PaymentScreen.clearCache();
+      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
+      // 3. Nếu bạn đã thêm hàm preloadData, hãy gọi luôn để nạp cache mới (Optional nhưng tốt hơn)
+      // await PaymentScreen.preloadData(widget.currentUser.storeId);
+
       ToastService().show(
           message: isCurrentlyDefault ? "Đã gỡ PTTT mặc định" : "Đã đặt làm PTTT mặc định",
           type: ToastType.success
@@ -320,7 +329,8 @@ class _PaymentMethodFormState extends State<_PaymentMethodForm> {
       }
 
       PaymentScreen.clearCache();
-
+      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
       ToastService()
           .show(message: 'Đã lưu PTTT thành công', type: ToastType.success);
       if (mounted) Navigator.of(context).pop();

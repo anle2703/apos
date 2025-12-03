@@ -8,7 +8,6 @@ import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../../services/toast_service.dart';
-import 'dashboard_screen.dart';
 import '../products/product_list_screen.dart';
 import '../bills/bill_history_screen.dart';
 import 'auth_gate.dart';
@@ -24,6 +23,7 @@ import '../screens/payment_methods_screen.dart';
 import 'invoice/e_invoice_settings_screen.dart';
 import '../tables/qr_order_management_screen.dart';
 import 'tax_management_screen.dart';
+import 'sales/retail_order_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -48,7 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canViewListTable = false;
   bool _canViewEmployee = false;
 
-  // Biến cờ để tránh hiện popup nhiều lần
   bool _isShowingTypePicker = false;
 
   @override
@@ -67,7 +66,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _initializeUserAndSettings() async {
     UserModel? loadedUser;
 
-    // 1. Xác định User
     if (widget.user != null) {
       loadedUser = widget.user;
     } else {
@@ -79,7 +77,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (loadedUser == null) return;
 
-    // 2. Nếu là nhân viên, lấy businessType từ Owner
     if (loadedUser.role != 'owner' && loadedUser.ownerUid != null) {
       final ownerProfile =
       await _firestoreService.getUserProfile(loadedUser.ownerUid!);
@@ -89,7 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // 3. Cập nhật State và Lắng nghe thay đổi
     if (mounted) {
       setState(() {
         _currentUser = loadedUser;
@@ -100,21 +96,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (_currentUser != null) {
       await PrintQueueService().initialize(_currentUser!.storeId);
-
-      // [FIX] Kiểm tra và hiện popup ngay sau khi init xong dữ liệu
       _checkAndShowBusinessTypePicker();
     }
   }
 
   void _checkAndShowBusinessTypePicker() {
     if (_currentUser == null) return;
-    if (_isShowingTypePicker) return; // Đang hiện rồi thì thôi
+    if (_isShowingTypePicker) return;
 
-    // Chỉ hiện nếu là Owner và chưa có businessType
     if (_currentUser!.role == 'owner' &&
-        (_currentUser!.businessType == null || _currentUser!.businessType!.isEmpty)) {
-
-      _isShowingTypePicker = true; // Đánh dấu đang hiện
+        (_currentUser!.businessType == null ||
+            _currentUser!.businessType!.isEmpty)) {
+      _isShowingTypePicker = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _showBusinessTypePicker(context);
       });
@@ -129,7 +122,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _userStatusSubscription = _firestoreService
           .streamUserProfile(_currentUser!.uid)
           .listen((userProfile) {
-        // TRƯỜNG HỢP 1: Tài khoản bị xóa khỏi CSDL
         if (userProfile == null) {
           _authService.signOut().then((_) {
             navigator.pushAndRemoveUntil(
@@ -139,7 +131,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        // TRƯỜNG HỢP 2: Tài khoản bị vô hiệu hóa
         if (!userProfile.active) {
           ToastService().show(
               message: 'Tài khoản của bạn đã bị quản trị viên vô hiệu hóa.',
@@ -156,7 +147,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        // TRƯỜNG HỢP 3: Cập nhật thông tin người dùng (bao gồm cả quyền)
         if (userProfile.role == 'owner') {
           _canViewPurchaseOrder = true;
           _canViewPromotions = true;
@@ -166,8 +156,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']
           ?['canViewPurchaseOrder'] ??
               false;
-          _canViewPromotions = userProfile.permissions?['promotions']
-          ?['canViewPromotions'] ??
+          _canViewPromotions = userProfile
+              .permissions?['promotions']?['canViewPromotions'] ??
               false;
           _canViewListTable = userProfile.permissions?['listTable']
           ?['canViewListTable'] ??
@@ -178,14 +168,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (mounted) {
           setState(() {
-            // Cập nhật _currentUser từ Stream để UI tự động refresh khi có thay đổi
             _currentUser = userProfile.copyWith(
-              // Giữ lại businessType nếu stream trả về null (đề phòng)
-              businessType: userProfile.businessType ?? _currentUser?.businessType,
+              businessType:
+              userProfile.businessType ?? _currentUser?.businessType,
             );
           });
-
-          // Kiểm tra lại popup mỗi khi có data mới (phòng trường hợp init chưa bắt được)
           _checkAndShowBusinessTypePicker();
         }
       });
@@ -201,14 +188,11 @@ class _HomeScreenState extends State<HomeScreen> {
           onConfirm: (type) async {
             final navigator = Navigator.of(dialogContext);
             try {
-              // 1. Cập nhật Firestore
               await _firestoreService
                   .updateUserField(_currentUser!.uid, {'businessType': type});
 
-              // Đóng dialog NẾU thành công
               navigator.pop();
 
-              // Cập nhật Local State NGAY LẬP TỨC
               if (mounted) {
                 setState(() {
                   _currentUser = _currentUser!.copyWith(businessType: type);
@@ -216,10 +200,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _selectedIndex = 0;
                 });
               }
-
             } catch (e) {
-              // Nếu lỗi: Hiện thông báo nhưng KHÔNG đóng dialog
-              // để nút "Xác nhận" dừng quay và user có thể thử lại
               ToastService()
                   .show(message: "Lỗi cập nhật: $e", type: ToastType.error);
             }
@@ -244,30 +225,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
     switch (_selectedIndex) {
       case 0:
+      // [SỬA ĐỔI QUAN TRỌNG]
+      // Bất kể là Owner hay Employee:
+      // - Nếu F&B -> TableSelectionScreen
+      // - Nếu Retail -> RetailOrderScreen (Màn hình bán hàng luôn là mặc định)
         if (_currentUser!.businessType == 'fnb') {
-          // Nếu là F&B, TẤT CẢ người dùng (owner và employee) đều thấy màn hình bàn
           return TableSelectionScreen(currentUser: _currentUser!);
         } else {
-          // Nếu là Bán lẻ (hoặc chưa xác định), lúc này MỚI KIỂM TRA VAI TRÒ
-          if (_currentUser!.role == 'owner') {
-            // Owner thấy Dashboard
-            return DashboardScreen(currentUser: _currentUser!);
-          } else {
-            // Employee thấy danh sách sản phẩm
-            return ProductListScreen(currentUser: _currentUser!);
-          }
+          // Luôn trả về màn hình bán hàng cho Retail
+          return RetailOrderScreen(currentUser: _currentUser!);
         }
       case 1:
         return ProductListScreen(currentUser: _currentUser!);
       case 2:
         return BillHistoryScreen(currentUser: _currentUser!);
       case 3:
+      // Owner muốn xem Tổng quan thì vào Báo cáo hoặc Dashboard ở đây
+      // (Nếu bạn muốn Tab 3 là Dashboard cho Owner thì sửa ở đây, hiện tại để mặc định là Report)
         return ReportScreen(currentUser: _currentUser!);
       case 4:
         return Scaffold(
           appBar: AppBar(title: const Text('Khác')),
           body: ListView(
             children: [
+              // Menu items giữ nguyên...
               ListTile(
                 leading: const Icon(Icons.add_business_outlined),
                 title: const Text('Quản lý nhập hàng'),
@@ -404,7 +385,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ));
                     } else {
                       ToastService().show(
-                          message: 'Chỉ chủ sở hữu mới có thể truy cập mục này.',
+                          message:
+                          'Chỉ chủ sở hữu mới có thể truy cập mục này.',
                           type: ToastType.warning);
                     }
                   }
@@ -417,8 +399,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (_currentUser != null) {
                     if (_currentUser!.role == 'owner') {
                       Navigator.of(context).push(MaterialPageRoute(
-                        builder: (context) =>
-                            EInvoiceSettingsScreen(currentUser: _currentUser!),
+                        builder: (context) => EInvoiceSettingsScreen(
+                            currentUser: _currentUser!),
                       ));
                     } else {
                       ToastService().show(
@@ -441,7 +423,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           SettingsScreen(currentUser: _currentUser!),
                     ))
                         .then((_) {
-                      // Load lại toàn bộ dữ liệu để cập nhật thay đổi
                       setState(() {
                         _initializationFuture = _initializeUserAndSettings();
                       });
@@ -474,21 +455,18 @@ class _HomeScreenState extends State<HomeScreen> {
     return FutureBuilder<void>(
       future: _initializationFuture,
       builder: (context, snapshot) {
-        // Trong khi đang chờ dữ liệu, hiển thị vòng xoay
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        // Nếu có lỗi, hiển thị thông báo
         if (snapshot.hasError) {
           return Scaffold(
             body: Center(child: Text('Đã xảy ra lỗi: ${snapshot.error}')),
           );
         }
 
-        // Khi dữ liệu đã sẵn sàng, hiển thị giao diện chính
         return LayoutBuilder(
           builder: (context, constraints) {
             const double mobileBreakpoint = 700;
@@ -504,14 +482,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDesktopLayout() {
-    // Label của tab đầu tiên sẽ thay đổi tùy theo logic hiển thị
-    String firstTabLabel;
-    if (_currentUser?.businessType == 'fnb') {
-      firstTabLabel = 'Bán hàng';
-    } else {
-      firstTabLabel = _currentUser?.role == 'owner' ? 'Tổng quan' : 'Bán hàng';
-    }
-
     return Scaffold(
       body: Row(
         children: [
@@ -524,24 +494,24 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Icon(Icons.shopping_bag_outlined,
                   size: 40, color: Theme.of(context).primaryColor),
             ),
-            destinations: <NavigationRailDestination>[
+            destinations: const <NavigationRailDestination>[
               NavigationRailDestination(
-                  icon: const Icon(Icons.add_shopping_cart_outlined),
-                  selectedIcon: const Icon(Icons.add_shopping_cart),
-                  label: Text(firstTabLabel)),
-              const NavigationRailDestination(
+                  icon: Icon(Icons.add_shopping_cart_outlined),
+                  selectedIcon: Icon(Icons.add_shopping_cart),
+                  label: Text('Bán hàng')), // Luôn hiển thị là Bán hàng
+              NavigationRailDestination(
                   icon: Icon(Icons.inventory_2),
                   selectedIcon: Icon(Icons.inventory_2_outlined),
                   label: Text('Sản phẩm')),
-              const NavigationRailDestination(
+              NavigationRailDestination(
                   icon: Icon(Icons.receipt_long_outlined),
                   selectedIcon: Icon(Icons.receipt_long),
                   label: Text('Đơn hàng')),
-              const NavigationRailDestination(
+              NavigationRailDestination(
                   icon: Icon(Icons.bar_chart_outlined),
                   selectedIcon: Icon(Icons.bar_chart),
                   label: Text('Báo cáo')),
-              const NavigationRailDestination(
+              NavigationRailDestination(
                   icon: Icon(Icons.more_horiz_outlined),
                   selectedIcon: Icon(Icons.more_horiz),
                   label: Text('Khác')),
@@ -556,34 +526,27 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMobileLayout() {
-    String firstTabLabel;
-    if (_currentUser?.businessType == 'fnb') {
-      firstTabLabel = 'Bán hàng';
-    } else {
-      firstTabLabel = _currentUser?.role == 'owner' ? 'Tổng quan' : 'Bán hàng';
-    }
-
     return Scaffold(
       body: _buildCurrentPage(),
       bottomNavigationBar: BottomNavigationBar(
-        items: <BottomNavigationBarItem>[
+        items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(
-              icon: const Icon(Icons.add_shopping_cart_outlined),
-              activeIcon: const Icon(Icons.add_shopping_cart),
-              label: firstTabLabel),
-          const BottomNavigationBarItem(
+              icon: Icon(Icons.add_shopping_cart_outlined),
+              activeIcon: Icon(Icons.add_shopping_cart),
+              label: 'Bán hàng'), // Luôn hiển thị là Bán hàng
+          BottomNavigationBarItem(
               icon: Icon(Icons.inventory_2_outlined),
               activeIcon: Icon(Icons.inventory_2),
               label: 'Sản phẩm'),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
               icon: Icon(Icons.receipt_long_outlined),
               activeIcon: Icon(Icons.receipt_long),
               label: 'Đơn hàng'),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
               icon: Icon(Icons.bar_chart_outlined),
               activeIcon: Icon(Icons.bar_chart),
               label: 'Báo cáo'),
-          const BottomNavigationBarItem(
+          BottomNavigationBarItem(
               icon: Icon(Icons.more_horiz_outlined),
               activeIcon: Icon(Icons.more_horiz),
               label: 'Khác'),
@@ -608,7 +571,7 @@ class BusinessTypePickerPopup extends StatefulWidget {
 
 class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
   String? _selectedType;
-  bool _isUpdating = false; // Biến trạng thái loading
+  bool _isUpdating = false;
 
   @override
   Widget build(BuildContext context) {
@@ -638,19 +601,15 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
       ),
       actions: [
         TextButton(
-          // Vô hiệu hóa nút khi chưa chọn HOẶC đang loading
           onPressed: (_selectedType == null || _isUpdating)
               ? null
               : () async {
-            // Bắt đầu loading
             setState(() {
               _isUpdating = true;
             });
 
-            // Gọi hàm xử lý từ cha và đợi kết quả
             await widget.onConfirm(_selectedType!);
 
-            // Nếu widget chưa bị đóng (do lỗi), tắt loading
             if (mounted) {
               setState(() {
                 _isUpdating = false;
@@ -675,7 +634,6 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
     final color = Theme.of(context).primaryColor;
 
     return InkWell(
-      // Chặn bấm chọn loại khi đang loading
       onTap: _isUpdating ? null : () => setState(() => _selectedType = value),
       borderRadius: BorderRadius.circular(12),
       child: Container(
