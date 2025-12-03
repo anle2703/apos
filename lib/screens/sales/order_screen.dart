@@ -2140,7 +2140,6 @@ class _OrderScreenState extends State<OrderScreen> {
         _selectedCustomer = null;
         _lastCustomerIdFromOrder = null;
       });
-      // [FIX QUAN TRỌNG] Tính lại giảm giá khi không có khách hàng (để áp dụng khuyến mãi cho khách lẻ nếu có)
       _recalculateCartDiscounts();
     }
   }

@@ -1448,6 +1448,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               ],
             ),
           ),
+        const SizedBox(height: 8),
         Expanded(
           child: cartEntries.isEmpty
               ? Center(
