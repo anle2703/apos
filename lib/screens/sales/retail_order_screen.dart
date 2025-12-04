@@ -34,15 +34,16 @@ import '/screens/sales/payment_screen.dart';
 import '../../theme/string_extensions.dart';
 import '../../theme/number_utils.dart';
 import '../../models/quick_note_model.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
-// --- CLASS QUẢN LÝ SESSION ---
 class RetailTab {
   String id;
   String name;
   CustomerModel? customer;
   Map<String, OrderItem> items;
   DateTime createdAt;
-  String? cloudOrderId; // [MỚI] ID của đơn hàng trên Firestore (nếu được load về)
+  String? cloudOrderId;
 
   RetailTab({
     required this.id,
@@ -55,6 +56,70 @@ class RetailTab {
         createdAt = createdAt ?? DateTime.now();
 
   double get totalAmount => items.values.fold(0, (tong, item) => tong + item.subtotal);
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'customer': customer?.toMap(),
+
+      // [FIX TRIỆT ĐỂ LỖI TIMESTAMP]
+      // Convert thủ công tất cả Timestamp sang int (milliseconds)
+      'items': items.values.map((e) {
+        final map = e.toMap();
+
+        // 1. Xử lý addedAt
+        if (map['addedAt'] is Timestamp) {
+          map['addedAt'] = (map['addedAt'] as Timestamp).millisecondsSinceEpoch;
+        }
+
+        // 2. Xử lý pausedAt (Quan trọng: nếu không có dòng này, món đang tạm dừng sẽ gây lỗi)
+        if (map['pausedAt'] != null && map['pausedAt'] is Timestamp) {
+          map['pausedAt'] = (map['pausedAt'] as Timestamp).millisecondsSinceEpoch;
+        }
+
+        return map;
+      }).toList(),
+
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      'cloudOrderId': cloudOrderId,
+    };
+  }
+
+  factory RetailTab.fromMap(Map<String, dynamic> map, List<ProductModel> allProducts) {
+    final Map<String, OrderItem> loadedItems = {};
+
+    if (map['items'] != null) {
+      final rawList = map['items'] as List;
+      for (var rawItem in rawList) {
+        try {
+          final itemMap = Map<String, dynamic>.from(rawItem);
+
+          // [FIX LỖI TIMESTAMP] Convert ngược từ int về Timestamp trước khi đưa vào OrderItem.fromMap
+          if (itemMap['addedAt'] is int) {
+            itemMap['addedAt'] = Timestamp.fromMillisecondsSinceEpoch(itemMap['addedAt']);
+          }
+
+          final item = OrderItem.fromMap(itemMap, allProducts: allProducts);
+
+          if (item.product.id.isNotEmpty) {
+            loadedItems[item.lineId] = item;
+          }
+        } catch (e) {
+          debugPrint(">>> [Retail Load Warning] Bỏ qua món lỗi: $e");
+        }
+      }
+    }
+
+    return RetailTab(
+      id: map['id'] ?? 'unknown',
+      name: map['name'] ?? 'Đơn hàng',
+      customer: map['customer'] != null ? CustomerModel.fromMap(map['customer']) : null,
+      items: loadedItems,
+      createdAt: map['createdAt'] != null ? DateTime.fromMillisecondsSinceEpoch(map['createdAt']) : null,
+      cloudOrderId: map['cloudOrderId'],
+    );
+  }
 }
 
 class RetailSessionManager {
@@ -65,9 +130,70 @@ class RetailSessionManager {
   List<RetailTab> tabs = [];
   String activeTabId = '';
 
+  // [DEBUG] In chi tiết khi lưu
+  Future<void> saveSessionToLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Kiểm tra xem có món nào trong các tab không
+      int totalItems = 0;
+      for (var t in tabs) { totalItems += t.items.length; }
+
+      final List<Map<String, dynamic>> data = tabs.map((t) => t.toMap()).toList();
+      final String jsonStr = jsonEncode(data);
+
+      debugPrint(">>> [SAVE] Đang lưu... Tổng đơn: ${tabs.length} | Tổng món: $totalItems | Length chuỗi: ${jsonStr.length}");
+      if (totalItems == 0 && tabs.isNotEmpty) {
+        debugPrint("!!! CẢNH BÁO: Đang lưu các đơn hàng RỖNG.");
+      }
+
+      await prefs.setString('retail_session_data', jsonStr);
+      await prefs.setString('retail_active_tab', activeTabId);
+
+    } catch (e) {
+      debugPrint("!!! [SAVE ERROR] Lỗi lưu session: $e");
+    }
+  }
+
+  // [DEBUG] In chi tiết khi load
+  Future<void> loadSessionFromLocal(List<ProductModel> allProducts) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? jsonStr = prefs.getString('retail_session_data');
+      final String? savedActiveId = prefs.getString('retail_active_tab');
+
+      debugPrint(">>> [LOAD] Bắt đầu load. Có dữ liệu cũ không? ${jsonStr != null}");
+
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        debugPrint(">>> [LOAD] Nội dung JSON cũ: $jsonStr"); // In hết ra để xem
+
+        final List<dynamic> list = jsonDecode(jsonStr);
+        tabs = list.map((m) => RetailTab.fromMap(m, allProducts)).toList();
+
+        int loadedItemsCount = 0;
+        for(var t in tabs) {loadedItemsCount += t.items.length;}
+
+        debugPrint(">>> [LOAD RESULT] Khôi phục xong. Số đơn: ${tabs.length}. Tổng món: $loadedItemsCount");
+
+        if (tabs.isNotEmpty) {
+          activeTabId = savedActiveId ?? tabs.first.id;
+          if (!tabs.any((t) => t.id == activeTabId)) {
+            activeTabId = tabs.first.id;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("!!! [LOAD ERROR] Lỗi tải session: $e");
+      tabs = [];
+      activeTabId = '';
+    }
+  }
+
   void clearSession() {
+    debugPrint(">>> [CLEAR SESSION] Đang xóa session...");
     tabs = [];
     activeTabId = '';
+    saveSessionToLocal();
   }
 }
 
@@ -98,7 +224,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   final _searchController = TextEditingController();
   String _searchQuery = '';
   bool _isPaymentView = false;
-
+  bool _isSessionRestored = false;
   List<ProductGroupModel> _menuGroups = [];
   List<ProductModel> _menuProducts = [];
   List<DiscountModel> _activeDiscounts = [];
@@ -131,12 +257,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         _promptForCash = s.promptForCash ?? true;
       });
     });
-
-    if (_session.tabs.isEmpty) {
-      _addNewTab(forceName: "Đơn hàng 1");
-    } else if (_session.activeTabId.isEmpty) {
-      _session.activeTabId = _session.tabs.first.id;
-    }
 
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     _searchController.addListener(() {
@@ -297,6 +417,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       });
       _cartUpdateController.add(null);
     }
+    _session.saveSessionToLocal();
   }
 
   Future<void> _confirmClearCart() async {
@@ -324,7 +445,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
   }
 
-  void _addNewTab({String? forceName}) {
+  void _addNewTab({String? forceName, bool save = true}) {
     final String newId = 'tab_${DateTime.now().microsecondsSinceEpoch}';
     final int nextNum = _session.tabs.length + 1;
     final String name = forceName ?? 'Đơn hàng $nextNum';
@@ -336,6 +457,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       _session.activeTabId = newId;
       _isPaymentView = false;
     });
+
+    // Bây giờ biến 'save' đã được định nghĩa
+    if (save) _session.saveSessionToLocal();
   }
 
   void _switchTab(String id) {
@@ -348,6 +472,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_isPaymentView && isDesktop) _searchFocusNode.requestFocus();
     });
+    _session.saveSessionToLocal();
   }
 
   void _closeTab(String id) {
@@ -362,6 +487,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       }
       _isPaymentView = false;
     });
+    _session.saveSessionToLocal();
   }
 
   void _updateTabCustomer(CustomerModel? customer) {
@@ -375,6 +501,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         _currentTab!.name = "Đơn hàng ${index + 1}";
       }
     });
+    _session.saveSessionToLocal();
   }
 
   Future<void> _saveOrderToCloud() async {
@@ -727,6 +854,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _applyBuyXGetYLogic();
     });
+    _session.saveSessionToLocal();
   }
 
   void _updateQuantity(String key, double change) {
@@ -756,6 +884,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
     // [QUAN TRỌNG] Chạy lại logic sau khi đổi số lượng (để xóa/thêm quà)
     _applyBuyXGetYLogic();
+    _session.saveSessionToLocal();
   }
 
   void _removeItem(String key) {
@@ -774,6 +903,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     _cartUpdateController.add(null);
     // [QUAN TRỌNG] Chạy lại logic sau khi xóa
     _applyBuyXGetYLogic();
+    _session.saveSessionToLocal();
   }
 
   OrderModel _createOrderFromTab(RetailTab tab) {
@@ -818,8 +948,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
 
     // 2. CHUẨN BỊ DỮ LIỆU TẠI CHỖ (INSTANT DATA)
-    // Tạo OrderModel ngay lập tức từ Tab hiện tại
-    // Nếu chưa có ID (đơn mới), tạo ID mới. Nếu đã có (đơn đã lưu), dùng lại ID đó.
     final String orderId = tab.cloudOrderId ?? 'retail_${DateTime.now().millisecondsSinceEpoch}';
 
     // Đảm bảo tab có ID để dùng cho việc lưu sau này
@@ -847,12 +975,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       customerName: tab.customer?.name,
       customerPhone: tab.customer?.phone,
     );
-
-    // 3. BACKGROUND TASK (CHẠY NGẦM - KHÔNG AWAIT)
-    // Lưu lên Server và để nó tự chạy, không chờ kết quả để tránh delay
-    _firestoreService.getOrderReference(newOrder.id).set(newOrder.toMap())
-        .then((_) => debugPrint(">>> [Background Retail] Đã lưu đơn ngầm thành công"))
-        .catchError((e) => debugPrint(">>> [Background Retail] Lỗi lưu đơn ngầm: $e"));
 
     // 4. XỬ LÝ GIAO DIỆN & NAVIGATE NGAY LẬP TỨC
     if (isDesktop) {
@@ -884,33 +1006,19 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   }
 
   void _checkPaymentResult(dynamic result, RetailTab tab) {
-    // result == true: Thanh toán thành công (Mobile callback)
-    // result is PaymentResult: Trả về kết quả thanh toán (Desktop/PaymentScreen callback)
+    // TRƯỜNG HỢP 1: THANH TOÁN THÀNH CÔNG
     if (result == true || result is PaymentResult) {
-
-      // 1. Đóng Tab hiện tại khỏi giao diện bán hàng
       _closeTab(tab.id);
-
-      // 2. Tắt view thanh toán (cho Desktop)
-      if (mounted) {
-        setState(() {
-          _isPaymentView = false;
-        });
-      }
-
-      // [QUAN TRỌNG - ĐÃ SỬA]
-      // Tuyệt đối KHÔNG gọi delete() document ở đây.
-      // PaymentScreen đã update trạng thái đơn thành 'paid'.
-      // Nếu delete ở đây, bạn sẽ mất lịch sử giao dịch.
-
-      // Chỉ xóa nếu đây là đơn nháp chưa thanh toán (logic custom của bạn),
-      // nhưng với luồng chuẩn thì khi PaymentResult trả về thành công, đơn đã an toàn trên server.
-
+      if (mounted) setState(() => _isPaymentView = false);
       ToastService().show(message: "Thanh toán thành công!", type: ToastType.success);
     }
-    // Trường hợp result là PaymentState (In tạm tính hoặc Lưu nháp mà chưa thanh toán xong)
+
+    // TRƯỜNG HỢP 2: HỦY THANH TOÁN (result == null hoặc false)
+    else if (result == null || result == false) {
+    }
+
+    // TRƯỜNG HỢP 3: PaymentState -> Giữ nguyên
     else if (result is PaymentState) {
-      // Không làm gì cả, giữ nguyên tab để thu ngân thao tác tiếp
     }
   }
 
@@ -919,13 +1027,36 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     return StreamBuilder<List<ProductModel>>(
       stream: _firestoreService.getAllProductsStream(widget.currentUser.storeId),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        // 1. Kiểm tra dữ liệu sản phẩm
+        // Nếu chưa có sản phẩm nào, chưa cho phép load đơn hàng cũ (vì sẽ không map được thông tin)
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
-        _menuProducts = snapshot.data!
+        // 2. Lấy danh sách sản phẩm ĐẦY ĐỦ
+        final allRawProducts = snapshot.data!;
+
+        // Lọc danh sách để hiển thị menu (không ảnh hưởng đến việc restore đơn)
+        _menuProducts = allRawProducts
             .where((p) => p.isVisibleInMenu == true && p.productType != 'Nguyên liệu')
             .toList();
+
+        // 3. LOGIC KHÔI PHỤC DỮ LIỆU (CHỈ CHẠY 1 LẦN)
+        if (!_isSessionRestored) {
+          _isSessionRestored = true;
+
+          debugPrint(">>> [INIT] Bắt đầu khôi phục. Số lượng sản phẩm truyền vào: ${allRawProducts.length}");
+
+          _session.loadSessionFromLocal(allRawProducts).then((_) {
+            if (_session.tabs.isEmpty) {
+              debugPrint(">>> [INIT] Không có đơn cũ, tạo đơn 1 (SAVE=FALSE)");
+              _addNewTab(forceName: "Đơn hàng 1", save: false);
+            } else {
+              debugPrint(">>> [INIT] Đã có ${_session.tabs.length} đơn.");
+            }
+            if (mounted) setState(() {});
+          });
+        }
 
         return FutureBuilder<List<ProductGroupModel>>(
           future: _firestoreService.getProductGroups(widget.currentUser.storeId),
@@ -1215,7 +1346,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
-  // --- PAYMENT VIEW (Embedded) ---
   Widget _buildPaymentView() {
     if (_currentTab == null) return const SizedBox.shrink();
     final order = _createOrderFromTab(_currentTab!);
@@ -1237,6 +1367,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         setState(() {
           _isPaymentView = false;
         });
+        _checkPaymentResult(false, _currentTab!);
       },
       onConfirmPayment: (result) {
         _checkPaymentResult(true, _currentTab!);
@@ -1246,8 +1377,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       },
     );
   }
-
-  // --- MENU WIDGETS ---
 
   Widget _buildMenuView() {
     final groupNames = ['Tất cả', ..._menuGroups.map((g) => g.name)];
@@ -1425,8 +1554,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       ),
     );
   }
-
-  // --- CART WIDGETS ---
 
   Widget _buildCartView({ScrollController? scrollController, bool showCustomerSelector = true}) {
     final tab = _currentTab;
@@ -1952,8 +2079,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       onSubmitted: _handleBarcodeScan,
     );
   }
-
-  // --- HELPERS ---
 
   void _handleBarcodeScan(String val) {
     if (val.trim().isEmpty) return;

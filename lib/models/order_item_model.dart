@@ -179,6 +179,10 @@ class OrderItem {
     if (value == null) return null;
     if (value is Timestamp) return value;
     if (value is DateTime) return Timestamp.fromDate(value);
+
+    // [MỚI] Hỗ trợ đọc từ số int (milliseconds) - Dành cho bộ nhớ máy
+    if (value is int) return Timestamp.fromMillisecondsSinceEpoch(value);
+
     if (value is String) {
       final parsedDate = DateTime.tryParse(value);
       if (parsedDate != null) return Timestamp.fromDate(parsedDate);
