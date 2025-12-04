@@ -801,7 +801,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                 children: [
                   // Tên Hàng Hóa
                   Expanded(
-                    flex: 6,
+                    flex: 5,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -833,7 +833,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                         // Thời gian: Có năm, chữ to hơn (13 -> 15)
                         Text(
                           DateFormat('HH:mm dd/MM/yyyy').format(item.date),
-                          style: const TextStyle(fontSize: 15, color: Colors.black54, fontWeight: FontWeight.w500),
+                          style: const TextStyle(fontSize: 14, color: Colors.black54),
                           textAlign: TextAlign.right,
                         ),
                         const SizedBox(height: 4),
@@ -842,8 +842,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                           child: Text(
                             item.billCode,
                             style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
                               color: AppTheme.primaryColor,
                               decorationColor: AppTheme.primaryColor,
                             ),
@@ -869,7 +868,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                     flex: 4,
                     child: Text(
                       '${formatNumber(item.quantity)} x ${formatNumber(item.price)}',
-                      style: const TextStyle(fontSize: 15, color: Colors.black87),
+                      style: const TextStyle(fontSize: 14, color: Colors.black87),
                     ),
                   ),
 
@@ -881,7 +880,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                       style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87), // Màu đen bình thường
+                          color: Colors.black87),
                       textAlign: TextAlign.right,
                     ),
                   ),
@@ -915,11 +914,11 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(DateFormat('dd/MM/yy HH:mm').format(item.date), style: const TextStyle(fontSize: 15, color: Colors.black54)),
+                Text(DateFormat('dd/MM/yy HH:mm').format(item.date), style: const TextStyle(fontSize: 14, color: Colors.black54)),
                 const SizedBox(height: 4),
                 InkWell(
                   onTap: () => _openBillDetail(item.billId),
-                  child: Text(item.billCode, style: const TextStyle(fontSize: 15, color: AppTheme.primaryColor, decorationColor: AppTheme.primaryColor)),
+                  child: Text(item.billCode, style: const TextStyle(fontSize: 14, color: AppTheme.primaryColor, decorationColor: AppTheme.primaryColor, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -946,7 +945,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
             flex: 2,
             child: Text(
               '${formatNumber(item.quantity)} x ${formatNumber(item.price)}',
-              style: const TextStyle(fontSize: 15, color: Colors.black87),
+              style: const TextStyle(fontSize: 14, color: Colors.black87),
               textAlign: TextAlign.right,
             ),
           ),
@@ -982,7 +981,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
                       item.taxGroupName.replaceAll('.', ','),
                       // ------------------------------------------------
                       style: const TextStyle(
-                          fontSize: 15, // <-- Tăng size bằng với SL/Giá (15)
+                          fontSize: 14, // <-- Tăng size bằng với SL/Giá (15)
                           color: Colors.black54
                       ),
                       textAlign: TextAlign.right

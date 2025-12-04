@@ -84,9 +84,10 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
             title: 'Bán Hàng',
             permissions: {
               'canSell': 'Thực hiện bán hàng, thanh toán',
-              'canCancelItem': 'Hủy món đã lên bếp',
-              'canGiveDiscount': 'Áp dụng giảm giá, khuyến mãi',
+              'canCancelItem': 'Hủy món đã báo chế biến',
               'canChangeTable': 'Chuyển/gộp bàn',
+              'canEditNotes': 'Quản lý ghi chú nhanh',
+              'canHuyBill': 'Hủy hóa đơn',
             },
             groupKey: 'sales',
           ),
@@ -96,10 +97,14 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
             permissions: {
               'canAddProduct': 'Thêm sản phẩm',
               'canEditProduct': 'Chỉnh sửa sản phẩm',
+              'canDeleteProduct': 'Xóa sản phẩm',
               'canEditIsVisible': 'Ẩn sản phẩm',
+              'canImportExport': 'Nhập/xuất danh sách sản phẩm',
               'canViewCost': 'Xem giá vốn',
               'canEditCost': 'Sửa giá vốn',
               'canManageProductGroups': 'Quản lý nhóm sản phẩm',
+              'canPrintLabel': 'In tem sản phẩm (Bán lẻ)',
+              'canEditTax': 'Thiết lập thuế & HĐĐT',
             },
             groupKey: 'products',
           ),
@@ -136,6 +141,18 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
           ),
           const SizedBox(height: 16),
           _buildPermissionGroup(
+            title: 'Đối tác',
+            permissions: {
+              'canViewContacts': 'Xem danh sách đối tác',
+              'canAddContacts': 'Thêm đối tác',
+              'canEditContacts': 'Sửa đối tác',
+              'canManagerGroup': 'Quản lý nhóm đối tác',
+              'canThuChi': 'Thu/trả nợ cho đối tác',
+            },
+            groupKey: 'contacts',
+          ),
+          const SizedBox(height: 16),
+          _buildPermissionGroup(
             title: 'Nhân viên',
             permissions: {
               'canViewEmployee': 'Xem danh sách Nhân viên',
@@ -149,8 +166,9 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
           _buildPermissionGroup(
             title: 'Báo Cáo',
             permissions: {
-              'canViewReport': 'Xem báo cáo doanh thu',
-              'canExportReport': 'Xuất file báo cáo',
+              'canViewSales': 'Xem báo cáo tổng quan',
+              'canViewInventory': 'Xem báo cáo tồn kho',
+              'canViewRetailLedger': 'Xem báo cáo hàng hóa bán ra',
             },
             groupKey: 'reports',
           ),

@@ -40,7 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final AuthService _authService = AuthService();
 
   UserModel? _currentUser;
-  int _selectedIndex = 0;
+  int _selectedIndex = 2;
   Future<void>? _initializationFuture;
   StreamSubscription? _userStatusSubscription;
 
@@ -48,8 +48,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canViewPromotions = false;
   bool _canViewListTable = false;
   bool _canViewEmployee = false;
-
+  bool _canPrintLabel = false;
+  bool _canEditTax = false;
   bool _isShowingTypePicker = false;
+  bool _canViewContacts = false;
 
   @override
   void initState() {
@@ -80,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (loadedUser.role != 'owner' && loadedUser.ownerUid != null) {
       final ownerProfile =
-      await _firestoreService.getUserProfile(loadedUser.ownerUid!);
+          await _firestoreService.getUserProfile(loadedUser.ownerUid!);
       if (ownerProfile != null) {
         loadedUser =
             loadedUser.copyWith(businessType: ownerProfile.businessType);
@@ -127,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _authService.signOut().then((_) {
             navigator.pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => const AuthGate()),
-                    (route) => false);
+                (route) => false);
           });
           return;
         }
@@ -142,7 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _authService.signOut().then((_) {
               navigator.pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const AuthGate()),
-                      (route) => false);
+                  (route) => false);
             });
           });
           return;
@@ -153,25 +155,34 @@ class _HomeScreenState extends State<HomeScreen> {
           _canViewPromotions = true;
           _canViewListTable = true;
           _canViewEmployee = true;
+          _canPrintLabel = true;
+          _canEditTax = true;
+          _canViewContacts = true;
         } else {
           _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']
-          ?['canViewPurchaseOrder'] ??
+                  ?['canViewPurchaseOrder'] ??
               false;
-          _canViewPromotions = userProfile
-              .permissions?['promotions']?['canViewPromotions'] ??
+          _canViewPromotions = userProfile.permissions?['promotions']
+                  ?['canViewPromotions'] ??
               false;
           _canViewListTable = userProfile.permissions?['listTable']
-          ?['canViewListTable'] ??
+                  ?['canViewListTable'] ??
               false;
           _canViewEmployee =
               userProfile.permissions?['employee']?['canViewEmployee'] ?? false;
+          _canPrintLabel =
+              userProfile.permissions?['products']?['canPrintLabel'] ?? false;
+          _canEditTax =
+              userProfile.permissions?['products']?['canEditTax'] ?? false;
+          _canViewContacts =
+              userProfile.permissions?['contacts']?['canViewContacts'] ?? false;
         }
 
         if (mounted) {
           setState(() {
             _currentUser = userProfile.copyWith(
               businessType:
-              userProfile.businessType ?? _currentUser?.businessType,
+                  userProfile.businessType ?? _currentUser?.businessType,
             );
           });
           _checkAndShowBusinessTypePicker();
@@ -214,6 +225,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onItemTapped(int index) {
+    // [MỚI] Kiểm tra quyền truy cập Tab "Đơn hàng" (Index = 2)
+    if (index == 1) {
+      if (_currentUser?.role == 'order') {
+        ToastService().show(
+          message: 'Bạn không có quyền truy cập lịch sử Đơn hàng.',
+          type: ToastType.warning,
+        );
+        return; // Dừng lại, không chuyển tab
+      }
+    }
+
+    // Nếu thỏa mãn điều kiện thì mới chuyển tab
     setState(() {
       _selectedIndex = index;
     });
@@ -224,209 +247,209 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
+    // [CẤU TRÚC MỚI]: 0:Sản phẩm, 1:Đơn hàng, 2:Bán hàng, 3:Báo cáo, 4:Khác
     switch (_selectedIndex) {
-      case 0:
-      // [SỬA ĐỔI QUAN TRỌNG]
-      // Bất kể là Owner hay Employee:
-      // - Nếu F&B -> TableSelectionScreen
-      // - Nếu Retail -> RetailOrderScreen (Màn hình bán hàng luôn là mặc định)
+      case 0: // Vị trí 1 cũ -> Giờ là Sản phẩm
+        return ProductListScreen(currentUser: _currentUser!);
+      case 1: // Vị trí 2 cũ -> Giờ là Đơn hàng
+        return BillHistoryScreen(currentUser: _currentUser!);
+      case 2: // Vị trí 0 cũ -> Giờ là Bán hàng (Ở Giữa)
         if (_currentUser!.businessType == 'fnb') {
           return TableSelectionScreen(currentUser: _currentUser!);
         } else {
-          // Luôn trả về màn hình bán hàng cho Retail
           return RetailOrderScreen(currentUser: _currentUser!);
         }
-      case 1:
-        return ProductListScreen(currentUser: _currentUser!);
-      case 2:
-        return BillHistoryScreen(currentUser: _currentUser!);
       case 3:
-      // Owner muốn xem Tổng quan thì vào Báo cáo hoặc Dashboard ở đây
-      // (Nếu bạn muốn Tab 3 là Dashboard cho Owner thì sửa ở đây, hiện tại để mặc định là Report)
         return ReportScreen(currentUser: _currentUser!);
       case 4:
         return Scaffold(
           appBar: AppBar(title: const Text('Khác')),
           body: ListView(
             children: [
-              // Menu items giữ nguyên...
-              ListTile(
-                leading: const Icon(Icons.add_business_outlined),
-                title: const Text('Quản lý nhập hàng'),
-                onTap: () {
-                  if (_currentUser != null && _canViewPurchaseOrder) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => PurchaseOrdersListScreen(
-                              currentUser: _currentUser!)),
-                    );
-                  } else {
-                    ToastService().show(
-                        message:
-                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                        type: ToastType.warning);
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.print_outlined),
-                title: const Text('In tem sản phẩm'),
-                onTap: () {
-                  if (_currentUser != null) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => ProductLabelPrintScreen(
-                              currentUser: _currentUser!)),
-                    );
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.sell_outlined),
-                title: const Text('Chương trình khuyến mãi'),
-                onTap: () {
-                  if (_currentUser != null && _canViewPromotions) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) =>
-                              PromotionsScreen(currentUser: _currentUser!)),
-                    );
-                  } else {
-                    ToastService().show(
-                        message:
-                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                        type: ToastType.warning);
-                  }
-                },
-              ),
-              if (_currentUser?.businessType == 'fnb')
+              // [MỚI] Nếu là role 'order', ẨN HẾT các mục quản lý
+              if (_currentUser?.role != 'order') ...[
                 ListTile(
-                  leading: const Icon(Icons.chair_outlined),
-                  title: const Text('Quản lý phòng bàn'),
+                  leading: const Icon(Icons.add_business_outlined),
+                  title: const Text('Quản lý nhập hàng'),
                   onTap: () {
-                    if (_currentUser != null && _canViewListTable) {
+                    if (_currentUser != null && _canViewPurchaseOrder) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => PurchaseOrdersListScreen(
+                                currentUser: _currentUser!)),
+                      );
+                    } else {
+                      ToastService().show(
+                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          type: ToastType.warning);
+                    }
+                  },
+                ),
+                if (_currentUser?.businessType == 'retail')
+                  ListTile(
+                    leading: const Icon(Icons.print_outlined),
+                    title: const Text('In tem sản phẩm'),
+                    onTap: () {
+                      if (_currentUser != null && _canPrintLabel) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => ProductLabelPrintScreen(
+                                  currentUser: _currentUser!)),
+                        );
+                      } else {
+                        ToastService().show(
+                            message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                            type: ToastType.warning);
+                      }
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.sell_outlined),
+                  title: const Text('Chương trình khuyến mãi'),
+                  onTap: () {
+                    if (_currentUser != null && _canViewPromotions) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) =>
+                                PromotionsScreen(currentUser: _currentUser!)),
+                      );
+                    } else {
+                      ToastService().show(
+                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          type: ToastType.warning);
+                    }
+                  },
+                ),
+                if (_currentUser?.businessType == 'fnb') ...[
+                  ListTile(
+                    leading: const Icon(Icons.chair_outlined),
+                    title: const Text('Quản lý phòng bàn'),
+                    onTap: () {
+                      if (_currentUser != null && _canViewListTable) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => TableListScreen(
+                              currentUser: _currentUser!,
+                            ),
+                          ),
+                        );
+                      } else {
+                        ToastService().show(
+                            message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                            type: ToastType.warning);
+                      }
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.qr_code_2_outlined),
+                    title: const Text('Quản lý QR Order'),
+                    onTap: () {
+                      if (_currentUser != null && _canViewListTable) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => QrOrderManagementScreen(
+                              currentUser: _currentUser!,
+                            ),
+                          ),
+                        );
+                      } else {
+                        ToastService().show(
+                            message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                            type: ToastType.warning);
+                      }
+                    },
+                  ),
+                ],
+                ListTile(
+                  leading: const Icon(Icons.people_alt_outlined),
+                  title: const Text('Quản lý nhân viên'),
+                  onTap: () {
+                    if (_currentUser != null && _canViewEmployee) {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (context) => TableListScreen(
+                          builder: (context) => EmployeeManagementScreen(
                             currentUser: _currentUser!,
                           ),
                         ),
                       );
                     } else {
                       ToastService().show(
-                          message:
-                          'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
                 ),
-              ListTile(
-                leading: const Icon(Icons.people_alt_outlined),
-                title: const Text('Quản lý nhân viên'),
-                onTap: () {
-                  if (_currentUser != null && _canViewEmployee) {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => EmployeeManagementScreen(
-                          currentUser: _currentUser!,
+                ListTile(
+                  leading: const Icon(Icons.business_center_outlined),
+                  title: const Text('Quản lý đối tác'),
+                  onTap: () {
+                    if (_currentUser != null && _canViewContacts) {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => ContactsScreen(
+                            currentUser: _currentUser!,
+                          ),
                         ),
-                      ),
-                    );
-                  } else {
-                    ToastService().show(
-                        message:
-                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                        type: ToastType.warning);
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.business_center_outlined),
-                title: const Text('Quản lý đối tác'),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => ContactsScreen(
-                        currentUser: _currentUser!,
-                      ),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.payment_outlined),
-                title: const Text('Phương thức thanh toán'),
-                onTap: () {
-                  if (_currentUser != null) {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (context) =>
-                          PaymentMethodsScreen(currentUser: _currentUser!),
-                    ));
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.qr_code_2_outlined),
-                title: const Text('Quản lý QR Order'),
-                onTap: () {
-                  if (_currentUser != null && _canViewListTable) {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => QrOrderManagementScreen(
-                          currentUser: _currentUser!,
-                        ),
-                      ),
-                    );
-                  } else {
-                    ToastService().show(
-                        message:
-                        'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                        type: ToastType.warning);
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.calculate_outlined),
-                title: const Text('Thuế & Kê khai'),
-                onTap: () {
-                  if (_currentUser != null) {
-                    if (_currentUser!.role == 'owner') {
+                      );
+                    } else {
+                      ToastService().show(
+                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          type: ToastType.warning);
+                    }
+                  },
+                ),
+                if (_currentUser!.role == 'owner')
+                  ListTile(
+                    leading: const Icon(Icons.payment_outlined),
+                    title: const Text('Phương thức thanh toán'),
+                    onTap: () {
+                      if (_currentUser != null) {
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (context) =>
+                              PaymentMethodsScreen(currentUser: _currentUser!),
+                        ));
+                      }
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.calculate_outlined),
+                  title: const Text('Thuế & Kê khai'),
+                  onTap: () {
+                    if (_currentUser != null && _canEditTax) {
                       Navigator.of(context).push(MaterialPageRoute(
                         builder: (context) =>
                             TaxManagementScreen(currentUser: _currentUser!),
                       ));
                     } else {
                       ToastService().show(
-                          message:
-                          'Chỉ chủ sở hữu mới có thể truy cập mục này.',
+                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.receipt_long_outlined),
-                title: const Text('Kết nối HĐĐT'),
-                onTap: () {
-                  if (_currentUser != null) {
-                    if (_currentUser!.role == 'owner') {
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.receipt_long_outlined),
+                  title: const Text('Kết nối HĐĐT'),
+                  onTap: () {
+                    if (_currentUser != null && _canEditTax) {
                       Navigator.of(context).push(MaterialPageRoute(
-                        builder: (context) => EInvoiceSettingsScreen(
-                            currentUser: _currentUser!),
+                        builder: (context) =>
+                            EInvoiceSettingsScreen(currentUser: _currentUser!),
                       ));
                     } else {
                       ToastService().show(
-                          message:
-                          'Chỉ chủ sở hữu mới có thể truy cập mục này.',
+                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
-                  }
-                },
-              ),
-              const Divider(height: 4, thickness: 0.5, color: Colors.grey),
+                  },
+                ),
+                const Divider(height: 4, thickness: 0.5, color: Colors.grey),
+              ], // --- HẾT PHẦN ẨN ---
+
+              // Hai mục này LUÔN HIỆN cho tất cả role
               ListTile(
                 leading: const Icon(Icons.settings_outlined),
                 title: const Text('Cài đặt'),
@@ -461,7 +484,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       default:
-        return ProductListScreen(currentUser: _currentUser!);
+      // Default trả về Bán hàng để an toàn
+        if (_currentUser!.businessType == 'fnb') {
+          return TableSelectionScreen(currentUser: _currentUser!);
+        } else {
+          return RetailOrderScreen(currentUser: _currentUser!);
+        }
     }
   }
 
@@ -510,22 +538,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   size: 40, color: Theme.of(context).primaryColor),
             ),
             destinations: const <NavigationRailDestination>[
-              NavigationRailDestination(
-                  icon: Icon(Icons.add_shopping_cart_outlined),
-                  selectedIcon: Icon(Icons.add_shopping_cart),
-                  label: Text('Bán hàng')), // Luôn hiển thị là Bán hàng
+              // Index 0: Sản phẩm
               NavigationRailDestination(
                   icon: Icon(Icons.inventory_2),
                   selectedIcon: Icon(Icons.inventory_2_outlined),
                   label: Text('Sản phẩm')),
+              // Index 1: Đơn hàng
               NavigationRailDestination(
                   icon: Icon(Icons.receipt_long_outlined),
                   selectedIcon: Icon(Icons.receipt_long),
                   label: Text('Đơn hàng')),
+              // Index 2: Bán hàng (Ở giữa)
+              NavigationRailDestination(
+                  icon: Icon(Icons.add_shopping_cart_outlined),
+                  selectedIcon: Icon(Icons.add_shopping_cart),
+                  label: Text('Bán hàng')),
+              // Index 3: Báo cáo
               NavigationRailDestination(
                   icon: Icon(Icons.bar_chart_outlined),
                   selectedIcon: Icon(Icons.bar_chart),
                   label: Text('Báo cáo')),
+              // Index 4: Khác
               NavigationRailDestination(
                   icon: Icon(Icons.more_horiz_outlined),
                   selectedIcon: Icon(Icons.more_horiz),
@@ -545,22 +578,27 @@ class _HomeScreenState extends State<HomeScreen> {
       body: _buildCurrentPage(),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-              icon: Icon(Icons.add_shopping_cart_outlined),
-              activeIcon: Icon(Icons.add_shopping_cart),
-              label: 'Bán hàng'), // Luôn hiển thị là Bán hàng
+          // Index 0: Sản phẩm
           BottomNavigationBarItem(
               icon: Icon(Icons.inventory_2_outlined),
               activeIcon: Icon(Icons.inventory_2),
               label: 'Sản phẩm'),
+          // Index 1: Đơn hàng
           BottomNavigationBarItem(
               icon: Icon(Icons.receipt_long_outlined),
               activeIcon: Icon(Icons.receipt_long),
               label: 'Đơn hàng'),
+          // Index 2: Bán hàng (Ở giữa) - Có thể làm icon to hơn hoặc màu khác nếu muốn
+          BottomNavigationBarItem(
+              icon: Icon(Icons.add_shopping_cart_outlined),
+              activeIcon: Icon(Icons.add_shopping_cart),
+              label: 'Bán hàng'),
+          // Index 3: Báo cáo
           BottomNavigationBarItem(
               icon: Icon(Icons.bar_chart_outlined),
               activeIcon: Icon(Icons.bar_chart),
               label: 'Báo cáo'),
+          // Index 4: Khác
           BottomNavigationBarItem(
               icon: Icon(Icons.more_horiz_outlined),
               activeIcon: Icon(Icons.more_horiz),
@@ -592,7 +630,7 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title:
-      const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
+          const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -619,24 +657,24 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
           onPressed: (_selectedType == null || _isUpdating)
               ? null
               : () async {
-            setState(() {
-              _isUpdating = true;
-            });
+                  setState(() {
+                    _isUpdating = true;
+                  });
 
-            await widget.onConfirm(_selectedType!);
+                  await widget.onConfirm(_selectedType!);
 
-            if (mounted) {
-              setState(() {
-                _isUpdating = false;
-              });
-            }
-          },
+                  if (mounted) {
+                    setState(() {
+                      _isUpdating = false;
+                    });
+                  }
+                },
           child: _isUpdating
               ? const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('Xác nhận'),
         ),
       ],
@@ -670,7 +708,7 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
             Text(title,
                 style: TextStyle(
                     fontWeight:
-                    isSelected ? FontWeight.bold : FontWeight.normal)),
+                        isSelected ? FontWeight.bold : FontWeight.normal)),
           ],
         ),
       ),

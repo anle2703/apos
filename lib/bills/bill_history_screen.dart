@@ -389,15 +389,14 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
   final List<String> _debtOptions = ['Tất cả', 'Có', 'Không'];
   StreamSubscription<StoreSettings>? _settingsSub;
 
+
   @override
   void initState() {
     super.initState();
     _storeInfoFuture = FirestoreService().getStoreDetails(widget.currentUser.storeId);
 
-    // --- LẮNG NGHE CÀI ĐẶT ---
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
-    // Đảm bảo SettingsService() có dấu ngoặc ()
     _settingsSub = SettingsService().watchStoreSettings(settingsId).listen((settings) {
       if (!mounted) return;
 
@@ -408,7 +407,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
 
       if (newCutoff != _reportCutoffTime) {
         setState(() {
-          _reportCutoffTime = newCutoff; // Bây giờ dòng này sẽ hết lỗi
+          _reportCutoffTime = newCutoff;
           _updateDateRange();
           _updateBillsStream();
         });
@@ -425,7 +424,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     _settingsSub?.cancel(); // <--- THÊM DÒNG NÀY
     super.dispose();
   }
-  // --- COPY HÀM TÍNH NGÀY TỪ FILE MẪU ---
+
   void _updateDateRange() {
     if (_selectedRange == TimeRange.custom) {
       if (_selectedStartDate == null || _selectedEndDate == null) {
@@ -505,7 +504,6 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     }
   }
 
-  // Hàm phụ trợ để chọn ngày Custom
   Future<List<DateTime>?> _selectCustomDateTimeRange(DateTime? initialStart, DateTime? initialEnd) async {
     return await showOmniDateTimeRangePicker(
       context: context,
@@ -978,10 +976,16 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   ReceiptTemplateModel? _templateSettings;
 
   bool get _isDesktop => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  bool _canHuyBill = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.currentUser.role == 'owner') {
+      _canHuyBill = true;
+    } else {
+      _canHuyBill = widget.currentUser.permissions?['sales']?['canHuyBill'] ?? false;
+    }
   }
 
 
@@ -1233,8 +1237,8 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 400, // Giới hạn chiều rộng Dialog
-          maxHeight: screenHeight * 0.85,
+          maxWidth: 350,
+          maxHeight: screenHeight * 0.9,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1268,9 +1272,8 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
               ),
             ),
             const SizedBox(height: 12),
-            // ... (Phần nút bấm giữ nguyên)
             Container(
-              width: 400, // Đồng bộ width với Dialog
+              width: 350, // Đồng bộ width với Dialog
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12.0)),
               padding: const EdgeInsets.symmetric(vertical: 4.0),
               child: Row(
@@ -1282,17 +1285,18 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
                       child: const Text("Xóa bill", style: TextStyle(color: Colors.red)),
                     )
                   else
+                    if (_canHuyBill)
                     TextButton(
                       onPressed: () => _handleCancel(context),
-                      child: const Text("Hủy bill", style: TextStyle(color: Colors.red)),
+                      child: const Text("Hủy", style: TextStyle(color: Colors.red)),
                     ),
                   TextButton(
                     onPressed: _reprintReceipt,
-                    child: const Text("In lại"),
+                    child: const Text("In"),
                   ),
                   TextButton(
                     onPressed: _isDesktop ? _savePdf : _shareReceipt,
-                    child: Text(_isDesktop ? "Lưu PDF" : "Chia sẻ"),
+                    child: Text(_isDesktop ? "Lưu" : "Chia sẻ"),
                   ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),

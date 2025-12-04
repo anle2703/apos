@@ -337,7 +337,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   late final TextEditingController _voucherController;
   late final TextEditingController _pointsController;
   late final TextEditingController _cashInputController;
-
+  final Map<String, TextEditingController> _paymentControllers = {};
   static Map<String, dynamic>? _cachedStoreTaxSettings;
   static List<PaymentMethodModel>? _cachedPaymentMethods;
   static double? _cachedEarnRate;
@@ -742,19 +742,22 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   void _addListeners() {
-    _discountController.addListener(_onInputChanged);
-    _pointsController.addListener(_onInputChanged);
+    // Chiết khấu & Điểm thay đổi -> Cần Sync lại số tiền thanh toán (TRUE)
+    _discountController.addListener(_onStructureChanged);
+    _pointsController.addListener(_onStructureChanged);
+
+    // Nhập tiền mặt -> KHÔNG Sync, giữ nguyên số nhập (FALSE)
     _cashInputController.addListener(_onCashInputChanged);
+
     _voucherController.addListener(() {
       if (_voucherDebounce?.isActive ?? false) _voucherDebounce!.cancel();
-      _voucherDebounce =
-          Timer(const Duration(milliseconds: 800), _applyVoucher);
+      _voucherDebounce = Timer(const Duration(milliseconds: 800), _applyVoucher);
     });
   }
 
-  void _onInputChanged() {
+  void _onStructureChanged() {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 150), _calculateTotal);
+    _debounce = Timer(const Duration(milliseconds: 150), () => _calculateTotal(syncPayment: true));
   }
 
   void _onCashInputChanged() {
@@ -762,8 +765,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final cashAmount = parseVN(_cashInputController.text);
       _paymentAmounts[_cashMethod!.id] = cashAmount;
     }
-
-    _onInputChanged();
+    // Gọi tính toán nhưng KHÔNG sync lại tiền
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 150), () => _calculateTotal(syncPayment: false));
   }
 
   @override
@@ -774,6 +778,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     _cashInputController.dispose();
     _debounce?.cancel();
     _voucherDebounce?.cancel();
+    for (var controller in _paymentControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -786,7 +793,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _appliedVoucher = null;
           _voucherDiscountValue = 0;
         });
-        _calculateTotal();
+        _calculateTotal(syncPayment: true);
       }
       return;
     }
@@ -841,7 +848,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             type: ToastType.error);
       }
     }
-    _calculateTotal();
+    _calculateTotal(syncPayment: true);
   }
 
   double _calculateDiscount() {
@@ -903,10 +910,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     return (totalTax.roundToDouble(), 0.0);
   }
 
-  void _calculateTotal({bool initialLoad = false}) {
+  void _calculateTotal({bool initialLoad = false, bool syncPayment = false}) {
     if (!initialLoad && (!_settingsLoaded || !_methodsLoaded)) return;
 
-    // 1. Tính tổng các loại chiết khấu/giảm giá áp dụng cho giá trị hàng hóa
     final discountAmount = _calculateDiscount();
     final int maxPoints = widget.customer?.points ?? 0;
 
@@ -919,46 +925,48 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     }
 
     final double pointsValue = pointsUsed * _redeemRate;
+    final double totalDistributableDiscount = discountAmount + pointsValue + _voucherDiscountValue;
 
-    // Tổng chiết khấu CẦN PHÂN BỔ (Chiết khấu nhập tay + Điểm + Voucher)
-    final double totalDistributableDiscount =
-        discountAmount + pointsValue + _voucherDiscountValue;
-
-    // 2. Tính thuế dựa trên tổng chiết khấu cần phân bổ
-    final (newVatAmount, newTncnAmount) =
-        _getCalculatedTaxes(totalDistributableDiscount);
+    final (newVatAmount, newTncnAmount) = _getCalculatedTaxes(totalDistributableDiscount);
 
     final subtotal = widget.subtotal;
     final totalSurcharge = _calculateTotalSurcharge();
-
-    // 3. Tính tổng tiền phải trả:
-    // (Giá trị hàng hóa TRƯỚC THUẾ) - (Tổng Chiết Khấu) + (Phụ Thu) + (Tổng Thuế Mới)
     final double finalTotalBase = subtotal - totalDistributableDiscount;
     final double taxToAdd = newVatAmount + newTncnAmount;
     final double finalTotal = finalTotalBase + totalSurcharge + taxToAdd;
 
     final newTotalPayable = finalTotal > 0 ? finalTotal.roundToDouble() : 0.0;
 
-    if (!initialLoad && _selectedMethodIds.length == 1) {
+    // [QUAN TRỌNG] Chỉ tự động gán tiền nếu có lệnh syncPayment
+    if (syncPayment && !initialLoad && _selectedMethodIds.length == 1) {
       final methodId = _selectedMethodIds.first;
       final method = _availableMethods.firstWhere((m) => m.id == methodId,
           orElse: () => _cashMethod!);
 
-      // Điều kiện cập nhật: Không phải tiền mặt HOẶC (Là tiền mặt nhưng không bắt nhập tay)
-      bool shouldAutoSync =
-          method.type != PaymentMethodType.cash || !widget.promptForCash;
+      bool shouldAutoSync = method.type != PaymentMethodType.cash || !widget.promptForCash;
 
       if (shouldAutoSync) {
         _paymentAmounts[methodId] = newTotalPayable;
+        final newText = formatNumber(newTotalPayable); // Format tiền
 
-        // Nếu là tiền mặt (trường hợp promptForCash = false), update luôn Controller
+        // 1. Xử lý Tiền mặt (Giữ nguyên logic cũ)
         if (method.type == PaymentMethodType.cash) {
-          final newText = formatNumber(newTotalPayable);
-          // Chỉ update text nếu giá trị thực sự thay đổi để tránh loop
           if (_cashInputController.text != newText) {
             _cashInputController.removeListener(_onCashInputChanged);
             _cashInputController.text = newText;
             _cashInputController.addListener(_onCashInputChanged);
+          }
+        }
+        // 2. [MỚI] Xử lý các PTTT khác (Bank, Ví...)
+        else {
+          if (_paymentControllers.containsKey(methodId)) {
+            final controller = _paymentControllers[methodId]!;
+            if (controller.text != newText) {
+              // Cập nhật text hiển thị mà không trigger sự kiện onChanged
+              // (Do onChanged của CustomTextFormField thường ko gán listener trực tiếp như Native)
+              // Nhưng ở đây ta chỉ cần set text là đủ.
+              controller.text = newText;
+            }
           }
         }
       }
@@ -968,8 +976,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     double newDebt = newTotalPayable;
 
     if (!initialLoad) {
-      final double totalPaid =
-          _paymentAmounts.values.fold(0.0, (a, b) => a + b);
+      final double totalPaid = _paymentAmounts.values.fold(0.0, (a, b) => a + b);
       final double cashPaid = _paymentAmounts[_cashMethod!.id] ?? 0.0;
       final double otherPayments = totalPaid - cashPaid;
 
@@ -1897,7 +1904,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             onChanged: (val) {
                               setState(() {
                                 _isDiscountPercent = val ?? false;
-                                _calculateTotal();
+                                _calculateTotal(syncPayment: true);
                               });
                             },
                           ),
@@ -2130,27 +2137,40 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           );
         }
 
-        // --- XỬ LÝ CÁC PHƯƠNG THỨC KHÁC (SỬA Ở ĐÂY) ---
+        // --- XỬ LÝ CÁC PHƯƠNG THỨC KHÁC (SỬA ĐỔI) ---
+
+        // 1. Khởi tạo Controller nếu chưa có
+        if (!_paymentControllers.containsKey(method.id)) {
+          _paymentControllers[method.id] = TextEditingController(
+              text: formatNumber(_paymentAmounts[method.id] ?? 0)
+          );
+        }
+
+        // [QUAN TRỌNG] Dòng này để sửa lỗi "Undefined name 'controller'"
+        final controller = _paymentControllers[method.id];
+
         return Padding(
           padding: const EdgeInsets.only(top: 12.0),
           child: CustomTextFormField(
-            // === KEY CHANGE: Thêm số tiền vào key để ép render lại khi tiền thay đổi ===
-            key: ValueKey('${method.id}_${_paymentAmounts[method.id]}'),
+            // Key phải cố định theo ID
+            key: ValueKey(method.id),
 
-            initialValue: formatNumber(_paymentAmounts[method.id] ?? 0),
+            // Controller đã được khai báo ở trên
+            controller: controller,
+
             decoration: InputDecoration(
               labelText: method.name,
               prefixIcon: Icon(_getIconForMethodType(method.type)),
               suffixIcon: (method.type == PaymentMethodType.bank &&
-                      method.qrDisplayOnScreen)
+                  method.qrDisplayOnScreen)
                   ? _confirmedBankMethods.contains(method.id)
-                      ? const Icon(Icons.check_circle, color: Colors.green)
-                      : IconButton(
-                          icon: const Icon(Icons.qr_code_scanner_outlined,
-                              color: AppTheme.primaryColor),
-                          onPressed: () => _showQrPopup(method),
-                          tooltip: 'Quét QR',
-                        )
+                  ? const Icon(Icons.check_circle, color: Colors.green)
+                  : IconButton(
+                icon: const Icon(Icons.qr_code_scanner_outlined,
+                    color: AppTheme.primaryColor),
+                onPressed: () => _showQrPopup(method),
+                tooltip: 'Quét QR',
+              )
                   : null,
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -2163,13 +2183,20 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                   _confirmedBankMethods.remove(method.id);
                 });
               }
-              // Gọi debounce
-              _onInputChanged();
+              // Gọi hàm tính toán không sync
+              _onPaymentInputChanged();
             },
           ),
         );
       }).toList(),
     );
+  }
+
+  // Thêm hàm này vào class _PaymentPanelState
+  void _onPaymentInputChanged() {
+    // Chỉ dùng để trigger tính lại dư nợ, KHÔNG gán lại giá trị ô nhập (syncPayment: false)
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 150), () => _calculateTotal(syncPayment: false));
   }
 
   Widget _buildSurchargeInputs() {
@@ -2181,7 +2208,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           setState(() {
             _surcharges
                 .add(SurchargeItem(name: '', amount: 0, isPercent: false));
-            _calculateTotal();
+            _calculateTotal(syncPayment: true);
           });
         },
       );
@@ -2226,7 +2253,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                           onChanged: (val) {
                             setState(() {
                               item.isPercent = val ?? false;
-                              _calculateTotal();
+                              _calculateTotal(syncPayment: true);
                             });
                           },
                         ),
@@ -2249,7 +2276,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             final parsed = parseVN(val).toDouble();
                             setState(() {
                               item.amount = parsed;
-                              _calculateTotal();
+                              _calculateTotal(syncPayment: true);
                             });
                           },
                         ),
@@ -2260,7 +2287,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                         onPressed: () {
                           setState(() {
                             _surcharges.removeAt(index);
-                            _calculateTotal();
+                            _calculateTotal(syncPayment: true);
                           });
                         },
                       ),
@@ -2290,7 +2317,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             onPressed: () {
                               setState(() {
                                 _surcharges.removeAt(index);
-                                _calculateTotal();
+                                _calculateTotal(syncPayment: true);
                               });
                             },
                           ),
@@ -2312,7 +2339,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                               onChanged: (val) {
                                 setState(() {
                                   item.isPercent = val ?? false;
-                                  _calculateTotal();
+                                  _calculateTotal(syncPayment: true);
                                 });
                               },
                             ),
@@ -2333,7 +2360,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                                 final parsed = parseVN(val).toDouble();
                                 setState(() {
                                   item.amount = parsed;
-                                  _calculateTotal();
+                                  _calculateTotal(syncPayment: true);
                                 });
                               },
                             ),
@@ -2354,7 +2381,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             setState(() {
               _surcharges
                   .add(SurchargeItem(name: '', amount: 0, isPercent: false));
-              _calculateTotal();
+              _calculateTotal(syncPayment: true);
             });
           },
         ),
@@ -2609,37 +2636,40 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   double _calculateTotalProfit() {
-    double totalProfit = 0;
+    // 1. Tính TỔNG GIÁ VỐN (Total COGS)
+    double totalCost = 0.0;
+
     for (final itemMap in widget.order.items) {
       final product = itemMap['product'] as Map<String, dynamic>? ?? {};
-      final costPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
-      final salePrice = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
-      final quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+      final double costPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
       final isTimeBased = product['serviceSetup']?['isTimeBased'] == true;
 
       if (isTimeBased) {
-        // --- LOGIC MỚI CHO DỊCH VỤ TÍNH GIỜ ---
-        // Với dịch vụ tính giờ: quantity luôn là 1, salePrice là Tổng thành tiền.
-        // Ta tính giá vốn dựa trên tỷ lệ (Giá vốn gốc / Giá bán gốc)
-
-        final baseSellPrice = (product['sellPrice'] as num?)?.toDouble() ?? 0.0;
+        // Với dịch vụ: Tính giá vốn theo tỷ lệ nếu có giá bán gốc, hoặc = 0
+        final double sellPrice = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
+        final double baseSellPrice = (product['sellPrice'] as num?)?.toDouble() ?? 0.0;
 
         if (baseSellPrice > 0) {
-          // 1. Tính chi phí ước tính = Thành tiền * (Giá vốn / Giá bán)
-          final estimatedTotalCost = salePrice * (costPrice / baseSellPrice);
-
-          // 2. Lợi nhuận = Thành tiền - Chi phí
-          totalProfit += salePrice - estimatedTotalCost;
-        } else {
-          // Nếu không có giá bán gốc, tạm tính lợi nhuận = doanh thu (hoặc 0 tùy bạn chọn)
-          totalProfit += salePrice;
+          totalCost += sellPrice * (costPrice / baseSellPrice);
         }
       } else {
-        // Logic cũ cho sản phẩm thường
-        totalProfit += (salePrice - costPrice) * quantity;
+        // Hàng hóa thường: Giá vốn * Số lượng
+        final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+        totalCost += costPrice * quantity;
       }
     }
-    return totalProfit;
+
+    // 2. Tính TỔNG GIẢM GIÁ CẤP HÓA ĐƠN
+    final double totalBillDiscount = _calculateDiscount() +
+        _voucherDiscountValue +
+        _pointsMonetaryValue;
+
+    // 3. Tính DOANH THU THUẦN (Net Revenue) từ hàng hóa
+    // widget.subtotal: Là tổng tiền hàng (đã trừ giảm giá từng món, chưa gồm thuế/phụ thu)
+    final double netRevenue = widget.subtotal - totalBillDiscount;
+
+    // 4. Lợi nhuận = Doanh thu thuần - Tổng giá vốn
+    return netRevenue - totalCost;
   }
 }
 

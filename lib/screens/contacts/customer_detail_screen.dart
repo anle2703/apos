@@ -47,12 +47,25 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   List<CustomerTransaction> _transactions = [];
   bool _isLoading = true;
   Map<String, String>? _storeInfo;
+  bool _canEditContacts = false;
+  bool _canThuChi = false;
 
   @override
   void initState() {
     super.initState();
     _loadAllData();
     _loadStoreInfo();
+    if (widget.currentUser.role == 'owner') {
+      _canEditContacts = true;
+      _canThuChi = true;
+    } else {
+      _canEditContacts = widget.currentUser.permissions?['contacts']
+      ?['canEditContacts'] ??
+          false;
+      _canThuChi = widget.currentUser.permissions?['contacts']
+      ?['canThuChi'] ??
+          false;
+    }
   }
 
   Future<void> _loadStoreInfo() async {
@@ -190,6 +203,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       appBar: AppBar(
         title: Text(_customer?.name ?? 'Chi tiết khách hàng'),
         actions: [
+          if (_canThuChi)
           IconButton(
             icon: const Icon(Icons.add_circle_outlined, color: AppTheme.primaryColor, size: 30),
             tooltip: 'Tạo phiếu thu nợ',
@@ -207,12 +221,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               }
             },
           ),
+          if (_canEditContacts) ...[
           IconButton(
             icon: const Icon(Icons.edit_outlined, color: AppTheme.primaryColor, size: 30,),
             onPressed: _customer == null ? null : _showEditCustomerDialog,
             tooltip: 'Chỉnh sửa thông tin',
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 8),],
         ],
       ),
       body: _isLoading

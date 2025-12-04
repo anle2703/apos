@@ -250,7 +250,7 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
       final poQuery = db
           .collection('purchase_orders')
           .where('storeId', isEqualTo: storeId)
-          .where('status', whereIn: ['Hoàn thành', 'Chưa thanh toán đủ'])
+          .where('status', whereIn: ['Hoàn thành', 'Nợ'])
           .where('createdAt', isGreaterThanOrEqualTo: _startDate)
           .where('createdAt', isLessThanOrEqualTo: _endDate)
           .orderBy('createdAt')

@@ -1,4 +1,4 @@
-// ===== THAY THẾ TOÀN BỘ TỆP CLOUD FUNCTION (v10.3 - Thêm totalBillDiscount) =====
+// index.ts
 
 import {
   onDocumentCreated,
@@ -15,16 +15,47 @@ const db = admin.firestore();
 setGlobalOptions({ region: "asia-southeast1" });
 
 // ============================================================================
-// HÀM TRỢ GIÚP: LẤY NGÀY BÁO CÁO (v7.1 - Giữ nguyên)
+// ĐỊNH NGHĨA TYPES
+// ============================================================================
+
+type IncrementPayload = {
+  billCount?: number;
+  totalRevenue?: number;
+  totalProfit?: number;
+  totalDebt?: number;
+  totalDiscount?: number;
+  totalBillDiscount?: number;
+  totalVoucherDiscount?: number;
+  totalPointsValue?: number;
+  totalTax?: number;
+  totalSurcharges?: number;
+  totalCash?: number;
+  totalOtherPayments?: number;
+  totalOtherRevenue?: number;
+  totalOtherExpense?: number;
+  paymentMethods?: Record<string, number>; // <-- Map lưu chi tiết thanh toán
+};
+
+type ProductSaleData = {
+  id: string;
+  name: string;
+  group: string;
+  qty: number;
+  revenue: number;
+  discount: number;
+};
+
+// ============================================================================
+// HÀM TRỢ GIÚP: LẤY NGÀY BÁO CÁO
 // ============================================================================
 async function getReportDateInfoMoment(billData: {
   storeId: string,
   createdByUid: string,
   createdAt: admin.firestore.Timestamp,
 }): Promise<{
-  reportDateForTimestamp: Date; // 00:00 UTC
-  reportDateString: string; // YYYY-MM-DD
-  reportDayStartTimestamp: admin.firestore.Timestamp; // Giờ chốt sổ (Local)
+  reportDateForTimestamp: Date;
+  reportDateString: string;
+  reportDayStartTimestamp: admin.firestore.Timestamp;
 }> {
   const storeId = billData.storeId as string;
   const createdByUid = billData.createdByUid as string;
@@ -34,6 +65,7 @@ async function getReportDateInfoMoment(billData: {
   let cutoffHour = 0;
   let cutoffMinute = 0;
   let ownerUidToReadSettings = createdByUid;
+  
   try {
     const creatorUserDoc = await db.collection("users").doc(createdByUid).get();
     if (creatorUserDoc.exists && creatorUserDoc.data()?.ownerUid) {
@@ -45,7 +77,7 @@ async function getReportDateInfoMoment(billData: {
       cutoffMinute = ownerSettingsDoc.data()?.reportCutoffMinute ?? 0;
     }
   } catch (e) {
-    console.warn(`[getReportDateInfoMoment v7.1] Lỗi tải cài đặt store: ${storeId}. Dùng 00:00.`, e);
+    console.warn(`[getReportDateInfoMoment] Lỗi tải cài đặt store: ${storeId}. Dùng 00:00.`, e);
   }
 
   const paymentTimeVN = moment(paymentTimestamp.toDate()).tz(timeZone);
@@ -79,43 +111,12 @@ async function getReportDateInfoMoment(billData: {
   };
 }
 
-
 // ============================================================================
-// HÀM TRỢ GIÚP MỚI: Định nghĩa payload (v10.3)
-// ============================================================================
-type IncrementPayload = {
-  billCount?: number;
-  totalRevenue?: number;
-  totalProfit?: number;
-  totalDebt?: number;
-  totalDiscount?: number; // Chiết khấu (món)
-  totalBillDiscount?: number; // <-- THÊM MỚI: Chiết khấu (tổng đơn)
-  totalVoucherDiscount?: number;
-  totalPointsValue?: number;
-  totalTax?: number;
-  totalSurcharges?: number;
-  totalCash?: number;
-  totalOtherPayments?: number;
-  totalOtherRevenue?: number;
-  totalOtherExpense?: number;
-};
-
-// Định nghĩa dữ liệu sản phẩm
-type ProductSaleData = {
-  id: string;
-  name: string;
-  group: string;
-  qty: number;
-  revenue: number;
-  discount: number;
-};
-
-// ============================================================================
-// HÀM 1: TỔNG HỢP HÓA ĐƠN (v10.3)
+// HÀM 1: TỔNG HỢP HÓA ĐƠN
 // ============================================================================
 export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
   async (event: FirestoreEvent<QueryDocumentSnapshot | undefined>) => {
-    console.log("--- Bắt đầu aggregateDailyReport v10.3 ---");
+    console.log("--- Bắt đầu aggregateDailyReport v10.4 ---");
     const snap = event.data;
     if (!snap) return;
     const billId = event.params.billId;
@@ -124,7 +125,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
     // 1. Kiểm tra
     if (billData.status !== "completed") return;
     if (!billData?.storeId || !billData.createdAt || !billData.createdByUid || !billData.createdByName) {
-      console.error(`[DailyReport v10.3] Bill ${billId} thiếu trường.`);
+      console.error(`[DailyReport] Bill ${billId} thiếu trường.`);
       return;
     }
 
@@ -142,8 +143,8 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
         createdAt: eventTime,
       });
 
-      // 3. Xử lý Items
-      let totalLineItemDiscount = 0; // Chiết khấu (món)
+      // 3. Xử lý Items & Discount
+      let totalLineItemDiscount = 0; 
       const productSalesMap = new Map<string, ProductSaleData>();
 
       for (const item of items) {
@@ -152,7 +153,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
         const product = item.product as { [key: string]: any } | undefined;
         const isTimeBased = product?.serviceSetup?.isTimeBased === true;
         
-        const itemPrice = (item.price as number) || 0; // Giá bán thực tế
+        const itemPrice = (item.price as number) || 0;
         const quantity = (item.quantity as number) || 0;
         const discVal = (item.discountValue as number) || 0;
         const discUnit = (item.discountUnit as string) || "%";
@@ -160,7 +161,6 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
         let itemDiscountAmount = 0;
         let priceEditDiscount = 0;
         let manualDiscount = 0;
-        
         const productListPrice = (product?.sellPrice as number) || itemPrice;
 
         if (isTimeBased) {
@@ -208,15 +208,11 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
       const totalPayable = (billData.totalPayable as number) || 0;
       const debtAmount = (billData.debtAmount as number) || 0;
       const profit = (billData.totalProfit as number) || 0;
-      
-      // --- SỬA LOGIC v10.3: Phân biệt 2 loại chiết khấu ---
-      const totalBillDiscount = (billData.discount as number) || 0; // Chiết khấu (tổng đơn)
-      // totalLineItemDiscount đã được tính ở trên // Chiết khấu (món)
-      // ------------------------------------------------
-      
+      const totalBillDiscount = (billData.discount as number) || 0;
       const voucherDiscount = (billData.voucherDiscount as number) || 0;
       const taxAmount = (billData.taxAmount as number) || 0;
       const pointsValue = (billData.customerPointsValue as number) || 0;
+      
       const surchargesArray = (billData.surcharges as any[]) || [];
       const totalSurcharges = surchargesArray.reduce((sum, surcharge) => {
         if (surcharge.isPercent === true) {
@@ -225,8 +221,12 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
         }
         return sum + (surcharge.amount || 0);
       }, 0);
+
+      // --- XỬ LÝ THANH TOÁN CHI TIẾT ---
       let cashAmount = 0;
       let otherPaymentsAmount = 0;
+      const paymentMethodBreakdown: Record<string, number> = {}; 
+
       const payments = billData.payments as Record<string, number> || {};
       for (const [method, amount] of Object.entries(payments)) {
         if (method.startsWith("Tiền mặt")) {
@@ -234,6 +234,8 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
         } else {
           otherPaymentsAmount += amount;
         }
+        // Lưu chi tiết cho map mới (Bao gồm cả tiền mặt và các loại khác)
+        paymentMethodBreakdown[method] = (paymentMethodBreakdown[method] || 0) + amount;
       }
       
       const billPayload: IncrementPayload = {
@@ -241,19 +243,20 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
         totalRevenue: totalPayable,
         totalProfit: profit,
         totalDebt: debtAmount,
-        totalDiscount: totalLineItemDiscount, // Chiết khấu (món)
-        totalBillDiscount: totalBillDiscount, // <-- THÊM MỚI: Chiết khấu (tổng đơn)
+        totalDiscount: totalLineItemDiscount,
+        totalBillDiscount: totalBillDiscount,
         totalVoucherDiscount: voucherDiscount,
         totalPointsValue: pointsValue,
         totalTax: taxAmount,
         totalSurcharges: totalSurcharges,
         totalCash: cashAmount,
         totalOtherPayments: otherPaymentsAmount,
+        paymentMethods: paymentMethodBreakdown, // Lưu map chi tiết
       };
 
       // 5. Chạy Transaction
       await db.runTransaction(async (transaction) => {
-        // --- VÙNG ĐỌC (READS) ---
+        // --- VÙNG ĐỌC ---
         const shiftsRef = db.collection("employee_shifts");
         const openShiftQuery = shiftsRef
           .where("storeId", "==", storeId)
@@ -280,7 +283,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
           closedShiftSnapshot = await transaction.get(closedShiftQuery);
         }
 
-        // --- VÙNG GHI (WRITES) ---
+        // --- VÙNG GHI ---
         let shiftId: string;
         let startTime: admin.firestore.Timestamp;
         let isNewShift = false;
@@ -327,8 +330,12 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             };
           }
 
+          // Tách paymentMethods ra để xử lý
+          const { paymentMethods, ...restPayload } = billPayload;
+
           const shiftDataForSet = {
-            ...billPayload,
+            ...restPayload,
+            paymentMethods: paymentMethods, // Map chi tiết trong Ca
             shiftId: shiftId,
             userId: userId,
             userName: userName,
@@ -343,7 +350,8 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             storeId: storeId,
             date: admin.firestore.Timestamp.fromDate(reportDateForTimestamp),
             openingBalance: 0,
-            ...billPayload,
+            ...restPayload,
+            paymentMethods: paymentMethods, // Map chi tiết trong Ngày
             products: shiftProductsPayload,
             shifts: {
               [shiftId]: shiftDataForSet,
@@ -354,16 +362,26 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
           const updatePayload: { [key: string]: any } = {};
           const shiftKeyPrefix = `shifts.${shiftId}`;
           
-          // Cập nhật payload chính
+          // Cập nhật các trường số (billCount, revenue, etc)
           for (const [key, value] of Object.entries(billPayload)) {
-            if (typeof value === "number" && value !== 0) {
+            if (key !== 'paymentMethods' && typeof value === "number" && value !== 0) {
               const increment = admin.firestore.FieldValue.increment(value);
               updatePayload[key] = increment;
               updatePayload[`${shiftKeyPrefix}.${key}`] = increment;
             }
           }
 
-          // Cập nhật payload sản phẩm
+          // Cập nhật chi tiết thanh toán (Từng key trong map)
+          for (const [method, amount] of Object.entries(paymentMethodBreakdown)) {
+            if (amount !== 0) {
+              // Cấp Ngày
+              updatePayload[`paymentMethods.${method}`] = admin.firestore.FieldValue.increment(amount);
+              // Cấp Ca
+              updatePayload[`${shiftKeyPrefix}.paymentMethods.${method}`] = admin.firestore.FieldValue.increment(amount);
+            }
+          }
+
+          // Cập nhật sản phẩm
           for (const [pId, pData] of productSalesMap.entries()) {
             const rootProductKey = `products.${pId}`;
             const shiftProductKey = `${shiftKeyPrefix}.products.${pId}`;
@@ -371,7 +389,6 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             const revInc = admin.firestore.FieldValue.increment(pData.revenue);
             const discInc = admin.firestore.FieldValue.increment(pData.discount);
 
-            // Cập nhật cấp độ TỔNG
             updatePayload[`${rootProductKey}.productId`] = pData.id;
             updatePayload[`${rootProductKey}.productName`] = pData.name;
             updatePayload[`${rootProductKey}.productGroup`] = pData.group;
@@ -379,7 +396,6 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             updatePayload[`${rootProductKey}.totalRevenue`] = revInc;
             updatePayload[`${rootProductKey}.totalDiscount`] = discInc;
 
-            // Cập nhật cấp độ CA
             updatePayload[`${shiftProductKey}.productId`] = pData.id;
             updatePayload[`${shiftProductKey}.productName`] = pData.name;
             updatePayload[`${shiftProductKey}.productGroup`] = pData.group;
@@ -388,7 +404,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             updatePayload[`${shiftProductKey}.totalDiscount`] = discInc;
           }
 
-          // Kiểm tra nếu ca này mới
+          // Khởi tạo ca mới nếu chưa có
           const existingShiftData = reportDoc.data()?.shifts?.[shiftId];
           if (!existingShiftData) {
             updatePayload[`${shiftKeyPrefix}.shiftId`] = shiftId;
@@ -398,7 +414,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             updatePayload[`${shiftKeyPrefix}.status`] = "open";
             updatePayload[`${shiftKeyPrefix}.endTime`] = null;
             updatePayload[`${shiftKeyPrefix}.openingBalance`] = 0;
-            // (Payload sản phẩm đã được thêm ở trên)
+            updatePayload[`${shiftKeyPrefix}.paymentMethods`] = {}; // Khởi tạo map rỗng
           }
           
           transaction.update(reportRef, updatePayload);
@@ -409,16 +425,16 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
           reportDateKey: reportDateString,
           shiftId: shiftId,
         });
-      }); // --- KẾT THÚC TRANSACTION ---
+      });
 
-      console.log(`[DailyReport v10.3] Ghi thành công bill ${billId} vào ca ${reportDateString}`);
+      console.log(`[DailyReport] Ghi thành công bill ${billId}`);
     } catch (error) {
-      console.error(`[DailyReport v10.3] LỖI ${billId}:`, error);
+      console.error(`[DailyReport] LỖI ${billId}:`, error);
     }
   });
 
 // ============================================================================
-// HÀM 2: TỔNG HỢP PHIẾU THU/CHI (v2.4 - Sửa lỗi thiếu storeId - Giữ nguyên)
+// HÀM 2: TỔNG HỢP PHIẾU THU/CHI
 // ============================================================================
 export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_transactions/{txId}",
   async (event: FirestoreEvent<QueryDocumentSnapshot | undefined>) => {
@@ -428,10 +444,9 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
     const txId = event.params.txId;
     const txData = snap.data();
 
-    // 1. Kiểm tra
     if (txData.status !== "completed") return;
     if (!txData?.storeId || !txData.date || !txData.userId || !txData.user || txData.amount == null) {
-      console.error(`[ManualTx v2.4] Tx ${txId} thiếu trường.`);
+      console.error(`[ManualTx] Tx ${txId} thiếu trường.`);
       return;
     }
 
@@ -443,22 +458,19 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
     if (amount === 0) return;
 
     try {
-      // 2. Lấy ngày báo cáo
       const { reportDateForTimestamp, reportDateString, reportDayStartTimestamp } = await getReportDateInfoMoment({
         storeId: storeId,
         createdByUid: userId,
         createdAt: eventTime,
       });
 
-      // 3. Chuẩn bị payload
       const txPayload: IncrementPayload = {
         totalOtherRevenue: (txData.type === "revenue") ? amount : 0,
         totalOtherExpense: (txData.type === "expense") ? amount : 0,
       };
 
-      // 4. Chạy Transaction
       await db.runTransaction(async (transaction) => {
-        // --- VÙNG ĐỌC (READS) ---
+        // ... (Vùng đọc giống hệt hàm trên)
         const shiftsRef = db.collection("employee_shifts");
         const openShiftQuery = shiftsRef
           .where("storeId", "==", storeId)
@@ -485,7 +497,7 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
           closedShiftSnapshot = await transaction.get(closedShiftQuery);
         }
 
-        // --- VÙNG GHI (WRITES) ---
+        // --- Vùng ghi ---
         let shiftId: string;
         let startTime: admin.firestore.Timestamp;
         let isNewShift = false;
@@ -503,7 +515,6 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
             : reportDayStartTimestamp;
         }
 
-        // GHI 1: Tạo ca mới (nếu cần)
         if (isNewShift) {
           transaction.set(shiftsRef.doc(shiftId), {
             storeId: storeId,
@@ -517,7 +528,6 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
           });
         }
 
-        // GHI 2: Cập nhật hoặc Tạo Báo Cáo Ngày
         if (!reportDoc.exists) {
           const shiftDataForSet = {
             ...txPayload,
@@ -529,6 +539,7 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
             endTime: null,
             openingBalance: 0,
             products: {},
+            paymentMethods: {},
           };
           transaction.set(reportRef, {
             storeId: storeId,
@@ -536,6 +547,7 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
             openingBalance: 0,
             ...txPayload,
             products: {},
+            paymentMethods: {},
             shifts: {
               [shiftId]: shiftDataForSet,
             },
@@ -562,19 +574,19 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
             updatePayload[`${shiftKeyPrefix}.endTime`] = null;
             updatePayload[`${shiftKeyPrefix}.openingBalance`] = 0;
             updatePayload[`${shiftKeyPrefix}.products`] = {};
+            updatePayload[`${shiftKeyPrefix}.paymentMethods`] = {};
           }
           transaction.update(reportRef, updatePayload);
         }
 
-        // GHI 3: Cập nhật lại phiếu
         transaction.update(snap.ref, {
           reportDateKey: reportDateString,
           shiftId: shiftId,
         });
-      }); // --- KẾT THÚC TRANSACTION ---
+      });
 
-      console.log(`[ManualTx v2.4] Ghi thành công Tx ${txId} vào ca ${reportDateString}`);
+      console.log(`[ManualTx] Ghi thành công Tx ${txId}`);
     } catch (error) {
-      console.error(`[ManualTx v2.4] LỖI ${txId}:`, error);
+      console.error(`[ManualTx] LỖI ${txId}:`, error);
     }
   });

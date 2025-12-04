@@ -30,6 +30,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   bool _canEditProduct = false;
   bool _canViewCost = false;
   bool _canManageGroups = false;
+  bool _canImportExport = false;
 
   @override
   void initState() {
@@ -39,11 +40,13 @@ class _ProductListScreenState extends State<ProductListScreen> {
       _canEditProduct = true;
       _canViewCost = true;
       _canManageGroups = true;
+      _canImportExport = true;
     } else {
       _canAddProduct = widget.currentUser.permissions?['products']?['canAddProduct'] ?? false;
       _canEditProduct = widget.currentUser.permissions?['products']?['canEditProduct'] ?? false;
       _canViewCost = widget.currentUser.permissions?['products']?['canViewCost'] ?? false;
       _canManageGroups = widget.currentUser.permissions?['products']?['canManageProductGroups'] ?? false;
+      _canImportExport = widget.currentUser.permissions?['products']?['canImportExport'] ?? false;
     }
     _loadData();
   }
@@ -314,6 +317,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   onPressed: () => _showSearchDialog(productGroups),
                   tooltip: 'Tìm kiếm',
                 ),
+                if (_canImportExport)
                 IconButton(
                   icon: const Icon(Icons.import_export, size: 30),
                   color: AppTheme.primaryColor,
@@ -362,9 +366,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
             ),
             body: TabBarView(
               children: groupNames.map((name) {
-                // --- SỬA: Truyền tên tab vào hàm build ---
                 return _buildProductListForGroup(name, productGroups);
-                // -----------------------------------------
               }).toList(),
             ),
           ),

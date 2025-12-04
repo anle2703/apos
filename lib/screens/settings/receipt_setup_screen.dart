@@ -253,34 +253,39 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
   }
 
   Widget _buildSettingsPanel() {
+    final bool isRetail = widget.currentUser.businessType == 'retail';
+
     return Container(
       color: Colors.white,
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: AppDropdown<String>(
-              labelText: 'Chọn mẫu xem trước',
-              value: _previewMode,
-              items: const [
-                DropdownMenuItem(value: 'bill', child: Text('Hóa đơn thanh toán (Chi tiết)')),
-                DropdownMenuItem(value: 'provisional_simple', child: Text('Tạm tính (Nhanh)')),
-                DropdownMenuItem(value: 'check_dish', child: Text('Kiểm món (Không giá)')),
-                DropdownMenuItem(value: 'kitchen', child: Text('Báo bếp')),
-                DropdownMenuItem(value: 'table_event', child: Text('Chuyển/Gộp bàn')),
-              ],
-              onChanged: (val) {
-                if (val != null) setState(() => _previewMode = val);
-              },
+          // [MỚI] Ẩn Dropdown nếu là Retail
+          if (!isRetail)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: AppDropdown<String>(
+                labelText: 'Chọn mẫu xem trước',
+                value: _previewMode,
+                items: const [
+                  DropdownMenuItem(value: 'bill', child: Text('Hóa đơn thanh toán (Chi tiết)')),
+                  DropdownMenuItem(value: 'provisional_simple', child: Text('Tạm tính (Nhanh)')),
+                  DropdownMenuItem(value: 'check_dish', child: Text('Kiểm món (Không giá)')),
+                  DropdownMenuItem(value: 'kitchen', child: Text('Báo bếp')),
+                  DropdownMenuItem(value: 'table_event', child: Text('Chuyển/Gộp bàn')),
+                ],
+                onChanged: (val) {
+                  if (val != null) setState(() => _previewMode = val);
+                },
+              ),
             ),
-          ),
 
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
-              children: _previewMode == 'kitchen'
-                  ? _buildKitchenSettings()
-                  : _buildBillSettings(),
+              // Nếu là Retail, luôn hiển thị settings cho Bill
+              children: (isRetail || _previewMode != 'kitchen')
+                  ? _buildBillSettings()
+                  : _buildKitchenSettings(),
             ),
           ),
         ],

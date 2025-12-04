@@ -16,19 +16,25 @@ import 'add_edit_supplier_dialog.dart';
 import '../../services/supplier_service.dart';
 import 'package:app_4cash/widgets/custom_text_form_field.dart';
 
-
 class ContactsScreen extends StatefulWidget {
   final UserModel currentUser;
+
   const ContactsScreen({super.key, required this.currentUser});
 
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
 }
 
-class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProviderStateMixin {
+class _ContactsScreenState extends State<ContactsScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final GlobalKey<_CustomerListTabState> _customerTabKey = GlobalKey<_CustomerListTabState>();
-  final GlobalKey<_SupplierListTabState> _supplierTabKey = GlobalKey<_SupplierListTabState>();
+  final GlobalKey<_CustomerListTabState> _customerTabKey =
+      GlobalKey<_CustomerListTabState>();
+  final GlobalKey<_SupplierListTabState> _supplierTabKey =
+      GlobalKey<_SupplierListTabState>();
+
+  bool _canAddContacts = false;
+  bool _canManagerGroup = false;
 
   @override
   void initState() {
@@ -37,6 +43,17 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
     _tabController.addListener(() {
       setState(() {});
     });
+    if (widget.currentUser.role == 'owner') {
+      _canAddContacts = true;
+      _canManagerGroup = true;
+    } else {
+      _canAddContacts = widget.currentUser.permissions?['contacts']
+              ?['canAddContacts'] ??
+          false;
+      _canManagerGroup = widget.currentUser.permissions?['contacts']
+              ?['canManagerGroup'] ??
+          false;
+    }
   }
 
   @override
@@ -74,25 +91,35 @@ class _ContactsScreenState extends State<ContactsScreen> with SingleTickerProvid
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outlined, size: 30, color: AppTheme.primaryColor),
-            tooltip: _tabController.index == 0 ? 'Thêm Khách Hàng' : 'Thêm Nhà Cung Cấp',
-            onPressed: _openAddDialogForCurrentTab,
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.settings, size: 30, color: AppTheme.primaryColor),
-            tooltip: 'Quản lý nhóm',
-            onPressed: _manageCurrentGroup,
-          ),
-          const SizedBox(width: 8),
+          if (_canAddContacts) ...[
+            IconButton(
+              icon: const Icon(Icons.add_circle_outlined,
+                  size: 30, color: AppTheme.primaryColor),
+              tooltip: _tabController.index == 0
+                  ? 'Thêm Khách Hàng'
+                  : 'Thêm Nhà Cung Cấp',
+              onPressed: _openAddDialogForCurrentTab,
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (_canManagerGroup) ...[
+            IconButton(
+              icon: const Icon(Icons.settings,
+                  size: 30, color: AppTheme.primaryColor),
+              tooltip: 'Quản lý nhóm',
+              onPressed: _manageCurrentGroup,
+            ),
+            const SizedBox(width: 8),
+          ],
         ],
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          CustomerListTab(key: _customerTabKey, currentUser: widget.currentUser),
-          SupplierListTab(key: _supplierTabKey, currentUser: widget.currentUser),
+          CustomerListTab(
+              key: _customerTabKey, currentUser: widget.currentUser),
+          SupplierListTab(
+              key: _supplierTabKey, currentUser: widget.currentUser),
         ],
       ),
     );
@@ -158,9 +185,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
     // 2. LOẠI BỎ logic lưu DB dư thừa và lỗi đọc Map.
     try {
       // Xác định thông báo dựa trên việc thêm mới hay cập nhật
-      final String message = (customer != null)
-          ? 'Cập nhật thành công!'
-          : 'Thêm mới thành công!';
+      final String message =
+          (customer != null) ? 'Cập nhật thành công!' : 'Thêm mới thành công!';
 
       ToastService().show(message: message, type: ToastType.success);
 
@@ -172,10 +198,10 @@ class _CustomerListTabState extends State<CustomerListTab> {
 
       // Cập nhật trạng thái UI (ví dụ: danh sách khách hàng)
       setState(() {});
-
     } catch (e) {
       // Bắt lỗi nếu có vấn đề về UI/Toast sau khi lưu
-      ToastService().show(message: "Lưu khách hàng thất bại: $e", type: ToastType.error);
+      ToastService()
+          .show(message: "Lưu khách hàng thất bại: $e", type: ToastType.error);
     }
   }
 
@@ -197,26 +223,37 @@ class _CustomerListTabState extends State<CustomerListTab> {
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 16),
                   ),
                 );
 
                 final groupFilter = AppDropdown<String>(
                   labelText: 'Lọc theo nhóm',
-                  prefixIcon: Icons.filter_list, // Hoặc Icons.filter_list
-                  value: _selectedFilterGroupId, // Luôn dùng giá trị đang chọn (ban đầu là null)
+                  prefixIcon: Icons.filter_list,
+                  // Hoặc Icons.filter_list
+                  value: _selectedFilterGroupId,
+                  // Luôn dùng giá trị đang chọn (ban đầu là null)
                   items: _isLoadingGroups
                       ? [
-                    const DropdownMenuItem(value: null, child: Text('Đang tải nhóm...')),
-                  ]
+                          const DropdownMenuItem(
+                              value: null, child: Text('Đang tải nhóm...')),
+                        ]
                       : [
-                    const DropdownMenuItem(value: null, child: Text('Tất cả nhóm')),
-                    ..._customerGroups.map((group) => DropdownMenuItem(
-                        value: group.id, child: Text(group.name, overflow: TextOverflow.ellipsis)))
-                  ],
-                  onChanged: _isLoadingGroups ? null : (String? newValue) {
-                    setState(() { _selectedFilterGroupId = newValue; });
-                  },
+                          const DropdownMenuItem(
+                              value: null, child: Text('Tất cả nhóm')),
+                          ..._customerGroups.map((group) => DropdownMenuItem(
+                              value: group.id,
+                              child: Text(group.name,
+                                  overflow: TextOverflow.ellipsis)))
+                        ],
+                  onChanged: _isLoadingGroups
+                      ? null
+                      : (String? newValue) {
+                          setState(() {
+                            _selectedFilterGroupId = newValue;
+                          });
+                        },
                 );
 
                 if (isDesktop) {
@@ -238,8 +275,7 @@ class _CustomerListTabState extends State<CustomerListTab> {
                   );
                 }
               },
-            )
-        ),
+            )),
         Expanded(
           child: StreamBuilder<List<CustomerModel>>(
             stream: _firestoreService.searchCustomers(
@@ -260,7 +296,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
                 );
               }
               final customers = snapshot.data!;
-              customers.sort((a, b) => (b.debt ?? 0.0).compareTo(a.debt ?? 0.0));
+              customers
+                  .sort((a, b) => (b.debt ?? 0.0).compareTo(a.debt ?? 0.0));
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: customers.length,
@@ -295,7 +332,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              bool isMobile = constraints.maxWidth < 500; // Tăng breakpoint một chút
+              bool isMobile =
+                  constraints.maxWidth < 500; // Tăng breakpoint một chút
               if (isMobile) {
                 return _buildMobileLayout(customer);
               } else {
@@ -310,7 +348,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
 
   Widget _buildDesktopLayout(CustomerModel customer) {
     final textStyleLabel = TextStyle(color: Colors.black, fontSize: 16);
-    final textStyleValue = const TextStyle(fontWeight: FontWeight.bold, fontSize: 16);
+    final textStyleValue =
+        const TextStyle(fontWeight: FontWeight.bold, fontSize: 16);
 
     return Row(
       children: [
@@ -376,7 +415,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
 
   Widget _buildMobileLayout(CustomerModel customer) {
     final textStyleLabel = TextStyle(color: Colors.black, fontSize: 16);
-    final textStyleValue = const TextStyle(fontWeight: FontWeight.bold, fontSize: 16);
+    final textStyleValue =
+        const TextStyle(fontWeight: FontWeight.bold, fontSize: 16);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -410,7 +450,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
                   Text(
                     '${NumberFormat('#,##0', 'vi_VN').format(customer.debt ?? 0)} đ',
                     style: textStyleValue.copyWith(
-                      color: (customer.debt ?? 0) > 0 ? Colors.red : Colors.green,
+                      color:
+                          (customer.debt ?? 0) > 0 ? Colors.red : Colors.green,
                     ),
                   ),
                 ],
@@ -420,7 +461,8 @@ class _CustomerListTabState extends State<CustomerListTab> {
               // Hàng Điểm thưởng (giá trị nằm sát nhãn)
               Row(
                 children: [
-                  Text('Điểm thưởng: ', style: textStyleLabel), // Thêm khoảng trắng
+                  Text('Điểm thưởng: ', style: textStyleLabel),
+                  // Thêm khoảng trắng
                   Text(
                     NumberFormat('#,##0', 'vi_VN').format(customer.points),
                     style: textStyleValue.copyWith(color: Colors.green),
@@ -436,7 +478,9 @@ class _CustomerListTabState extends State<CustomerListTab> {
 
   void showGroupManagement() {
     if (_customerGroups.isEmpty) {
-      ToastService().show(message: 'Chưa có nhóm Khách hàng nào được tạo.', type: ToastType.warning);
+      ToastService().show(
+          message: 'Chưa có nhóm Khách hàng nào được tạo.',
+          type: ToastType.warning);
       return;
     }
     _showCustomerGroupManagementSheet(_customerGroups);
@@ -476,22 +520,26 @@ class _CustomerListTabState extends State<CustomerListTab> {
                       final group = groups[index];
                       return Card(
                         child: ListTile(
-                          contentPadding: const EdgeInsets.only(left: 16.0, right: 8.0),
-                          title: Text(group.name, style: Theme.of(context).textTheme.titleMedium),
+                          contentPadding:
+                              const EdgeInsets.only(left: 16.0, right: 8.0),
+                          title: Text(group.name,
+                              style: Theme.of(context).textTheme.titleMedium),
                           trailing: SizedBox(
                             width: 96,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.edit_outlined, color: Colors.blue),
+                                  icon: const Icon(Icons.edit_outlined,
+                                      color: Colors.blue),
                                   onPressed: () {
                                     Navigator.of(context).pop();
                                     _showEditCustomerGroupDialog(group);
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  icon: const Icon(Icons.delete,
+                                      color: Colors.red),
                                   onPressed: () {
                                     Navigator.of(context).pop();
                                     _confirmDeleteCustomerGroup(group);
@@ -524,69 +572,71 @@ class _CustomerListTabState extends State<CustomerListTab> {
       context: context,
       builder: (context) {
         // *** SỬA LỖI: Dùng StatefulBuilder để cập nhật nút saving ***
-        return StatefulBuilder(
-            builder: (context, setDialogState) {
-              return AlertDialog(
-                title: const Text('Cập nhật Nhóm KH'),
-                content: Form(
-                  key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CustomTextFormField(
-                        controller: nameController,
-                        decoration: const InputDecoration(labelText: 'Tên nhóm'),
-                        validator: (value) => value == null || value.isEmpty
-                            ? 'Không được để trống'
-                            : null,
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: isSaving ? null : () => Navigator.of(context).pop(),
-                    child: const Text('Hủy'),
-                  ),
-                  ElevatedButton(
-                    onPressed: isSaving ? null : () async {
-                      if (formKey.currentState!.validate()) {
-                        setDialogState(() => isSaving = true);
-                        try {
-                          final newName = nameController.text.trim();
-                          // 1. Cập nhật document nhóm
-                          await _firestoreService.updateCustomerGroup(
-                            group.id,
-                            newName,
-                          );
-
-                          // 2. Cập nhật tất cả khách hàng thuộc nhóm này
-                          await _firestoreService.updateCustomerGroupNameInCustomers(
-                              group.id,
-                              newName,
-                              _storeId
-                          );
-
-                          ToastService().show(
-                              message: 'Cập nhật thành công',
-                              type: ToastType.success);
-                          await _loadCustomerGroups(); // Await
-                          navigator.pop();
-                        } catch (e) {
-                          ToastService()
-                              .show(message: 'Lỗi: $e', type: ToastType.error);
-                          setDialogState(() => isSaving = false);
-                        }
-                      }
-                    },
-                    child: isSaving
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Lưu'),
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Cập nhật Nhóm KH'),
+            content: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CustomTextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Tên nhóm'),
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Không được để trống'
+                        : null,
                   ),
                 ],
-              );
-            }
-        );
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.of(context).pop(),
+                child: const Text('Hủy'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        if (formKey.currentState!.validate()) {
+                          setDialogState(() => isSaving = true);
+                          try {
+                            final newName = nameController.text.trim();
+                            // 1. Cập nhật document nhóm
+                            await _firestoreService.updateCustomerGroup(
+                              group.id,
+                              newName,
+                            );
+
+                            // 2. Cập nhật tất cả khách hàng thuộc nhóm này
+                            await _firestoreService
+                                .updateCustomerGroupNameInCustomers(
+                                    group.id, newName, _storeId);
+
+                            ToastService().show(
+                                message: 'Cập nhật thành công',
+                                type: ToastType.success);
+                            await _loadCustomerGroups(); // Await
+                            navigator.pop();
+                          } catch (e) {
+                            ToastService().show(
+                                message: 'Lỗi: $e', type: ToastType.error);
+                            setDialogState(() => isSaving = false);
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Text('Lưu'),
+              ),
+            ],
+          );
+        });
       },
     );
   }
@@ -618,7 +668,7 @@ class _CustomerListTabState extends State<CustomerListTab> {
                 navigator.pop();
               } catch (e) {
                 String errorMessage =
-                e.toString().replaceFirst("Exception: ", "");
+                    e.toString().replaceFirst("Exception: ", "");
                 ToastService().show(
                   message: errorMessage,
                   type: ToastType.warning,
@@ -636,6 +686,7 @@ class _CustomerListTabState extends State<CustomerListTab> {
 
 class SupplierListTab extends StatefulWidget {
   final UserModel currentUser;
+
   const SupplierListTab({super.key, required this.currentUser});
 
   @override
@@ -710,25 +761,33 @@ class _SupplierListTabState extends State<SupplierListTab> {
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                 ),
               );
 
               final groupFilter = _isLoadingGroups
-                  ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                  ? const Center(
+                      child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2)))
                   : AppDropdown<String>(
-                labelText: 'Lọc theo nhóm',
-                prefixIcon: Icons.filter_list,
-                value: _selectedFilterGroupId,
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('Tất cả nhóm')),
-                  ..._supplierGroups.map((group) => DropdownMenuItem(
-                      value: group.id, child: Text(group.name)))
-                ],
-                onChanged: (String? newValue) {
-                  setState(() { _selectedFilterGroupId = newValue; });
-                },
-              );
+                      labelText: 'Lọc theo nhóm',
+                      prefixIcon: Icons.filter_list,
+                      value: _selectedFilterGroupId,
+                      items: [
+                        const DropdownMenuItem(
+                            value: null, child: Text('Tất cả nhóm')),
+                        ..._supplierGroups.map((group) => DropdownMenuItem(
+                            value: group.id, child: Text(group.name)))
+                      ],
+                      onChanged: (String? newValue) {
+                        setState(() {
+                          _selectedFilterGroupId = newValue;
+                        });
+                      },
+                    );
 
               if (isDesktop) {
                 return Row(
@@ -766,7 +825,8 @@ class _SupplierListTabState extends State<SupplierListTab> {
                 return Center(child: Text('Lỗi: ${snapshot.error}'));
               }
               if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Center(child: Text('Không tìm thấy nhà cung cấp nào.'));
+                return const Center(
+                    child: Text('Không tìm thấy nhà cung cấp nào.'));
               }
               final suppliers = snapshot.data!;
 
@@ -839,7 +899,8 @@ class _SupplierListTabState extends State<SupplierListTab> {
                           '${NumberFormat('#,##0', 'vi_VN').format(supplier.debt)} đ',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: supplier.debt > 0 ? Colors.red : Colors.green,
+                            color:
+                                supplier.debt > 0 ? Colors.red : Colors.green,
                             fontSize: 16,
                           ),
                         ),
@@ -854,9 +915,11 @@ class _SupplierListTabState extends State<SupplierListTab> {
       ),
     );
   }
+
   void showGroupManagement() {
     if (_supplierGroups.isEmpty) {
-      ToastService().show(message: 'Chưa có nhóm NCC nào được tạo.', type: ToastType.warning);
+      ToastService().show(
+          message: 'Chưa có nhóm NCC nào được tạo.', type: ToastType.warning);
       return;
     }
     _showSupplierGroupManagementSheet(_supplierGroups);
@@ -896,22 +959,26 @@ class _SupplierListTabState extends State<SupplierListTab> {
                       final group = groups[index];
                       return Card(
                         child: ListTile(
-                          contentPadding: const EdgeInsets.only(left: 16.0, right: 8.0),
-                          title: Text(group.name, style: Theme.of(context).textTheme.titleMedium),
+                          contentPadding:
+                              const EdgeInsets.only(left: 16.0, right: 8.0),
+                          title: Text(group.name,
+                              style: Theme.of(context).textTheme.titleMedium),
                           trailing: SizedBox(
                             width: 96,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.edit_outlined, color: Colors.blue),
+                                  icon: const Icon(Icons.edit_outlined,
+                                      color: Colors.blue),
                                   onPressed: () {
                                     Navigator.of(context).pop();
                                     _showEditSupplierGroupDialog(group);
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  icon: const Icon(Icons.delete,
+                                      color: Colors.red),
                                   onPressed: () {
                                     Navigator.of(context).pop();
                                     _confirmDeleteSupplierGroup(group);
@@ -944,69 +1011,71 @@ class _SupplierListTabState extends State<SupplierListTab> {
       context: context,
       builder: (context) {
         // *** SỬA LỖI: Dùng StatefulBuilder ***
-        return StatefulBuilder(
-            builder: (context, setDialogState) {
-              return AlertDialog(
-                title: const Text('Cập nhật Nhóm NCC'),
-                content: Form(
-                  key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CustomTextFormField(
-                        controller: nameController,
-                        decoration: const InputDecoration(labelText: 'Tên nhóm'),
-                        validator: (value) => value == null || value.isEmpty
-                            ? 'Không được để trống'
-                            : null,
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: isSaving ? null : () => Navigator.of(context).pop(),
-                    child: const Text('Hủy'),
-                  ),
-                  ElevatedButton(
-                    onPressed: isSaving ? null : () async {
-                      if (formKey.currentState!.validate()) {
-                        setDialogState(() => isSaving = true); // Bật cờ
-                        try {
-                          final newName = nameController.text.trim();
-                          // 1. Cập nhật document nhóm
-                          await _supplierService.updateSupplierGroup(
-                            group.id,
-                            newName,
-                          );
-
-                          // 2. Cập nhật tất cả NCC thuộc nhóm này
-                          await _supplierService.updateSupplierGroupNameInSuppliers(
-                              group.id,
-                              newName,
-                              _storeId
-                          );
-
-                          ToastService().show(
-                              message: 'Cập nhật thành công',
-                              type: ToastType.success);
-                          await _loadSupplierGroups(); // Await
-                          navigator.pop();
-                        } catch (e) {
-                          ToastService()
-                              .show(message: 'Lỗi: $e', type: ToastType.error);
-                          setDialogState(() => isSaving = false); // Tắt cờ
-                        }
-                      }
-                    },
-                    child: isSaving
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Lưu'),
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Cập nhật Nhóm NCC'),
+            content: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CustomTextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Tên nhóm'),
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Không được để trống'
+                        : null,
                   ),
                 ],
-              );
-            }
-        );
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.of(context).pop(),
+                child: const Text('Hủy'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        if (formKey.currentState!.validate()) {
+                          setDialogState(() => isSaving = true); // Bật cờ
+                          try {
+                            final newName = nameController.text.trim();
+                            // 1. Cập nhật document nhóm
+                            await _supplierService.updateSupplierGroup(
+                              group.id,
+                              newName,
+                            );
+
+                            // 2. Cập nhật tất cả NCC thuộc nhóm này
+                            await _supplierService
+                                .updateSupplierGroupNameInSuppliers(
+                                    group.id, newName, _storeId);
+
+                            ToastService().show(
+                                message: 'Cập nhật thành công',
+                                type: ToastType.success);
+                            await _loadSupplierGroups(); // Await
+                            navigator.pop();
+                          } catch (e) {
+                            ToastService().show(
+                                message: 'Lỗi: $e', type: ToastType.error);
+                            setDialogState(() => isSaving = false); // Tắt cờ
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Text('Lưu'),
+              ),
+            ],
+          );
+        });
       },
     );
   }
@@ -1037,7 +1106,7 @@ class _SupplierListTabState extends State<SupplierListTab> {
                 navigator.pop();
               } catch (e) {
                 String errorMessage =
-                e.toString().replaceFirst("Exception: ", "");
+                    e.toString().replaceFirst("Exception: ", "");
                 ToastService().show(
                   message: errorMessage,
                   type: ToastType.warning,

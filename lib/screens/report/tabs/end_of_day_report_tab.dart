@@ -109,7 +109,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
   };
 
   bool get isLoading => _isLoading;
-
+  Map<String, double> _rootPaymentMethods = {};
   bool get isOwnerOrManager =>
       widget.currentUser.role == 'owner' ||
           widget.currentUser.role == 'manager';
@@ -325,6 +325,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       _closingBalance = 0;
       _shiftDataList = [];
       _rootProductsSold = {};
+      _rootPaymentMethods = {};
     });
 
     try {
@@ -412,7 +413,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     final List<Map<String, dynamic>> allShifts = [];
     final Set<String> newShiftIds = {};
     final Map<String, dynamic> aggregatedRootProducts = {};
-
+    final Map<String, double> aggregatedPaymentMethods = {};
     double firstDayOpeningBalance = 0.0;
 
     for (final doc in reportDocs) {
@@ -427,6 +428,12 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
           totalData[key] =
               (totalData[key] ?? 0.0) + (data[key] as num).toDouble();
         }
+      }
+      final paymentMethodsMap = data['paymentMethods'] as Map<String, dynamic>?;
+      if (paymentMethodsMap != null) {
+        paymentMethodsMap.forEach((method, amount) {
+          aggregatedPaymentMethods[method] = (aggregatedPaymentMethods[method] ?? 0.0) + (amount as num).toDouble();
+        });
       }
 
       final rootProducts = (data['products'] as Map<String, dynamic>?) ?? {};
@@ -576,6 +583,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       _closingBalance = closingBal;
       _shiftDataList = processedShifts;
       _rootProductsSold = aggregatedRootProducts;
+      _rootPaymentMethods = aggregatedPaymentMethods;
     });
     _openingBalanceController.text = _numberFormat.format(firstDayOpeningBalance);
   }
@@ -1208,7 +1216,6 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
   }
 
   Widget _buildSingleShiftCard(Map<String, dynamic> data, bool isWide) {
-    // ... (Toàn bộ phần khai báo biến giữ nguyên) ...
     final int orders = (data['billCount'] as num?)?.toInt() ?? 0;
     final double discount = (data['totalDiscount'] as num?)?.toDouble() ?? 0.0;
     final double billDiscount = (data['totalBillDiscount'] as num?)?.toDouble() ?? 0.0;
@@ -1222,6 +1229,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     final double cash = (data['totalCash'] as num?)?.toDouble() ?? 0.0;
     final double otherPayments =
         (data['totalOtherPayments'] as num?)?.toDouble() ?? 0.0;
+    final Map<String, dynamic> shiftPaymentMethods = (data['paymentMethods'] as Map<String, dynamic>?) ?? {};
     final double debt = (data['totalDebt'] as num?)?.toDouble() ?? 0.0;
     final double otherRevenue =
         (data['totalOtherRevenue'] as num?)?.toDouble() ?? 0.0;
@@ -1267,7 +1275,28 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
 
     final divider =
     Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300);
-
+    List<Widget> otherPaymentWidgets = [];
+    if (shiftPaymentMethods.isNotEmpty) {
+      shiftPaymentMethods.forEach((method, amount) {
+        // Loại bỏ Tiền mặt vì đã hiển thị riêng, chỉ hiện các loại khác có giá trị > 0
+        if (!method.startsWith("Tiền mặt") && (amount as num) > 0) {
+          otherPaymentWidgets.add(Column(
+            children: [
+              _buildReportRow(method, amount.toDouble()),
+              divider,
+            ],
+          ));
+        }
+      });
+    } else if (otherPayments > 0) {
+      // Fallback: Nếu dữ liệu cũ chưa có paymentMethods, hiện tổng cũ
+      otherPaymentWidgets.add(Column(
+        children: [
+          _buildReportRow('Thanh toán khác', otherPayments),
+          divider,
+        ],
+      ));
+    }
     // Tách nội dung thẻ ra để xử lý layout
     final Widget cardContent = Column(
       children: [
@@ -1282,9 +1311,9 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               _buildReportRow('Đơn hàng', orders.toDouble(),
                   isCurrency: false),
               divider,
-              _buildReportRow('Chiết khấu (món)', discount),
+              _buildReportRow('Chiết khấu/sản phẩm', discount),
               divider,
-              _buildReportRow('Chiết khấu (tổng đơn)', billDiscount),
+              _buildReportRow('Chiết khấu/tổng đơn', billDiscount),
               divider,
               _buildReportRow('Voucher', voucher),
               divider,
@@ -1298,7 +1327,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Tiền mặt', cash),
               divider,
-              _buildReportRow('Thanh toán khác', otherPayments),
+              ...otherPaymentWidgets,
               divider,
               _buildReportRow('Ghi nợ', debt),
               divider,
@@ -1479,7 +1508,6 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
   }
 
   Widget _buildTotalReportCard(bool isWide) {
-    // ... (Toàn bộ phần khai báo biến giữ nguyên) ...
     final bool hasData = _totalOrders > 0 ||
         _totalRevenue > 0 ||
         _totalCash > 0 ||
@@ -1490,8 +1518,26 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
         _openingBalance > 0;
     final divider =
     Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300);
-
-    // Tách nội dung thẻ ra để xử lý layout
+    List<Widget> otherPaymentWidgets = [];
+    if (_rootPaymentMethods.isNotEmpty) {
+      _rootPaymentMethods.forEach((method, amount) {
+        if (!method.startsWith("Tiền mặt") && amount > 0) {
+          otherPaymentWidgets.add(Column(
+            children: [
+              _buildReportRow(method, amount),
+              divider,
+            ],
+          ));
+        }
+      });
+    } else if (_totalOtherPayments > 0) {
+      otherPaymentWidgets.add(Column(
+        children: [
+          _buildReportRow('Thanh toán khác', _totalOtherPayments),
+          divider,
+        ],
+      ));
+    }
     final Widget cardContent = Column(
       children: [
         if (!hasData)
@@ -1523,7 +1569,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Tiền mặt', _totalCash),
               divider,
-              _buildReportRow('Thanh toán khác', _totalOtherPayments),
+              ...otherPaymentWidgets,
               divider,
               _buildReportRow('Ghi nợ', _totalDebt),
               divider,

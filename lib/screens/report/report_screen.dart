@@ -11,6 +11,19 @@ import 'package:app_4cash/models/cash_flow_transaction_model.dart';
 import 'package:app_4cash/widgets/cash_flow_dialog_helper.dart';
 import 'tabs/retail_sales_ledger_tab.dart';
 
+// 1. [MỚI] Class helper để định nghĩa một Tab
+class _ReportTabInfo {
+  final String title;
+  final Widget view;
+  final List<Widget> Function(BuildContext) actionsBuilder;
+
+  _ReportTabInfo({
+    required this.title,
+    required this.view,
+    required this.actionsBuilder,
+  });
+}
+
 class ReportScreen extends StatefulWidget {
   final UserModel currentUser;
   const ReportScreen({super.key, required this.currentUser});
@@ -21,6 +34,8 @@ class ReportScreen extends StatefulWidget {
 class _ReportScreenState extends State<ReportScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+
+  // Keys
   final _endOfDayReportKey = GlobalKey<EndOfDayReportTabState>();
   final _inventoryReportKey = GlobalKey<InventoryReportTabState>();
   final _cashFlowReportKey = GlobalKey<CashFlowReportTabState>();
@@ -31,20 +46,108 @@ class _ReportScreenState extends State<ReportScreen>
   bool _isEndOfDayLoading = true;
   bool _isRetailLedgerLoading = true;
 
+  // 2. [MỚI] Danh sách các Tab ĐƯỢC PHÉP hiển thị
+  List<_ReportTabInfo> _visibleTabs = [];
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _initTabsBasedOnPermissions(); // Khởi tạo danh sách tab trước
+
+    _tabController = TabController(length: _visibleTabs.length, vsync: this);
     _tabController.addListener(() {
       if (mounted) {
         setState(() {});
       }
     });
+
+    // Fix lỗi render sai khi init state
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        setState(() {});
-      }
+      if (mounted) setState(() {});
     });
+  }
+
+  // 3. [MỚI] Hàm xử lý Logic phân quyền từng Tab
+  void _initTabsBasedOnPermissions() {
+    final role = widget.currentUser.role;
+    final perms = widget.currentUser.permissions ?? {};
+
+    // Helper: Check quyền cụ thể trong permissions map (Owner luôn có quyền)
+    bool hasPerm(String group, String key) {
+      if (role == 'owner') return true;
+      return perms[group]?[key] ?? false;
+    }
+
+    // --- 1. LOGIC PHÂN QUYỀN MỚI ---
+
+    bool canViewSales = hasPerm('reports', 'canViewSales');
+    bool canViewCashFlow = (role != 'order');
+    bool canViewEndOfDay = (role != 'order');
+    bool canViewInventory = hasPerm('reports', 'canViewInventory');
+    bool canViewRetailLedger = hasPerm('reports', 'canViewRetailLedger');
+
+    List<_ReportTabInfo> allPossibleTabs = [
+      if (canViewSales)
+        _ReportTabInfo(
+          title: 'Tổng quan',
+          view: SalesReportTab(
+            key: _salesReportKey,
+            currentUser: widget.currentUser,
+            onLoadingChanged: (bool isLoading) {
+              if (mounted) setState(() => _isSalesLoading = isLoading);
+            },
+          ),
+          actionsBuilder: (ctx) => _buildSalesActions(ctx),
+        ),
+
+      if (canViewCashFlow)
+        _ReportTabInfo(
+          title: 'Thu Chi',
+          view: CashFlowReportTab(
+            key: _cashFlowReportKey,
+            currentUser: widget.currentUser,
+          ),
+          actionsBuilder: (ctx) => _buildCashFlowActions(ctx),
+        ),
+
+      if (canViewEndOfDay)
+        _ReportTabInfo(
+          title: 'Tổng kết cuối ngày',
+          view: EndOfDayReportTab(
+            key: _endOfDayReportKey,
+            currentUser: widget.currentUser,
+            onLoadingChanged: (bool isLoading) {
+              if (mounted) setState(() => _isEndOfDayLoading = isLoading);
+            },
+          ),
+          actionsBuilder: (ctx) => _buildEndOfDayActions(ctx),
+        ),
+
+      if (canViewInventory)
+        _ReportTabInfo(
+          title: 'Tồn Kho',
+          view: InventoryReportTab(
+            key: _inventoryReportKey,
+            currentUser: widget.currentUser,
+          ),
+          actionsBuilder: (ctx) => _buildInventoryActions(ctx),
+        ),
+
+      if (canViewRetailLedger)
+        _ReportTabInfo(
+          title: 'Hàng hóa bán ra',
+          view: RetailSalesLedgerTab(
+            key: _retailLedgerKey,
+            currentUser: widget.currentUser,
+            onLoadingChanged: (bool isLoading) {
+              if (mounted) setState(() => _isRetailLedgerLoading = isLoading);
+            },
+          ),
+          actionsBuilder: (ctx) => _buildRetailLedgerActions(ctx),
+        ),
+    ];
+
+    _visibleTabs = allPossibleTabs;
   }
 
   @override
@@ -54,9 +157,15 @@ class _ReportScreenState extends State<ReportScreen>
   }
 
   void _handleExport() {
-    if (_tabController.index == 3) {
+    // [CẬP NHẬT] Logic export cần check loại tab hiện tại là gì thay vì index cứng
+    if (_visibleTabs.isEmpty) return;
+
+    // Lấy widget hiện tại đang hiển thị
+    final currentWidget = _visibleTabs[_tabController.index].view;
+
+    if (currentWidget is InventoryReportTab) {
       _inventoryReportKey.currentState?.exportReport();
-    } else if (_tabController.index == 4) {
+    } else if (currentWidget is RetailSalesLedgerTab) {
       _retailLedgerKey.currentState?.exportReport();
     }
   }
@@ -91,7 +200,6 @@ class _ReportScreenState extends State<ReportScreen>
   List<Widget> _buildSalesActions(BuildContext context) {
     return [
       IconButton(
-        // SỬ DỤNG BIẾN TẠI ĐÂY:
         icon: _isSalesLoading
             ? const SizedBox(
             width: 24,
@@ -100,7 +208,6 @@ class _ReportScreenState extends State<ReportScreen>
             : Icon(Icons.filter_list,
             color: AppTheme.primaryColor, size: 30),
         tooltip: 'Lọc báo cáo',
-        // VÀ SỬ DỤNG BIẾN TẠI ĐÂY:
         onPressed: _isSalesLoading ? null : () {
           final state = _salesReportKey.currentState;
           if (state != null) {
@@ -170,9 +277,7 @@ class _ReportScreenState extends State<ReportScreen>
 
   List<Widget> _buildEndOfDayActions(BuildContext context) {
     final endOfDayState = _endOfDayReportKey.currentState;
-
     return [
-      // --- NÚT LỌC (Giữ nguyên) ---
       IconButton(
         icon: _isEndOfDayLoading
             ? const SizedBox(
@@ -184,7 +289,7 @@ class _ReportScreenState extends State<ReportScreen>
         onPressed: _isEndOfDayLoading
             ? null
             : () {
-          endOfDayState?.showFilterModal(); // Gọi hàm lọc trong EndOfDayReportTabState
+          endOfDayState?.showFilterModal();
         },
       ),
       const SizedBox(width: 8),
@@ -199,7 +304,7 @@ class _ReportScreenState extends State<ReportScreen>
           icon: const Icon(Icons.download_for_offline,
               color: AppTheme.primaryColor, size: 30),
           tooltip: 'Xuất báo cáo (Excel/PDF)',
-          onPressed: _handleExport, // Đã sửa hàm _handleExport ở trên
+          onPressed: _handleExport,
         ),
         IconButton(
           icon: state.areFiltersLoading
@@ -220,66 +325,35 @@ class _ReportScreenState extends State<ReportScreen>
 
   @override
   Widget build(BuildContext context) {
+    // 4. [MỚI] Xử lý trường hợp không có quyền xem báo cáo nào
+    if (_visibleTabs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Báo Cáo')),
+        body: const Center(
+          child: Text('Bạn không có quyền xem bất kỳ báo cáo nào.'),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Báo Cáo'),
         actions: [
-          if (_tabController.index == 0) ..._buildSalesActions(context),
-          if (_tabController.index == 1) ..._buildCashFlowActions(context),
-          if (_tabController.index == 2) ..._buildEndOfDayActions(context),
-          if (_tabController.index == 3) ..._buildInventoryActions(context),
-          if (_tabController.index == 4) ..._buildRetailLedgerActions(context),
+          // 5. [MỚI] Lấy actionsBuilder từ tab hiện tại trong danh sách visible
+          if (_visibleTabs.isNotEmpty)
+            ..._visibleTabs[_tabController.index].actionsBuilder(context),
         ],
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
-          tabs: const [
-            Tab(text: 'Tổng quan'),
-            Tab(text: 'Thu Chi'),
-            Tab(text: 'Tổng kết cuối ngày'),
-            Tab(text: 'Tồn Kho'),
-            Tab(text: 'Hàng hóa bán ra'),
-          ],
+          // 6. [MỚI] Build tabs từ danh sách động
+          tabs: _visibleTabs.map((t) => Tab(text: t.title)).toList(),
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          SalesReportTab(
-            key: _salesReportKey,
-            currentUser: widget.currentUser,
-            onLoadingChanged: (bool isLoading) {
-              if (mounted) {
-                setState(() {
-                  _isSalesLoading = isLoading;
-                });
-              }
-            },
-          ),
-          CashFlowReportTab(
-            key: _cashFlowReportKey,
-            currentUser: widget.currentUser,
-          ),
-          EndOfDayReportTab(
-            key: _endOfDayReportKey,
-            currentUser: widget.currentUser,
-            onLoadingChanged: (bool isLoading) {
-              if (mounted) { setState(() { _isEndOfDayLoading = isLoading; }); }
-            },
-          ),
-          InventoryReportTab(
-            key: _inventoryReportKey,
-            currentUser: widget.currentUser,
-          ),
-          // View mới
-          RetailSalesLedgerTab(
-            key: _retailLedgerKey,
-            currentUser: widget.currentUser,
-            onLoadingChanged: (bool isLoading) {
-              if (mounted) { setState(() { _isRetailLedgerLoading = isLoading; }); }
-            },
-          ),
-        ],
+        // 7. [MỚI] Build views từ danh sách động
+        children: _visibleTabs.map((t) => t.view).toList(),
       ),
     );
   }

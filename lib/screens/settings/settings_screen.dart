@@ -52,7 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSaving = false;
   bool _printBillAfterPayment = true;
   bool _notifyKitchenAfterPayment = false;
-  bool _allowProvisionalBill = true;
+  bool _allowProvisionalBill = false;
   bool _promptForCash = true;
 
   bool get isDesktop =>
@@ -84,7 +84,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'label_printer': 'Máy in Tem',
   };
 
-  // --- NEW STATE FOR DESKTOP VIEW ---
   String _selectedCategory = 'printer_connection'; // Default category
 
   @override
@@ -92,7 +91,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _serverIpController.text = '192.168.1.';
     _settingsService = SettingsService();
-    // Set default category based on role
     if (widget.currentUser.role == 'owner') {
       _selectedCategory = 'store_info';
     } else {
@@ -524,10 +522,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildPrintOptionsContent() {
+    // Kiểm tra xem có phải mô hình Retail không
+    final bool isRetail = widget.currentUser.businessType == 'retail';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('Tùy chọn in'),
+
+        // Dòng này luôn hiện cho cả Retail và F&B
         SwitchListTile(
           title: const Text('In hóa đơn sau khi Thanh toán'),
           value: _printBillAfterPayment,
@@ -535,47 +538,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() => _printBillAfterPayment = value),
           secondary: const Icon(Icons.print_outlined),
         ),
-        SwitchListTile(
-          title: const Text('In tem sau khi Thanh toán'),
-          value: _printLabelOnPayment,
-          onChanged: (val) => setState(() => _printLabelOnPayment = val),
-          secondary: const Icon(Icons.new_label_outlined),
-        ),
-        SwitchListTile(
-          title: const Text('In tem khi báo Chế biến'),
-          value: _printLabelOnKitchen,
-          onChanged: (val) => setState(() => _printLabelOnKitchen = val),
-          secondary: const Icon(Icons.label_outline),
-        ),
-        SwitchListTile(
-          title: const Text('In báo chế biến trước khi thanh toán'),
-          value: _notifyKitchenAfterPayment,
-          onChanged: (bool value) =>
-              setState(() => _notifyKitchenAfterPayment = value),
-          secondary: const Icon(Icons.fastfood_outlined),
-        ),
-        SwitchListTile(
-          title: const Text('Không in báo chế biến khi gởi món'),
-          subtitle: const Text(
-              'Nếu bật sẽ không in báo chế biến từ các máy in A B C D.'),
-          value: _skipKitchenPrint,
-          onChanged: (bool value) => setState(() => _skipKitchenPrint = value),
-          secondary: const Icon(Icons.print_disabled_outlined),
-        ),
-        SwitchListTile(
-          title: const Text('Cho phép in tạm tính nhanh hoặc kiểm món'),
-          value: _allowProvisionalBill,
-          onChanged: (bool value) =>
-              setState(() => _allowProvisionalBill = value),
-          secondary: const Icon(Icons.receipt_outlined),
-        ),
-        SwitchListTile(
-          title: const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
-          subtitle: const Text('Tắt để chuyển sang in phiếu kiểm món.'),
-          value: _showPricesOnBill,
-          onChanged: (bool value) => setState(() => _showPricesOnBill = value),
-          secondary: const Icon(Icons.price_change_outlined),
-        ),
+
+        // Các tùy chọn bên dưới chỉ hiện nếu KHÔNG PHẢI là Retail
+        if (!isRetail) ...[
+          SwitchListTile(
+            title: const Text('In tem sau khi Thanh toán'),
+            value: _printLabelOnPayment,
+            onChanged: (val) => setState(() => _printLabelOnPayment = val),
+            secondary: const Icon(Icons.new_label_outlined),
+          ),
+          SwitchListTile(
+            title: const Text('In tem khi báo Chế biến'),
+            value: _printLabelOnKitchen,
+            onChanged: (val) => setState(() => _printLabelOnKitchen = val),
+            secondary: const Icon(Icons.label_outline),
+          ),
+          SwitchListTile(
+            title: const Text('In báo chế biến trước khi thanh toán'),
+            value: _notifyKitchenAfterPayment,
+            onChanged: (bool value) =>
+                setState(() => _notifyKitchenAfterPayment = value),
+            secondary: const Icon(Icons.fastfood_outlined),
+          ),
+          SwitchListTile(
+            title: const Text('Không in báo chế biến khi gởi món'),
+            subtitle: const Text(
+                'Nếu bật sẽ không in báo chế biến từ các máy in A B C D.'),
+            value: _skipKitchenPrint,
+            onChanged: (bool value) => setState(() => _skipKitchenPrint = value),
+            secondary: const Icon(Icons.print_disabled_outlined),
+          ),
+          SwitchListTile(
+            title: const Text('Cho phép in tạm tính nhanh hoặc kiểm món'),
+            value: _allowProvisionalBill,
+            onChanged: (bool value) =>
+                setState(() => _allowProvisionalBill = value),
+            secondary: const Icon(Icons.receipt_outlined),
+          ),
+          SwitchListTile(
+            title: const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
+            subtitle: const Text('Tắt để chuyển sang in phiếu kiểm món.'),
+            value: _showPricesOnBill,
+            onChanged: (bool value) => setState(() => _showPricesOnBill = value),
+            secondary: const Icon(Icons.price_change_outlined),
+          ),
+        ],
       ],
     );
   }
@@ -777,9 +784,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildMenuTile('store_info', 'Thông tin cửa hàng', Icons.store),
               if (canAccessSettings) ...[
                 _buildMenuTile(
-                    'print_options', 'Tùy chọn in', Icons.print_outlined),
-                _buildMenuTile(
                     'general_settings', 'Thiết lập chung', Icons.settings),
+                _buildMenuTile(
+                    'print_options', 'Tùy chọn in', Icons.print_outlined),
               ],
               _buildMenuTile('printer_connection', 'Kết nối máy in',
                   Icons.compare_arrows),
@@ -793,7 +800,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Card(
-                elevation: 0, // Flat look or change as needed
+                elevation: 0,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
                 color: Colors.white,
@@ -840,10 +847,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     switch (_selectedCategory) {
       case 'store_info':
         return _buildStoreInfoContent();
-      case 'print_options':
-        return _buildPrintOptionsContent();
       case 'general_settings':
         return _buildGeneralSettingsContent();
+      case 'print_options':
+        return _buildPrintOptionsContent();
       case 'printer_connection':
         return _buildPrinterConnectionContent();
       default:
@@ -907,8 +914,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     });
 
+    final bool isRetail = widget.currentUser.businessType == 'retail';
+
+    final List<String> visibleRoles = _printerRoles.where((role) {
+      if (isRetail) {
+        // Retail: Chỉ hiện Thu ngân và Tem
+        return role == 'cashier_printer' || role == 'label_printer';
+      }
+      // FnB: Hiện tất cả (bao gồm Bếp A, B, C, D)
+      return true;
+    }).toList();
+
     return Column(
-      children: _printerRoles.map((roleKey) {
+      children: visibleRoles.map((roleKey) {
         final assignedPrinterConfig = _printerAssignments[roleKey];
         final currentSelectedId = assignedPrinterConfig != null
             ? _getPrinterUniqueId(assignedPrinterConfig.physicalPrinter)
@@ -1024,7 +1042,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                           child: Text(
-                            "Tùy chỉnh cỡ chữ Bill & Bếp",
+                            "Thiết lập mẫu in",
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyLarge
@@ -1093,7 +1111,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                           child: Text(
-                            "Tùy chỉnh Kích thước & Bố cục",
+                            "Thiết lập mẫu in tem",
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyLarge

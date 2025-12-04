@@ -283,7 +283,7 @@ class _CreatePurchaseOrderScreenState extends State<CreatePurchaseOrderScreen> {
         'totalAmount': confirmedData['totalAmount'],
         'debtAmount': confirmedData['debtAmount'],
         'status': (confirmedData['debtAmount'] > 0 && confirmedData['paymentMethod'] != 'Ghi nợ')
-            ? 'Chưa thanh toán đủ'
+            ? 'Nợ'
             : 'Hoàn thành',
         'items': itemsToSave.map((item) => item.toMap()).toList(),
         'createdByUid': _isEditMode ? widget.existingPurchaseOrder!.createdBy : widget.currentUser.uid,

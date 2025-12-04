@@ -32,8 +32,13 @@ class ProductToPrint {
 
 class ProductLabelPrintScreen extends StatefulWidget {
   final UserModel currentUser;
+  final PurchaseOrderModel? initialPurchaseOrder;
 
-  const ProductLabelPrintScreen({super.key, required this.currentUser});
+  const ProductLabelPrintScreen({
+    super.key,
+    required this.currentUser,
+    this.initialPurchaseOrder,
+  });
 
   @override
   State<ProductLabelPrintScreen> createState() =>
@@ -51,6 +56,11 @@ class _ProductLabelPrintScreenState extends State<ProductLabelPrintScreen> {
   void initState() {
     super.initState();
     _loadLabelSettings();
+    if (widget.initialPurchaseOrder != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _processImportPurchaseOrder(widget.initialPurchaseOrder!);
+      });
+    }
   }
 
   Future<void> _loadLabelSettings() async {
@@ -106,50 +116,57 @@ class _ProductLabelPrintScreenState extends State<ProductLabelPrintScreen> {
     );
 
     if (selectedPO != null) {
-      setState(() => _isProcessing = true);
-      try {
-        List<String> productIds =
-        selectedPO.items.map((e) => e['productId'] as String).toList();
+      _processImportPurchaseOrder(selectedPO);
+    }
+  }
 
-        final products = await _inventoryService.getProductsByIds(productIds);
-        final productMap = {for (var p in products) p.id: p};
+  Future<void> _processImportPurchaseOrder(PurchaseOrderModel po) async {
+    setState(() => _isProcessing = true);
+    try {
+      List<String> productIds =
+      po.items.map((e) => e['productId'] as String).toList();
 
-        setState(() {
-          for (var itemMap in selectedPO.items) {
-            final productId = itemMap['productId'];
-            final product = productMap[productId];
+      final products = await _inventoryService.getProductsByIds(productIds);
+      final productMap = {for (var p in products) p.id: p};
 
-            if (product != null) {
-              double qtyDouble = 0;
-              if (itemMap['manageStockSeparately'] == true) {
-                Map<String, dynamic> sepQty = itemMap['separateQuantities'] ?? {};
-                sepQty.forEach((k, v) => qtyDouble += (v as num).toDouble());
-              } else {
-                qtyDouble = (itemMap['quantity'] as num).toDouble();
-              }
+      setState(() {
+        // [TÙY CHỌN] Nếu muốn xóa danh sách cũ khi nhập mới thì uncomment dòng dưới
+        // _items.clear();
 
-              int qty = qtyDouble.toInt();
-              if (qty <= 0) qty = 1;
+        for (var itemMap in po.items) {
+          final productId = itemMap['productId'];
+          final product = productMap[productId];
 
-              final existingIndex = _items.indexWhere((e) => e.product.id == productId);
-              if (existingIndex != -1) {
-                _items[existingIndex].quantity = qty;
-              } else {
-                _items.add(ProductToPrint(
-                  product: product,
-                  quantity: qty,
-                  unit: itemMap['unit'] ?? product.unit ?? '',
-                ));
-              }
+          if (product != null) {
+            double qtyDouble = 0;
+            if (itemMap['manageStockSeparately'] == true) {
+              Map<String, dynamic> sepQty = itemMap['separateQuantities'] ?? {};
+              sepQty.forEach((k, v) => qtyDouble += (v as num).toDouble());
+            } else {
+              qtyDouble = (itemMap['quantity'] as num).toDouble();
+            }
+
+            int qty = qtyDouble.toInt();
+            if (qty <= 0) qty = 1;
+
+            final existingIndex = _items.indexWhere((e) => e.product.id == productId);
+            if (existingIndex != -1) {
+              _items[existingIndex].quantity = qty;
+            } else {
+              _items.add(ProductToPrint(
+                product: product,
+                quantity: qty,
+                unit: itemMap['unit'] ?? product.unit ?? '',
+              ));
             }
           }
-        });
-        ToastService().show(message: "Đã nhập từ phiếu ${selectedPO.code}", type: ToastType.success);
-      } catch (e) {
-        ToastService().show(message: "Lỗi: $e", type: ToastType.error);
-      } finally {
-        setState(() => _isProcessing = false);
-      }
+        }
+      });
+      ToastService().show(message: "Đã nhập từ phiếu ${po.code}", type: ToastType.success);
+    } catch (e) {
+      ToastService().show(message: "Lỗi: $e", type: ToastType.error);
+    } finally {
+      setState(() => _isProcessing = false);
     }
   }
 
@@ -400,7 +417,7 @@ class _ProductLabelPrintScreenState extends State<ProductLabelPrintScreen> {
 
   Widget _buildItemCard(int index) {
     final item = _items[index];
-    final bool isDesktop = MediaQuery.of(context).size.width > 800;
+    final bool isDesktop = MediaQuery.of(context).size.width > 700;
 
     // 1. Lấy danh sách ĐVT
     final List<String> availableUnits = [];

@@ -77,6 +77,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
   bool _isLoading = false;
   bool _canEditIsVisible = false;
   bool _canEditCost = false;
+  bool _canDelete = false;
 
   XFile? _imageXFile;
   bool _isVisibleInMenu = true;
@@ -90,9 +91,11 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
     if (widget.currentUser.role == 'owner') {
       _canEditIsVisible = true;
       _canEditCost = true;
+      _canDelete = true;
     } else {
       _canEditIsVisible = widget.currentUser.permissions?['products']?['canEditIsVisible'] ?? false;
       _canEditCost = widget.currentUser.permissions?['products']?['canEditCost'] ?? false;
+      _canDelete = widget.currentUser.permissions?['products']?['canDeleteProduct'] ?? false;
     }
     if (_isEditMode && widget.productToEdit != null) {
       final product = widget.productToEdit!;
@@ -815,7 +818,7 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                 ),
 
               // 2. Nút Xóa (Chỉ hiện khi đang sửa)
-              if (_isEditMode)
+              if (_isEditMode && _canDelete)
                 IconButton(
                   icon: const Icon(Icons.delete, color: Colors.red),
                   tooltip: 'Xóa sản phẩm',

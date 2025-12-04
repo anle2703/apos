@@ -11,6 +11,7 @@ import 'create_purchase_order_screen.dart';
 import '../../widgets/app_dropdown.dart';
 import '../../services/toast_service.dart';
 import 'package:omni_datetime_picker/omni_datetime_picker.dart';
+import '../labels/product_label_print_screen.dart';
 
 class PurchaseOrderService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -50,11 +51,9 @@ class PurchaseOrderService {
     if (supplierName != null && supplierName.isNotEmpty) {
       query = query.where('supplierName', isEqualTo: supplierName);
     }
-
     if (createdBy != null && createdBy.isNotEmpty) {
       query = query.where('createdByName', isEqualTo: createdBy);
     }
-
     if (updatedBy != null && updatedBy.isNotEmpty) {
       query = query.where('updatedByName', isEqualTo: updatedBy);
     }
@@ -81,7 +80,6 @@ class PurchaseOrderService {
           .toSet();
       return names.toList()..sort();
     } catch (e) {
-      debugPrint('Lỗi khi lấy danh sách nhà cung cấp: $e');
       return [];
     }
   }
@@ -99,7 +97,6 @@ class PurchaseOrderService {
           .toSet();
       return names.toList()..sort();
     } catch (e) {
-      debugPrint('Lỗi khi lấy danh sách người dùng: $e');
       return [];
     }
   }
@@ -109,7 +106,8 @@ class PurchaseOrdersListScreen extends StatefulWidget {
   final UserModel currentUser;
   final String? initialPurchaseOrderId;
 
-  const PurchaseOrdersListScreen({super.key,
+  const PurchaseOrdersListScreen({
+    super.key,
     required this.currentUser,
     this.initialPurchaseOrderId,
   });
@@ -133,7 +131,11 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
   bool _isLoadingFilters = true;
   List<String> _supplierOptions = [];
   List<String> _userOptions = [];
-  final List<String> _statusOptions = ['Hoàn thành', 'Chưa thanh toán đủ', 'Đã hủy'];
+  final List<String> _statusOptions = [
+    'Hoàn thành',
+    'Nợ',
+    'Đã hủy'
+  ];
   bool _isFilteredById = false;
 
   @override
@@ -181,40 +183,38 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
           if (!_statusOptions.contains('Tất cả')) {
             _statusOptions.insert(0, 'Tất cả');
           }
-
           _isLoadingFilters = false;
         });
       }
     } catch (e) {
-      debugPrint("Lỗi khi tải dữ liệu bộ lọc: $e");
-      if (mounted) {
-        setState(() {
-          _isLoadingFilters = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Không thể tải các tùy chọn bộ lọc.')),
-        );
-      }
+      if (mounted) setState(() => _isLoadingFilters = false);
     }
   }
 
   void _navigateToCreateScreen() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => CreatePurchaseOrderScreen(currentUser: widget.currentUser),
+        builder: (context) =>
+            CreatePurchaseOrderScreen(currentUser: widget.currentUser),
       ),
     );
   }
 
   void _navigateToEditScreen(PurchaseOrderModel order) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => CreatePurchaseOrderScreen(
-          currentUser: widget.currentUser,
-          existingPurchaseOrder: order,
+    if (_canEditPurchaseOrder) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => CreatePurchaseOrderScreen(
+            currentUser: widget.currentUser,
+            existingPurchaseOrder: order,
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      ToastService().show(
+          message: 'Bạn chưa được cấp quyền sửa phiếu nhập.',
+          type: ToastType.warning);
+    }
   }
 
   void _showFilterModal() {
@@ -237,7 +237,6 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
           builder: (BuildContext context, StateSetter setModalState) {
             final dateFormat = DateFormat('HH:mm dd/MM/yy');
 
-            // Hàm gọi Omni Picker mới
             Future<void> pickDateRange() async {
               if (!mounted) return;
               List<DateTime>? pickedRange = await showOmniDateTimeRangePicker(
@@ -261,16 +260,9 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
               }
             }
 
-            // Tạo Subtitle cho ListTile
-            String subtitleText;
-            if (tempStartDate == null && tempEndDate == null) {
-              subtitleText = 'Chưa chọn';
-            } else {
-              final start = tempStartDate != null ? dateFormat.format(tempStartDate!) : '...';
-              final end = tempEndDate != null ? dateFormat.format(tempEndDate!) : '...';
-              subtitleText = '$start - $end';
-            }
-
+            String subtitleText = (tempStartDate == null && tempEndDate == null)
+                ? 'Chưa chọn'
+                : '${tempStartDate != null ? dateFormat.format(tempStartDate!) : '...'} - ${tempEndDate != null ? dateFormat.format(tempEndDate!) : '...'}';
 
             return Padding(
               padding: EdgeInsets.fromLTRB(20, 20, 20,
@@ -281,16 +273,14 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
                   Text('Lọc Phiếu Nhập Hàng',
                       style: Theme.of(context).textTheme.headlineMedium),
                   const Divider(),
-
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                    leading: const Icon(Icons.calendar_month, color: AppTheme.primaryColor),
-                    title: Text('Khoảng thời gian', style: AppTheme.regularGreyTextStyle),
-                    subtitle: Text(
-                      subtitleText,
-                      style: AppTheme.boldTextStyle.copyWith(fontSize: 16),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    leading: const Icon(Icons.calendar_month,
+                        color: AppTheme.primaryColor),
+                    title: Text('Khoảng thời gian',
+                        style: AppTheme.regularGreyTextStyle),
+                    subtitle: Text(subtitleText,
+                        style: AppTheme.boldTextStyle.copyWith(fontSize: 16)),
                     onTap: pickDateRange,
                     trailing: (tempStartDate != null || tempEndDate != null)
                         ? IconButton(
@@ -302,32 +292,46 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
                     )
                         : null,
                   ),
-
                   AppDropdown<String>(
                     labelText: 'Nhà cung cấp',
                     value: tempSupplier,
-                    items: _supplierOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                    onChanged: (value) => setModalState(() => tempSupplier = (value == 'Tất cả') ? null : value),
+                    items: _supplierOptions
+                        .map((item) =>
+                        DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (value) => setModalState(() =>
+                    tempSupplier = (value == 'Tất cả') ? null : value),
                   ),
                   AppDropdown<String>(
                     labelText: 'Trạng thái',
                     value: tempStatus,
-                    items: _statusOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                    onChanged: (value) => setModalState(() => tempStatus = (value == 'Tất cả') ? null : value),
+                    items: _statusOptions
+                        .map((item) =>
+                        DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (value) => setModalState(
+                            () => tempStatus = (value == 'Tất cả') ? null : value),
                   ),
                   AppDropdown<String>(
                     labelText: 'Người tạo',
                     value: tempCreator,
-                    items: _userOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                    onChanged: (value) => setModalState(() => tempCreator = (value == 'Tất cả') ? null : value),
+                    items: _userOptions
+                        .map((item) =>
+                        DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (value) => setModalState(
+                            () => tempCreator = (value == 'Tất cả') ? null : value),
                   ),
                   AppDropdown<String>(
                     labelText: 'Người sửa',
                     value: tempUpdater,
-                    items: _userOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                    onChanged: (value) => setModalState(() => tempUpdater = (value == 'Tất cả') ? null : value),
+                    items: _userOptions
+                        .map((item) =>
+                        DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (value) => setModalState(
+                            () => tempUpdater = (value == 'Tất cả') ? null : value),
                   ),
-
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -375,7 +379,8 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isFilteredById ? 'Chi tiết Phiếu Nhập' : 'Phiếu nhập hàng'),
+        title:
+        Text(_isFilteredById ? 'Chi tiết Phiếu Nhập' : 'Phiếu nhập hàng'),
         actions: [
           if (!_isFilteredById) ...[
             IconButton(
@@ -421,39 +426,29 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            debugPrint("Lỗi Firestore Stream: ${snapshot.error}");
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  'Đã xảy ra lỗi. Vui lòng kiểm tra Debug Console để biết chi tiết và tạo Index cho Firestore nếu được yêu cầu.',
-                  textAlign: TextAlign.center,
-                  style: AppTheme.regularGreyTextStyle,
-                ),
-              ),
-            );
+            return const Center(child: Text('Lỗi khi tải dữ liệu'));
           }
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            final message = _isFilteredById
-                ? 'Không tìm thấy chi tiết phiếu nhập.'
-                : 'Không tìm thấy phiếu nhập hàng nào.\nHãy thử lại với bộ lọc khác hoặc nhấn "+" để tạo phiếu mới.';
-            return Center(
-              child: Text(
-                message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-            );
+            return const Center(child: Text('Không tìm thấy phiếu nhập nào.'));
           }
+
           final purchaseOrders = snapshot.data!;
-          return ListView.builder(
+
+          // FIX LỖI: Sử dụng ListView.separated và thêm cacheExtent
+          return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: purchaseOrders.length,
+            // [QUAN TRỌNG] cacheExtent giúp giữ widget sống lâu hơn khi cuộn,
+            // tránh lỗi hitTest khi widget bị destroy quá nhanh.
+            cacheExtent: 500,
+            separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
+              final order = purchaseOrders[index];
               return _PurchaseOrderCard(
-                canEdit: _canEditPurchaseOrder,
-                order: purchaseOrders[index],
-                onTap: () => _navigateToEditScreen(purchaseOrders[index]),
+                key: ValueKey(order.id),
+                order: order,
+                currentUser: widget.currentUser,
+                onEditTap: () => _navigateToEditScreen(order),
               );
             },
           );
@@ -464,113 +459,216 @@ class _PurchaseOrdersListScreenState extends State<PurchaseOrdersListScreen> {
 }
 
 class _PurchaseOrderCard extends StatelessWidget {
+  final UserModel currentUser;
   final PurchaseOrderModel order;
-  final VoidCallback onTap;
-  final bool canEdit;
+  final VoidCallback onEditTap;
 
-  const _PurchaseOrderCard({required this.order,
-    required this.onTap,
-    required this.canEdit,
+  const _PurchaseOrderCard({
+    super.key,
+    required this.order,
+    required this.currentUser,
+    required this.onEditTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bool isDesktop = MediaQuery.of(context).size.width > 600;
+
+    final bool isRetail = currentUser.businessType == 'retail';
+
     final statusColor = order.status == 'Hoàn thành'
         ? Colors.green
         : order.status == 'Đã hủy'
         ? Colors.red
         : Colors.orange;
 
+    String displayStatus = order.status;
+    if (order.status == 'Nợ') {
+      final double debt = (order.debtAmount).toDouble();
+      displayStatus = 'Dư nợ: ${formatNumber(debt)} đ';
+    }
+
     return Card(
       elevation: 2,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: () {
-          if (canEdit) {
-              onTap();
-          } else {
-            ToastService().show(
-                message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                type: ToastType.warning);
-          }
-        },        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 1. PHẦN THÔNG TIN
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onEditTap,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    order.code,
-                    style: AppTheme.boldTextStyle.copyWith(fontSize: 16, color: AppTheme.primaryColor),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        order.code,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: AppTheme.primaryColor),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusColor.withAlpha(25),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          displayStatus,
+                          style: TextStyle(
+                              color: statusColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13),
+                        ),
+                      )
+                    ],
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: statusColor.withAlpha(25),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      order.status,
-                      style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 14),
-                    ),
-                  )
+                  const Divider(height: 6, thickness: 0.5, color: Colors.grey,),
+
+                  _buildSimpleRow(Icons.store, 'NCC:', order.supplierName),
+                  const SizedBox(height: 4),
+
+                  if (isDesktop)
+                  // [DESKTOP] Dùng isCompact: true để các cột nằm gần nhau
+                    Row(
+                      children: [
+                        Flexible(
+                            child: _buildSimpleRow(Icons.person_outline, 'Tạo:', order.createdBy, isCompact: true)
+                        ),
+                        const SizedBox(width: 24), // Khoảng cách cố định 24px
+                        Flexible(
+                            child: _buildSimpleRow(Icons.access_time, 'Lúc:', DateFormat('HH:mm dd/MM/yyyy').format(order.createdAt), isCompact: true)
+                        ),
+                      ],
+                    )
+                  else ...[
+                    // [MOBILE] Giữ nguyên hiển thị dọc
+                    _buildSimpleRow(Icons.person_outline, 'Tạo:', order.createdBy),
+                    const SizedBox(height: 4),
+                    _buildSimpleRow(Icons.access_time, 'Lúc:', DateFormat('HH:mm dd/MM/yyyy').format(order.createdAt)),
+                  ],
+
+                  if (order.updatedAt != null) ...[
+                    const SizedBox(height: 4),
+                    if (isDesktop)
+                    // [DESKTOP] Dùng isCompact: true
+                      Row(
+                        children: [
+                          Flexible(
+                            child: _buildSimpleRow(
+                              Icons.edit_outlined,
+                              order.status == 'Đã hủy' ? 'Hủy:' : 'Sửa:',
+                              order.updatedBy ?? 'N/A',
+                              isCompact: true,
+                            ),
+                          ),
+                          const SizedBox(width: 24), // Khoảng cách cố định 24px
+                          Flexible(
+                            child: _buildSimpleRow(
+                              Icons.history,
+                              'Lúc:',
+                              DateFormat('HH:mm dd/MM/yyyy').format(order.updatedAt!),
+                              isCompact: true,
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
+                      // [MOBILE]
+                      _buildSimpleRow(
+                        Icons.edit_outlined,
+                        order.status == 'Đã hủy' ? 'Hủy:' : 'Sửa:',
+                        order.updatedBy ?? 'N/A',
+                      ),
+                      const SizedBox(height: 4),
+                      _buildSimpleRow(
+                        Icons.history,
+                        'Lúc:',
+                        DateFormat('HH:mm dd/MM/yyyy').format(order.updatedAt!),
+                      ),
+                    ],
+                  ],
                 ],
               ),
-              const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
-              _buildInfoRow(Icons.store_mall_directory_outlined, 'NCC:', order.supplierName),
-              const SizedBox(height: 4),
-              _buildInfoRow(Icons.person_outline, 'Người tạo:', order.createdBy),
-              const SizedBox(height: 4),
-              _buildInfoRow(
-                Icons.calendar_month,
-                'Ngày tạo:',
-                DateFormat('HH:mm dd/MM/yyyy').format(order.createdAt),              ),
-              if (order.updatedAt != null) ...[
-                const SizedBox(height: 4),
-                _buildInfoRow(
-                  Icons.edit_outlined,
-                  order.status == 'Đã hủy' ? 'Người hủy:' : 'Người sửa:',
-                  order.updatedBy ?? 'Không rõ',
-                ),
-                const SizedBox(height: 4),
-                _buildInfoRow(
-                  Icons.history_outlined,
-                  order.status == 'Đã hủy' ? 'Ngày hủy:' : 'Ngày sửa:',
-                  DateFormat('HH:mm dd/MM/yyyy').format(order.updatedAt!),
+            ),
+          ),
+
+          // 2. PHẦN NÚT BẤM VÀ GIÁ
+          Container(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (isRetail)
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ProductLabelPrintScreen(
+                            currentUser: currentUser,
+                            initialPurchaseOrder: order,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.print, size: 18),
+                    label: const Text("In Tem"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: AppTheme.primaryColor,
+                      elevation: 0,
+                      side: const BorderSide(color: AppTheme.primaryColor),
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  )
+                else
+                  const SizedBox(),
+
+                Text(
+                  '${formatNumber(order.totalAmount)} đ',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ],
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  'Tổng cộng: ${formatNumber(order.totalAmount)} đ',
-                  style: AppTheme.boldTextStyle.copyWith(fontSize: 16),
-                ),
-              )
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value) {
+  Widget _buildSimpleRow(IconData icon, String label, String value, {Color? textColor, bool isCompact = false}) {
+    final color = textColor ?? Colors.grey[600];
+    final valueColor = textColor ?? Colors.black87;
+
+    Widget textWidget = Text(
+        value,
+        style: TextStyle(color: valueColor, fontSize: 14),
+        overflow: TextOverflow.ellipsis
+    );
+
+    Widget contentWidget = isCompact
+        ? Flexible(fit: FlexFit.loose, child: textWidget)
+        : Expanded(child: textWidget);
+
     return Row(
+      mainAxisSize: MainAxisSize.min, // Giúp Row co lại vừa với nội dung
       children: [
-        Icon(icon, size: 16, color: Colors.black),
+        Icon(icon, size: 16, color: color),
         const SizedBox(width: 8),
-        Text(label, style: AppTheme.regularGreyTextStyle.copyWith(color: Colors.black, fontSize: 16)),
+        Text(label, style: TextStyle(color: color, fontSize: 14)),
         const SizedBox(width: 4),
-        Expanded(
-          child: Text(
-            value,
-            style: AppTheme.regularGreyTextStyle.copyWith(color: Colors.black, fontSize: 16),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
+        contentWidget,
       ],
     );
   }

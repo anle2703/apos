@@ -110,10 +110,16 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   bool _promptForCash = true;
   List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
   StreamSubscription? _buyXGetYSub;
+  bool _canSell = false;
 
   @override
   void initState() {
     super.initState();
+    if (widget.currentUser.role == 'owner') {
+      _canSell = true;
+    } else {
+      _canSell = widget.currentUser.permissions?['sales']?['canSell'] ?? false;
+    }
     _settingsService = SettingsService();
 
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -1765,21 +1771,23 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   ),
                 ),
               ),
-
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 2,
-                child: ElevatedButton(
-                  onPressed: tab.items.isNotEmpty ? _handlePayment : null,
-                  style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: AppTheme.primaryColor,
-                      foregroundColor: Colors.white,
-                      elevation: 2
+              if (_canSell) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: tab.items.isNotEmpty ? _handlePayment : null,
+                    style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        backgroundColor: AppTheme.primaryColor,
+                        foregroundColor: Colors.white,
+                        elevation: 2
+                    ),
+                    child: const Text("THANH TOÁN", style: TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
                   ),
-                  child: const Text("THANH TOÁN", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ),
-              )
+                )
+              ],
             ],
           )
         ],

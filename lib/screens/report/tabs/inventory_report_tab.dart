@@ -1482,7 +1482,6 @@ class InventoryReportTabState extends State<InventoryReportTab> {
     double value, {
     required int flex,
     Color? color,
-    bool isBold = false,
     TextAlign align = TextAlign.center,
   }) {
     if (value == 0) {
@@ -1502,7 +1501,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
         textAlign: align,
         style: TextStyle(
           color: color,
-          fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+          fontWeight: FontWeight.bold,
           fontSize: 16,
         ),
       ),
@@ -1511,13 +1510,12 @@ class InventoryReportTabState extends State<InventoryReportTab> {
 
   Widget _buildTransactionRow(InventoryTransaction tx) {
     final timeStyle = const TextStyle(fontSize: 14, color: Colors.black);
-    final codeStyle = const TextStyle(fontSize: 14, color: AppTheme.primaryColor, fontWeight: FontWeight.bold);
+    final codeStyle = const TextStyle(fontSize: 14, color: AppTheme.primaryColor);
     final refStyle = const TextStyle(fontSize: 14, color: Colors.black);
 
     // Style cho số lượng
     final qtyStyle = TextStyle(
       fontSize: 14,
-      fontWeight: FontWeight.bold,
       color: tx.type == 'NH' ? Colors.blue : Colors.red,
     );
     final qtyString = '${tx.type == 'NH' ? '+' : '-'}${formatNumber(tx.quantity)}';
