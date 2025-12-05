@@ -139,11 +139,37 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
             continue;
           }
 
-          double currentBaseTotal = 0;
-          double discountAmount = 0;
+          double discountVal = 0;
+          bool isPercent = true;
 
-          // A. Tính giá gốc
+          DiscountItem? discountRule;
+          if (discountCache.containsKey(product.id)) {
+            discountRule = discountCache[product.id];
+          } else {
+            discountRule = _discountService.findBestDiscountForProduct(
+              product: product,
+              activeDiscounts: activeDiscounts,
+              customer: null, // Ở màn hình chọn bàn chưa biết khách cụ thể nếu chưa vào đơn
+              checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
+            );
+            discountCache[product.id] = discountRule;
+          }
+
+          if (discountRule != null) {
+            discountVal = discountRule.value;
+            isPercent = discountRule.isPercent;
+          } else {
+            // Lấy giảm giá thủ công
+            discountVal = (itemMap['discountValue'] as num?)?.toDouble() ?? 0.0;
+            final String unit = (itemMap['discountUnit'] as String?) ?? '%';
+            isPercent = (unit == '%');
+          }
+
+          // --- BƯỚC 2: TÍNH TIỀN THEO TỪNG LOẠI SẢN PHẨM ---
+          double itemFinalTotal = 0;
+
           if (product.serviceSetup?['isTimeBased'] == true) {
+            // A. LOGIC DỊCH VỤ TÍNH GIỜ (ĐỒNG BỘ VỚI ORDERSCREEN)
             final startTime = itemMap['addedAt'] as Timestamp;
             final isPaused = itemMap['isPaused'] as bool? ?? false;
             final pausedAt = itemMap['pausedAt'] as Timestamp?;
@@ -156,66 +182,49 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
               pausedAt: pausedAt,
               totalPausedDurationInSeconds: totalPausedDuration,
             );
-            currentBaseTotal = timeResult.totalPrice;
+
+            // Duyệt qua từng Block để áp dụng giảm giá vào ĐƠN GIÁ GIỜ
+            for (var block in timeResult.blocks) {
+              double effectiveRate = block.ratePerHour;
+
+              if (discountVal > 0) {
+                if (isPercent) {
+                  // Giảm theo % trên đơn giá giờ
+                  effectiveRate = block.ratePerHour * (1 - discountVal / 100);
+                } else {
+                  // Giảm tiền mặt trên đơn giá giờ (VNĐ/h)
+                  effectiveRate = block.ratePerHour - discountVal;
+                }
+              }
+              if (effectiveRate < 0) effectiveRate = 0;
+
+              // Tính thành tiền của block
+              double blockCost = (effectiveRate / 60.0) * block.minutes;
+              itemFinalTotal += blockCost;
+            }
+            // Làm tròn tổng tiền của món này giống OrderScreen
+            itemFinalTotal = itemFinalTotal.roundToDouble();
+
           } else {
+            // B. LOGIC HÀNG HÓA THƯỜNG
             final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
             final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-            currentBaseTotal = price * quantity;
-          }
+            double baseTotal = price * quantity;
+            double discountAmount = 0;
 
-          // B. Tìm Discount (Có Cache)
-          DiscountItem? discountRule;
-          if (discountCache.containsKey(product.id)) {
-            discountRule = discountCache[product.id];
-          } else {
-            discountRule = _discountService.findBestDiscountForProduct(
-              product: product,
-              activeDiscounts: activeDiscounts,
-              customer: null,
-              checkTime: (itemMap['addedAt'] as Timestamp).toDate(),
-            );
-            discountCache[product.id] = discountRule;
-          }
-
-          if (discountRule != null) {
-            if (discountRule.isPercent) {
-              discountAmount = currentBaseTotal * (discountRule.value / 100);
-            } else {
-              if (product.serviceSetup?['isTimeBased'] == true) {
-                // Tính lại giờ cho discount VNĐ
-                final startTime = itemMap['addedAt'] as Timestamp;
-                final isPaused = itemMap['isPaused'] as bool? ?? false;
-                final pausedAt = itemMap['pausedAt'] as Timestamp?;
-                final totalPausedDuration = (itemMap['totalPausedDurationInSeconds'] as num?)?.toInt() ?? 0;
-                final timeResult = TimeBasedPricingService.calculatePriceWithBreakdown(
-                  product: product,
-                  startTime: startTime,
-                  isPaused: isPaused,
-                  pausedAt: pausedAt,
-                  totalPausedDurationInSeconds: totalPausedDuration,
-                );
-                double totalHours = timeResult.totalMinutesBilled / 60.0;
-                discountAmount = totalHours * discountRule.value;
+            if (discountVal > 0) {
+              if (isPercent) {
+                discountAmount = baseTotal * (discountVal / 100);
               } else {
-                final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-                discountAmount = quantity * discountRule.value;
+                // Với hàng thường: Giảm giá VNĐ trừ thẳng vào tổng (hoặc nhân số lượng tùy logic Store)
+                // Logic phổ biến: Discount Val * Số lượng (để khớp với đơn giá giảm)
+                discountAmount = discountVal * quantity;
               }
             }
-          } else {
-            // Fallback giảm giá thủ công
-            final double storedDiscountVal = (itemMap['discountValue'] as num?)?.toDouble() ?? 0.0;
-            final String storedDiscountUnit = (itemMap['discountUnit'] as String?) ?? '%';
-            if (storedDiscountVal > 0) {
-              if (storedDiscountUnit == '%') {
-                discountAmount = currentBaseTotal * (storedDiscountVal / 100);
-              } else {
-                discountAmount = storedDiscountVal;
-              }
-            }
+            itemFinalTotal = (baseTotal - discountAmount).clamp(0, double.infinity);
           }
 
-          double itemFinalPrice = (currentBaseTotal - discountAmount).clamp(0, double.infinity);
-          recalculatedTotal += itemFinalPrice;
+          recalculatedTotal += itemFinalTotal;
         }
         order.totalAmount = recalculatedTotal;
       }
