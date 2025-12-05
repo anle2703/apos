@@ -1716,14 +1716,24 @@ class _OrderScreenState extends State<OrderScreen> {
               if (context.mounted) Navigator.of(context).pop();
             }
           } else if (_localChanges.isNotEmpty) {
-            // Logic cũ: Tự động lưu khi thoát
-            if (isBookingTable) {
-              _saveOrder();
-              if (context.mounted) Navigator.of(context).pop(result);
-            } else {
-              await _saveOrder();
-              if (context.mounted) Navigator.of(context).pop(result);
-            }
+
+            // --- SỬA ĐOẠN NÀY ĐỂ CHẠY NGẦM ---
+
+            // 1. Gọi hàm lưu NHƯNG KHÔNG DÙNG 'await'
+            // Việc này giúp lệnh lưu chạy song song
+            _saveOrder().then((success) {
+              if (!success) {
+                debugPrint("Lưu ngầm thất bại (User đã thoát)");
+              } else {
+                debugPrint("Đã lưu ngầm thành công sau khi thoát");
+              }
+            });
+
+            // 2. Cho phép thoát màn hình NGAY LẬP TỨC
+            if (context.mounted) Navigator.of(context).pop(result);
+
+            // ----------------------------------
+
           } else {
             if (context.mounted) Navigator.of(context).pop(result);
           }
