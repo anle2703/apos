@@ -41,9 +41,9 @@ class OrderScreen extends StatefulWidget {
 
   const OrderScreen(
       {super.key,
-      required this.currentUser,
-      required this.table,
-      this.initialOrder});
+        required this.currentUser,
+        required this.table,
+        this.initialOrder});
 
   @override
   State<OrderScreen> createState() => _OrderScreenState();
@@ -55,13 +55,20 @@ class _OrderScreenState extends State<OrderScreen> {
   StreamSubscription<StoreSettings>? _settingsSub;
   StreamSubscription<List<QuickNoteModel>>? _quickNotesSub;
 
-  double get _totalAmount =>
-      _displayCart.values.fold(0, (total, item) => total + item.subtotal);
+  double get _totalAmount => _displayCart.values.fold(0, (total, item) {
+    final isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
+    if (isTimeBased) {
+      return total + item.price;
+    } else {
+      return total + item.subtotal;
+    }
+  });
   final FocusNode _searchFocusNode = FocusNode();
   Timer? _priceUpdateTimer;
   final Map<String, OrderItem> _cart = {};
   final Map<String, OrderItem> _localChanges = {};
   final Map<String, TimePricingResult> _timeBasedDataCache = {};
+  final Set<String> _manuallyDiscountedItems = {};
   int _numberOfCustomers = 1;
 
   Map<String, OrderItem> get _displayCart {
@@ -351,7 +358,7 @@ class _OrderScreenState extends State<OrderScreen> {
           }
         } else {
           final productModel =
-              _menuProducts.firstWhereOrNull((p) => p.id == giftId);
+          _menuProducts.firstWhereOrNull((p) => p.id == giftId);
           if (productModel != null) {
             final newItem = OrderItem(
               product: productModel,
@@ -407,13 +414,15 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
-  void _recalculateCartDiscounts() {
-    bool hasChanges = false;
+  void _recalculateCartDiscounts({bool triggerSetState = true}) {
+    bool hasDiscountChanges = false;
     final Map<String, OrderItem> updates = {};
     final allItems = {..._cart, ..._localChanges};
 
+    // 1. TÍNH TOÁN CÁC THAY ĐỔI VỀ GIẢM GIÁ
     for (final entry in allItems.entries) {
       final key = entry.key;
+      if (_manuallyDiscountedItems.contains(key)) continue;
       final item = entry.value;
 
       if (item.status == 'cancelled') continue;
@@ -440,14 +449,10 @@ class _OrderScreenState extends State<OrderScreen> {
         if (isPercent) {
           newCalculatedAmount = configValue;
         } else {
-          // [SỬA LỖI TẠI ĐÂY]
           final isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
           if (isTimeBased) {
-            // Logic cũ: newCalculatedAmount = configValue * totalHours; (SAI)
-            // Logic mới: Giữ nguyên giá trị cấu hình làm giá giảm/giờ
             newCalculatedAmount = configValue;
           } else {
-            // Món thường: Vẫn giữ nguyên logic cũ (Tổng tiền giảm)
             newCalculatedAmount = configValue;
           }
         }
@@ -456,28 +461,30 @@ class _OrderScreenState extends State<OrderScreen> {
       bool valueChanged = (currentItemVal - newCalculatedAmount).abs() > 0.001;
       bool unitChanged = currentItemUnit != newUnit;
 
-      // Chỉ cập nhật nếu có sự thay đổi từ cấu hình Khuyến mãi tự động
-      // Nếu người dùng đã sửa tay (User override), cần cân nhắc logic khác,
-      // nhưng ở đây ta ưu tiên logic tự động nếu có.
-      if ((valueChanged || unitChanged) && discountItem != null) {
+      if (valueChanged || unitChanged) {
         updates[key] = item.copyWith(
           discountValue: newCalculatedAmount,
           discountUnit: newUnit,
         );
-        hasChanges = true;
+        hasDiscountChanges = true;
       }
     }
 
-    if (hasChanges) {
-      if (mounted) {
-        setState(() {
-          _localChanges.addAll(updates);
-        });
-      }
+    if (hasDiscountChanges || updates.isNotEmpty) {
+      _localChanges.addAll(updates);
+    }
+
+    // Gọi hàm tính tiền giờ nhưng CHUYỀN triggerSetState xuống
+    _updateTimeBasedPrices(triggerSetState: triggerSetState);
+
+    // Xử lý logic cho món thường nếu cần vẽ lại
+    if (triggerSetState && hasDiscountChanges) {
+      bool hasTimeBasedItem = _displayCart.values.any((i) => i.product.serviceSetup?['isTimeBased'] == true);
+      if (!hasTimeBasedItem && mounted) setState(() {});
     }
   }
 
-  void _updateTimeBasedPrices() {
+  void _updateTimeBasedPrices({bool triggerSetState = true}) {
     if (!mounted) return;
     bool needsUpdate = false;
 
@@ -487,9 +494,9 @@ class _OrderScreenState extends State<OrderScreen> {
       if (serviceSetup != null &&
           serviceSetup['isTimeBased'] == true &&
           !item.isPaused) {
-        // 1. Tính giá gốc chuẩn theo thời gian
-        final pricingResult =
-            TimeBasedPricingService.calculatePriceWithBreakdown(
+
+        // 1. Tính toán thời gian & block gốc từ Service
+        final pricingResult = TimeBasedPricingService.calculatePriceWithBreakdown(
           product: item.product,
           startTime: item.addedAt,
           isPaused: item.isPaused,
@@ -497,56 +504,57 @@ class _OrderScreenState extends State<OrderScreen> {
           totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
         );
 
-        // 2. Tìm khuyến mãi (nếu có)
-        final discountItem = _discountService.findBestDiscountForProduct(
-          product: item.product,
-          activeDiscounts: _activeDiscounts,
-          customer: _selectedCustomer,
-          checkTime: item.addedAt.toDate(),
-        );
+        // 2. Lấy thông tin khuyến mãi hiện tại của Item
+        double currentDiscountVal = item.discountValue ?? 0;
+        String currentDiscountUnit = item.discountUnit ?? '%';
 
-        double newDiscountVal = item.discountValue ?? 0;
-        String newDiscountUnit = item.discountUnit ?? '%';
+        // 3. [QUAN TRỌNG] TÍNH LẠI GIÁ (REAL COST) DỰA TRÊN GIÁ NIÊM YẾT MỚI
+        // Chúng ta sẽ tạo lại danh sách blocks với giá đã giảm để hiển thị và lưu trữ
+        double realTotalCost = 0;
+        List<TimeBlock> updatedBlocks = [];
 
-        if (discountItem != null) {
-          newDiscountUnit = discountItem.isPercent ? '%' : 'VNĐ';
-          newDiscountVal = discountItem.value;
-        }
+        for (var block in pricingResult.blocks) {
+          double effectiveRate = block.ratePerHour;
 
-        // 3. [LOGIC MỚI QUAN TRỌNG]
-        double priceToStore = pricingResult.totalPrice;
-
-        if (newDiscountUnit == 'VNĐ' && newDiscountVal > 0) {
-          // Nếu giảm theo VNĐ/h:
-          // Bước A: Tính tổng tiền thực tế phải trả (Real Cost)
-          double realTotalCost = 0;
-          for (var block in pricingResult.blocks) {
-            double reducedRate = block.ratePerHour - newDiscountVal;
-            if (reducedRate < 0) reducedRate = 0;
-            // Tính tiền từng block với giá đã giảm
-            realTotalCost += (reducedRate / 60.0) * block.minutes;
+          // Áp dụng giảm giá vào đơn giá giờ
+          if (currentDiscountVal > 0) {
+            if (currentDiscountUnit == 'VNĐ') {
+              // Giảm trực tiếp đơn giá: 90k - 10k = 80k
+              effectiveRate = (block.ratePerHour - currentDiscountVal);
+            } else {
+              // Giảm theo %: 90k * (1 - 10%) = 81k
+              effectiveRate = block.ratePerHour * (1 - currentDiscountVal / 100);
+            }
           }
 
-          // Bước B: Điều chỉnh giá lưu (Price) để khớp với công thức Subtotal
-          // Vì Subtotal = Price - Discount
-          // Nên ta lưu: Price = RealCost + Discount
-          priceToStore = realTotalCost + newDiscountVal;
+          if (effectiveRate < 0) effectiveRate = 0;
+
+          // Tính thành tiền của block này: (Giá mới / 60) * số phút
+          double blockCost = (effectiveRate / 60.0) * block.minutes;
+
+          realTotalCost += blockCost;
+
+          // Tạo block mới với giá đã update (để in bill hiển thị đúng giá 80k)
+          updatedBlocks.add(TimeBlock(
+            label: block.label,
+            startTime: block.startTime,
+            endTime: block.endTime,
+            ratePerHour: effectiveRate, // Lưu giá thực tế (80k)
+            minutes: block.minutes,
+            cost: blockCost, // Lưu thành tiền thực tế
+          ));
         }
 
-        // Kiểm tra thay đổi
-        bool priceChanged = (priceToStore - item.price).abs() > 0.01;
-        bool valChanged =
-            (newDiscountVal - (item.discountValue ?? 0)).abs() > 0.01;
+        double finalPriceToStore = realTotalCost.round().toDouble();
 
-        // 4. Cập nhật nếu có thay đổi
-        if (priceChanged ||
-            valChanged ||
-            item.discountUnit != newDiscountUnit) {
+        if ((finalPriceToStore - item.price).abs() > 1.0 ||
+            pricingResult.totalMinutesBilled != (item.priceBreakdown.isNotEmpty ? item.priceBreakdown.fold(0, (tong, b) => tong + b.minutes) : 0)) {
+
           final updatedItem = item.copyWith(
-            price: priceToStore, // Lưu giá đã điều chỉnh
-            priceBreakdown: pricingResult.blocks,
-            discountValue: newDiscountVal,
-            discountUnit: newDiscountUnit,
+            price: finalPriceToStore,
+            priceBreakdown: updatedBlocks,
+            discountValue: currentDiscountVal,
+            discountUnit: currentDiscountUnit,
           );
 
           _timeBasedDataCache[lineId] = pricingResult;
@@ -562,7 +570,8 @@ class _OrderScreenState extends State<OrderScreen> {
       }
     });
 
-    if (needsUpdate) {
+    // [QUAN TRỌNG] Chỉ gọi setState nếu triggerSetState = true
+    if (needsUpdate && triggerSetState) {
       setState(() {});
       _saveOrder(onlyTimeBasedUpdates: true);
     }
@@ -722,7 +731,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final query = value.trim();
 
     final foundProduct = _menuProducts.firstWhereOrNull((p) =>
-        p.productCode == query ||
+    p.productCode == query ||
         p.additionalBarcodes.contains(query) ||
         (p.productCode?.toLowerCase() == query.toLowerCase()) ||
         p.additionalBarcodes
@@ -760,20 +769,20 @@ class _OrderScreenState extends State<OrderScreen> {
       onPressed: (_currentOrder == null)
           ? null
           : () async {
-              final result = await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => TableTransferScreen(
-                    currentUser: widget.currentUser,
-                    sourceOrder: _currentOrder!,
-                    sourceTable: widget.table,
-                  ),
-                ),
-              );
+        final result = await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => TableTransferScreen(
+              currentUser: widget.currentUser,
+              sourceOrder: _currentOrder!,
+              sourceTable: widget.table,
+            ),
+          ),
+        );
 
-              if (result == true && mounted) {
-                Navigator.of(context).pop();
-              }
-            },
+        if (result == true && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
     );
   }
 
@@ -790,7 +799,7 @@ class _OrderScreenState extends State<OrderScreen> {
         isPaused: false,
         pausedAt: () => null,
         totalPausedDurationInSeconds:
-            item.totalPausedDurationInSeconds + pausedDuration,
+        item.totalPausedDurationInSeconds + pausedDuration,
       );
     } else {
       // --- TẠM DỪNG ---
@@ -925,7 +934,7 @@ class _OrderScreenState extends State<OrderScreen> {
       final selectedUnit = result['selectedUnit'] as String;
       final priceForUnit = result['price'] as double;
       final selectedToppings =
-          result['selectedToppings'] as Map<ProductModel, double>;
+      result['selectedToppings'] as Map<ProductModel, double>;
       final selectedNoteText = result['selectedNote'] as String?;
 
       double originalPrice = priceForUnit;
@@ -1039,7 +1048,7 @@ class _OrderScreenState extends State<OrderScreen> {
           'createdAt': FieldValue.serverTimestamp(),
           'createdByUid': widget.currentUser.uid,
           'createdByName':
-              widget.currentUser.name ?? widget.currentUser.phoneNumber,
+          widget.currentUser.name ?? widget.currentUser.phoneNumber,
           'customerId': _selectedCustomer?.id,
           'customerName': _selectedCustomer?.name,
           'customerPhone': _selectedCustomer?.phone,
@@ -1056,7 +1065,7 @@ class _OrderScreenState extends State<OrderScreen> {
       } else {
         // Cập nhật đơn hàng hiện có
         final serverItems =
-            List<Map<String, dynamic>>.from(serverData!['items'] ?? []);
+        List<Map<String, dynamic>>.from(serverData!['items'] ?? []);
         serverItems.add(serviceItem.toMap());
 
         final newTotalAmount = serverItems.fold<double>(0.0, (tong, m) {
@@ -1120,7 +1129,7 @@ class _OrderScreenState extends State<OrderScreen> {
             'createdAt': FieldValue.serverTimestamp(),
             'createdByUid': widget.currentUser.uid,
             'createdByName':
-                widget.currentUser.name ?? widget.currentUser.phoneNumber,
+            widget.currentUser.name ?? widget.currentUser.phoneNumber,
             'customerId': _selectedCustomer?.id,
             'customerName': _selectedCustomer?.name,
             'customerPhone': _selectedCustomer?.phone,
@@ -1134,7 +1143,7 @@ class _OrderScreenState extends State<OrderScreen> {
         }
 
         final serverItems =
-            List<Map<String, dynamic>>.from(serverData!['items'] ?? []);
+        List<Map<String, dynamic>>.from(serverData!['items'] ?? []);
         serverItems.add(serviceItem.toMap());
 
         final newTotalAmount = serverItems.fold<double>(0.0, (tong, m) {
@@ -1171,31 +1180,32 @@ class _OrderScreenState extends State<OrderScreen> {
   double _rawSubtotalFromMap(Map<String, dynamic> m) {
     final q = (m['quantity'] as num?)?.toDouble() ?? 0.0;
     final p = (m['price'] as num?)?.toDouble() ?? 0.0;
-
-    // --- Lấy dữ liệu mới ---
     final productData = (m['product'] as Map<String, dynamic>?) ?? {};
+    if (productData['serviceSetup']?['isTimeBased'] == true) {
+      return (m['price'] as num?)?.toDouble() ?? 0.0;
+    }
+
     final isTimeBased = productData['serviceSetup']?['isTimeBased'] == true;
     final discVal = (m['discountValue'] as num?)?.toDouble() ?? 0.0;
     final discUnit = (m['discountUnit'] as String?) ?? '%';
-    // ------------------------
 
-    double basePrice = p; // p là tổng tiền (time-based) hoặc đơn giá (normal)
+    if (isTimeBased) {
+      return p;
+    }
+
+    double basePrice = p;
     double discountedPrice = basePrice;
 
     if (discVal > 0) {
       if (discUnit == '%') {
         discountedPrice = basePrice * (1 - discVal / 100);
       } else {
-        // 'VND'
+        // 'VND' cho món thường
         discountedPrice = (basePrice - discVal).clamp(0, double.maxFinite);
       }
     }
 
-    if (isTimeBased) {
-      return discountedPrice; // Trả về tổng tiền đã chiết khấu
-    }
-
-    // Tính toán cho món thường (giống code cũ)
+    // Tính toán cho món thường + topping
     double toppingsTotal = 0.0;
     final tops = m['toppings'];
     if (tops is List) {
@@ -1208,7 +1218,6 @@ class _OrderScreenState extends State<OrderScreen> {
       }
     }
 
-    // Trả về (đơn giá đã CK * SL) + topping
     return q * discountedPrice + toppingsTotal;
   }
 
@@ -1261,7 +1270,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     final bool isBookingTable = widget.table.id.startsWith('schedule_');
     final bool hasItemsInCartWithZeroSent =
-        _cart.values.any((item) => item.sentQuantity == 0 && item.quantity > 0);
+    _cart.values.any((item) => item.sentQuantity == 0 && item.quantity > 0);
 
     if (_localChanges.isEmpty &&
         (!isBookingTable || !hasItemsInCartWithZeroSent)) {
@@ -1412,7 +1421,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> _handlePrintProvisionalBill() async {
     final itemsToPrint =
-        _displayCart.values.where((item) => item.quantity > 0).toList();
+    _displayCart.values.where((item) => item.quantity > 0).toList();
     if (itemsToPrint.isEmpty) {
       ToastService()
           .show(message: "Chưa có món nào để in.", type: ToastType.warning);
@@ -1451,7 +1460,7 @@ class _OrderScreenState extends State<OrderScreen> {
       List<OrderItem> itemsToPrint) async {
     try {
       final storeInfo =
-          await _firestoreService.getStoreDetails(widget.currentUser.storeId);
+      await _firestoreService.getStoreDetails(widget.currentUser.storeId);
       if (storeInfo == null) {
         throw Exception("Không tìm thấy thông tin cửa hàng.");
       }
@@ -1515,12 +1524,12 @@ class _OrderScreenState extends State<OrderScreen> {
         // --- TRƯỜNG HỢP: ĐƠN MỚI TINH ---
 
         final DocumentReference orderRef =
-            _firestoreService.getOrderReference(widget.table.id);
+        _firestoreService.getOrderReference(widget.table.id);
         final String newOrderId = orderRef.id;
 
         // Chuẩn bị danh sách món ăn (sentQuantity = quantity)
         final List<Map<String, dynamic>> optimisticItems =
-            _displayCart.values.map((item) {
+        _displayCart.values.map((item) {
           return item.copyWith(sentQuantity: item.quantity).toMap();
         }).toList();
 
@@ -1544,7 +1553,7 @@ class _OrderScreenState extends State<OrderScreen> {
           'createdAt': Timestamp.now(),
           'createdByUid': widget.currentUser.uid,
           'createdByName':
-              widget.currentUser.name ?? widget.currentUser.phoneNumber,
+          widget.currentUser.name ?? widget.currentUser.phoneNumber,
         };
 
         // SỬA LỖI Ở ĐÂY: Dùng fromMap thay vì Constructor trực tiếp
@@ -1576,7 +1585,7 @@ class _OrderScreenState extends State<OrderScreen> {
             navigateToCartViewOnSuccess: false,
             performPrint: _notifyKitchenAfterPayment,
           ).then(
-              (_) => debugPrint(">>> [Background] Update món mới thành công"));
+                  (_) => debugPrint(">>> [Background] Update món mới thành công"));
         } else {
           _saveOrder();
         }
@@ -1607,9 +1616,9 @@ class _OrderScreenState extends State<OrderScreen> {
           if (_cart.isEmpty && _currentOrder != null) {
             final itemsMap = {
               for (var item in _currentOrder!.items)
-                // Tái tạo OrderItem từ Map
+              // Tái tạo OrderItem từ Map
                 OrderItem.fromMap(item as Map<String, dynamic>,
-                        allProducts: _menuProducts)
+                    allProducts: _menuProducts)
                     .lineId: OrderItem.fromMap(item, allProducts: _menuProducts)
             };
             _cart.addAll(itemsMap);
@@ -1730,17 +1739,17 @@ class _OrderScreenState extends State<OrderScreen> {
               return Scaffold(
                   body: Center(
                       child:
-                          Text('Lỗi tải thực đơn: ${productSnapshot.error}')));
+                      Text('Lỗi tải thực đơn: ${productSnapshot.error}')));
             }
             _menuProducts = productSnapshot.data!
                 .where((p) =>
-                    p.productType != 'Nguyên liệu' &&
-                    p.productType != 'Vật liệu' &&
-                    p.isVisibleInMenu == true)
+            p.productType != 'Nguyên liệu' &&
+                p.productType != 'Vật liệu' &&
+                p.isVisibleInMenu == true)
                 .toList();
             final bool productsHaveChanged = !const DeepCollectionEquality()
                 .equals(_menuProducts.map((p) => p.toMap()).toList(),
-                    _lastKnownProducts.map((p) => p.toMap()).toList());
+                _lastKnownProducts.map((p) => p.toMap()).toList());
 
             if (productsHaveChanged && _lastKnownProducts.isNotEmpty) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1749,15 +1758,6 @@ class _OrderScreenState extends State<OrderScreen> {
             }
             _lastKnownProducts = _menuProducts;
 
-            if (_menuProducts.isNotEmpty) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _recalculateCartDiscounts();
-              });
-            }
-
-            // --- BẮT ĐẦU ĐOẠN SỬA ---
-// 1. Xử lý logic nhóm món ăn ngay lập tức (dùng dữ liệu đã cache ở initState)
-// Không dùng FutureBuilder ở đây nữa để tránh load lại.
 
             if (_cachedGroups != null) {
               // Lọc các nhóm có chứa sản phẩm hiện tại
@@ -1768,7 +1768,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
               // Kiểm tra xem có sản phẩm nào không thuộc nhóm nào không (Orphan)
               final bool hasOrphanProducts = _menuProducts.any(
-                  (p) => p.productGroup == null || p.productGroup!.isEmpty);
+                      (p) => p.productGroup == null || p.productGroup!.isEmpty);
 
               // Nếu có, thêm nhóm "Khác" vào cuối
               if (hasOrphanProducts) {
@@ -1859,48 +1859,35 @@ class _OrderScreenState extends State<OrderScreen> {
         (itemData as Map).cast<String, dynamic>(),
         allProducts: currentProducts,
       );
+      if (!_localChanges.containsKey(newItem.lineId)) {
+        if (_activeDiscounts.isNotEmpty) {
+          final systemDiscount = _discountService.findBestDiscountForProduct(
+            product: newItem.product,
+            activeDiscounts: _activeDiscounts,
+            customer: _selectedCustomer,
+            checkTime: newItem.addedAt.toDate(),
+          );
 
-      if (_activeDiscounts.isNotEmpty) {
-        final discountItem = _discountService.findBestDiscountForProduct(
-          product: newItem.product,
-          activeDiscounts: _activeDiscounts,
-          customer: _selectedCustomer,
-          checkTime: newItem.addedAt.toDate(),
-        );
-
-        if (discountItem != null) {
-          final bool isPercentConfig = discountItem.isPercent;
-          final double configValue = discountItem.value;
-
-          String fixedUnit = isPercentConfig ? '%' : 'VNĐ';
-          double fixedValue = 0;
-
-          if (isPercentConfig) {
-            fixedValue = configValue;
-          } else {
-            final bool isTimeBased =
-                newItem.product.serviceSetup?['isTimeBased'] == true;
-            if (isTimeBased) {
-              fixedValue = newItem.discountValue ?? 0;
-            } else {
-              // Món thường: Ép về giá trị giảm tiền mặt mới
-              fixedValue = configValue;
-            }
+          // Tính giá trị mà hệ thống "đề xuất"
+          double systemVal = 0;
+          String systemUnit = '%';
+          if (systemDiscount != null) {
+            systemVal = systemDiscount.value;
+            systemUnit = systemDiscount.isPercent ? '%' : 'VNĐ';
           }
 
-          // [SỬA LẠI ĐOẠN SO SÁNH NÀY]
-          bool unitDiff = newItem.discountUnit != fixedUnit;
-          bool valueDiff = (newItem.discountValue ?? 0) != fixedValue;
+          // So sánh giá trên Server (newItem) với giá Hệ thống (systemVal)
+          // Nếu khác nhau -> Nghĩa là người dùng đã từng sửa tay -> Đánh dấu lại
+          bool isDifferent = (newItem.discountValue ?? 0) != systemVal ||
+              (newItem.discountUnit ?? '%') != systemUnit;
 
-          if (unitDiff || valueDiff) {
-            newItem = newItem.copyWith(
-                discountUnit: fixedUnit, discountValue: fixedValue);
+          if (isDifferent) {
+            _manuallyDiscountedItems.add(newItem.lineId);
           }
         }
       }
-
       final existingEntry = mergedCart.entries.firstWhereOrNull(
-        (entry) => entry.value.groupKey == newItem.groupKey,
+            (entry) => entry.value.groupKey == newItem.groupKey,
       );
 
       if (existingEntry != null) {
@@ -1963,11 +1950,11 @@ class _OrderScreenState extends State<OrderScreen> {
         automaticallyImplyLeading: true,
         actions: [
           if (_canChangeTable) ...[
-          _buildTableTransferButton(),
-          const SizedBox(width: 8),],
+            _buildTableTransferButton(),
+            const SizedBox(width: 8),],
           if (_canEditNotes) ...[
-          _buildQuickNotesIconButton(),
-          const SizedBox(width: 8),],
+            _buildQuickNotesIconButton(),
+            const SizedBox(width: 8),],
           SizedBox(
             width: 300,
             child: _buildSearchBar(),
@@ -2006,60 +1993,60 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                   child: _isPaymentView
                       ? (_currentOrder == null
-                          ? const Center(child: CircularProgressIndicator())
-                          : PaymentView(
-                              order: _currentOrder!.copyWith(
-                                items: _displayCart.values
-                                    .map((item) => item.toMap())
-                                    .toList(),
-                                totalAmount: _totalAmount,
-                              ),
-                              currentUser: widget.currentUser,
-                              subtotal: _totalAmount,
-                              customer: _selectedCustomer,
-                              customerAddress: _customerAddressFromOrder,
-                              printBillAfterPayment: _printBillAfterPayment,
-                              showPricesOnReceipt: _showPricesOnReceipt,
-                              initialState: _currentOrder != null
-                                  ? _paymentStateCache[_currentOrder!.id]
-                                  : null,
-                              promptForCash: _promptForCash,
-                              onCancel: () {
-                                setState(() {
-                                  _isPaymentView = false;
-                                });
-                                _isFinalizingPayment = false;
-                              },
-                              onConfirmPayment: (result) {
-                                debugPrint(
-                                    ">>> [DESKTOP] Thanh toán thành công.");
+                      ? const Center(child: CircularProgressIndicator())
+                      : PaymentView(
+                    order: _currentOrder!.copyWith(
+                      items: _displayCart.values
+                          .map((item) => item.toMap())
+                          .toList(),
+                      totalAmount: _totalAmount,
+                    ),
+                    currentUser: widget.currentUser,
+                    subtotal: _totalAmount,
+                    customer: _selectedCustomer,
+                    customerAddress: _customerAddressFromOrder,
+                    printBillAfterPayment: _printBillAfterPayment,
+                    showPricesOnReceipt: _showPricesOnReceipt,
+                    initialState: _currentOrder != null
+                        ? _paymentStateCache[_currentOrder!.id]
+                        : null,
+                    promptForCash: _promptForCash,
+                    onCancel: () {
+                      setState(() {
+                        _isPaymentView = false;
+                      });
+                      _isFinalizingPayment = false;
+                    },
+                    onConfirmPayment: (result) {
+                      debugPrint(
+                          ">>> [DESKTOP] Thanh toán thành công.");
 
-                                _hasCompletedPayment = true; // Bật cờ
+                      _hasCompletedPayment = true; // Bật cờ
 
-                                // Dọn dẹp dữ liệu
-                                setState(() {
-                                  _localChanges.clear();
-                                  _cart.clear();
-                                  _currentOrder = null;
-                                  _isPaymentView = false;
-                                });
+                      // Dọn dẹp dữ liệu
+                      setState(() {
+                        _localChanges.clear();
+                        _cart.clear();
+                        _currentOrder = null;
+                        _isPaymentView = false;
+                      });
 
-                                final orderId = _currentOrder?.id;
-                                if (orderId != null) {
-                                  _paymentStateCache.remove(orderId);
-                                }
+                      final orderId = _currentOrder?.id;
+                      if (orderId != null) {
+                        _paymentStateCache.remove(orderId);
+                      }
 
-                                _isFinalizingPayment = false;
-                                if (mounted) Navigator.of(context).pop();
-                              },
-                              onPrintAndExit: (currentState) {
-                                final orderId = _currentOrder?.id;
-                                if (orderId == null) return;
-                                _paymentStateCache[orderId] = currentState;
-                                _isFinalizingPayment = false;
-                                if (mounted) Navigator.of(context).pop();
-                              },
-                            ))
+                      _isFinalizingPayment = false;
+                      if (mounted) Navigator.of(context).pop();
+                    },
+                    onPrintAndExit: (currentState) {
+                      final orderId = _currentOrder?.id;
+                      if (orderId == null) return;
+                      _paymentStateCache[orderId] = currentState;
+                      _isFinalizingPayment = false;
+                      if (mounted) Navigator.of(context).pop();
+                    },
+                  ))
                       : _buildMenuView(),
                 ),
               ),
@@ -2077,102 +2064,102 @@ class _OrderScreenState extends State<OrderScreen> {
       length: groupNames.length,
       child: _isMenuView
           ? Scaffold(
-              appBar: AppBar(
-                actions: [
-                  if (_hasUnsentItems)
-                    IconButton(
-                      icon:
-                          const Icon(Icons.delete, size: 25, color: Colors.red),
-                      tooltip: 'Xóa tất cả sản phẩm đang chọn',
-                      onPressed: _confirmClearCart,
-                    ),
-                  if (_hasUnsentItems)
-                    IconButton(
-                      icon: const Icon(
-                        Icons.notification_add,
-                        color: AppTheme.primaryColor,
-                        size: 25,
-                      ),
-                      tooltip: 'Báo chế biến',
-                      onPressed: () => _sendToKitchen(),
-                    ),
-                  _buildMobileCartIcon(),
-                ],
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(100.0),
-                  child: Column(
-                    children: [
-                      _buildMobileSearchBar(),
-                      TabBar(
-                        isScrollable: true,
-                        tabs:
-                            groupNames.map((name) => Tab(text: name)).toList(),
-                      ),
-                    ],
-                  ),
+        appBar: AppBar(
+          actions: [
+            if (_hasUnsentItems)
+              IconButton(
+                icon:
+                const Icon(Icons.delete, size: 25, color: Colors.red),
+                tooltip: 'Xóa tất cả sản phẩm đang chọn',
+                onPressed: _confirmClearCart,
+              ),
+            if (_hasUnsentItems)
+              IconButton(
+                icon: const Icon(
+                  Icons.notification_add,
+                  color: AppTheme.primaryColor,
+                  size: 25,
                 ),
+                tooltip: 'Báo chế biến',
+                onPressed: () => _sendToKitchen(),
               ),
-              body: TabBarView(
-                children: groupNames.map((groupName) {
-                  final products = _menuProducts.where((p) {
-                    bool groupMatch;
-                    if (groupName == 'Tất cả') {
-                      groupMatch = true;
-                    } else if (groupName == 'Khác') {
-                      groupMatch =
-                          (p.productGroup == null || p.productGroup!.isEmpty);
-                    } else {
-                      groupMatch = (p.productGroup == groupName);
-                    }
-                    final searchMatch = _searchQuery.isEmpty ||
-                        p.productName.toLowerCase().contains(_searchQuery) ||
-                        (p.productCode?.toLowerCase().contains(_searchQuery) ??
-                            false) ||
-                        p.additionalBarcodes.any((barcode) =>
-                            barcode.toLowerCase().contains(_searchQuery));
-                    return groupMatch && searchMatch;
-                  }).toList();
-                  return GridView.builder(
-                    padding: const EdgeInsets.all(8.0),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 200,
-                      childAspectRatio: 0.85,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemCount: products.length,
-                    itemBuilder: (context, index) =>
-                        _buildProductCard(products[index], isMobile: true),
-                  );
-                }).toList(),
-              ),
-            )
-          : Scaffold(
-              appBar: AppBar(
-                title: Text(widget.table.tableName),
-                actions: [
-                  if (_canChangeTable) _buildTableTransferButton(),
-                  if (_canEditNotes) _buildQuickNotesIconButton(),
-                  IconButton(
-                    icon: const Icon(Icons.qr_code_scanner_outlined,
-                        size: 30, color: AppTheme.primaryColor),
-                    tooltip: 'Quét mã vạch thêm món',
-                    onPressed: _scanBarcodeAndAddToCart,
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.add_shopping_cart,
-                      color: AppTheme.primaryColor,
-                      size: 30,
-                    ),
-                    tooltip: 'Thêm món',
-                    onPressed: () => setState(() => _isMenuView = true),
-                  )
-                ],
-              ),
-              body: _buildCartView(),
+            _buildMobileCartIcon(),
+          ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(100.0),
+            child: Column(
+              children: [
+                _buildMobileSearchBar(),
+                TabBar(
+                  isScrollable: true,
+                  tabs:
+                  groupNames.map((name) => Tab(text: name)).toList(),
+                ),
+              ],
             ),
+          ),
+        ),
+        body: TabBarView(
+          children: groupNames.map((groupName) {
+            final products = _menuProducts.where((p) {
+              bool groupMatch;
+              if (groupName == 'Tất cả') {
+                groupMatch = true;
+              } else if (groupName == 'Khác') {
+                groupMatch =
+                (p.productGroup == null || p.productGroup!.isEmpty);
+              } else {
+                groupMatch = (p.productGroup == groupName);
+              }
+              final searchMatch = _searchQuery.isEmpty ||
+                  p.productName.toLowerCase().contains(_searchQuery) ||
+                  (p.productCode?.toLowerCase().contains(_searchQuery) ??
+                      false) ||
+                  p.additionalBarcodes.any((barcode) =>
+                      barcode.toLowerCase().contains(_searchQuery));
+              return groupMatch && searchMatch;
+            }).toList();
+            return GridView.builder(
+              padding: const EdgeInsets.all(8.0),
+              gridDelegate:
+              const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 200,
+                childAspectRatio: 0.85,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: products.length,
+              itemBuilder: (context, index) =>
+                  _buildProductCard(products[index], isMobile: true),
+            );
+          }).toList(),
+        ),
+      )
+          : Scaffold(
+        appBar: AppBar(
+          title: Text(widget.table.tableName),
+          actions: [
+            if (_canChangeTable) _buildTableTransferButton(),
+            if (_canEditNotes) _buildQuickNotesIconButton(),
+            IconButton(
+              icon: const Icon(Icons.qr_code_scanner_outlined,
+                  size: 30, color: AppTheme.primaryColor),
+              tooltip: 'Quét mã vạch thêm món',
+              onPressed: _scanBarcodeAndAddToCart,
+            ),
+            IconButton(
+              icon: const Icon(
+                Icons.add_shopping_cart,
+                color: AppTheme.primaryColor,
+                size: 30,
+              ),
+              tooltip: 'Thêm món',
+              onPressed: () => setState(() => _isMenuView = true),
+            )
+          ],
+        ),
+        body: _buildCartView(),
+      ),
     );
   }
 
@@ -2227,14 +2214,14 @@ class _OrderScreenState extends State<OrderScreen> {
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _searchController.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear, size: 20),
-                  onPressed: () => _searchController.clear(),
-                )
+            icon: const Icon(Icons.clear, size: 20),
+            onPressed: () => _searchController.clear(),
+          )
               : IconButton(
-                  icon: const Icon(Icons.qr_code_scanner,
-                      color: AppTheme.primaryColor, size: 25),
-                  onPressed: _scanBarcode,
-                ),
+            icon: const Icon(Icons.qr_code_scanner,
+                color: AppTheme.primaryColor, size: 25),
+            onPressed: _scanBarcode,
+          ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(30.0),
             borderSide: BorderSide.none,
@@ -2242,7 +2229,7 @@ class _OrderScreenState extends State<OrderScreen> {
           filled: true,
           fillColor: Colors.grey[200],
           contentPadding:
-              const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+          const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
           isDense: true,
         ),
       ),
@@ -2310,7 +2297,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   groupMatch = true;
                 } else if (groupName == 'Khác') {
                   groupMatch =
-                      (p.productGroup == null || p.productGroup!.isEmpty);
+                  (p.productGroup == null || p.productGroup!.isEmpty);
                 } else {
                   groupMatch = (p.productGroup == groupName);
                 }
@@ -2386,7 +2373,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                 padding: EdgeInsets.zero,
                                 iconSize: 22,
                                 icon:
-                                    const Icon(Icons.remove, color: Colors.red),
+                                const Icon(Icons.remove, color: Colors.red),
                                 onPressed: () => _updateNumberOfCustomers(
                                     _numberOfCustomers - 1),
                               ),
@@ -2450,7 +2437,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
               final bool isShipOrder = widget.table.id.startsWith('ship_');
               final bool isScheduleOrder =
-                  widget.table.id.startsWith('schedule_');
+              widget.table.id.startsWith('schedule_');
               final bool isOnlineOrder = isShipOrder || isScheduleOrder;
 
               // --- SỬA LỖI LOGIC: Chỉ giữ lại Name/Phone/Address nếu là đơn ONLINE ---
@@ -2465,10 +2452,10 @@ class _OrderScreenState extends State<OrderScreen> {
               // 1. Không hiển thị tên cho đơn online (Đã bị loại bỏ bởi logic trên)
               final bool showName = (guestName != null && guestName.isNotEmpty);
               final bool showPhone =
-                  (guestPhone != null && guestPhone.isNotEmpty);
+              (guestPhone != null && guestPhone.isNotEmpty);
               // 2. Đổi icon cho đơn đặt lịch
               final bool showAddressOrTime =
-                  (guestAddress != null && guestAddress.isNotEmpty);
+              (guestAddress != null && guestAddress.isNotEmpty);
 
               // 3. Hiển thị ghi chú
               final bool showNote = (guestNote != null && guestNote.isNotEmpty);
@@ -2541,7 +2528,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                       child: ConstrainedBox(
                                         constraints: BoxConstraints(
                                             maxWidth:
-                                                constraints.maxWidth - 60),
+                                            constraints.maxWidth - 60),
                                         child: Text(guestAddress!,
                                             style: textTheme.bodyMedium),
                                       ),
@@ -2583,23 +2570,23 @@ class _OrderScreenState extends State<OrderScreen> {
         Expanded(
           child: _displayCart.isEmpty
               ? Center(
-                  child: Text('Chưa có món nào được chọn.',
-                      style: textTheme.bodyMedium))
+              child: Text('Chưa có món nào được chọn.',
+                  style: textTheme.bodyMedium))
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 8.0),
-                  itemCount: cartEntries.length,
-                  itemBuilder: (context, index) {
-                    final entry = cartEntries[index];
-                    final cartId = entry.key;
-                    final item = entry.value;
-                    return _buildCartItemCard(cartId, item, currencyFormat);
-                  },
-                ),
+            padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 8.0),
+            itemCount: cartEntries.length,
+            itemBuilder: (context, index) {
+              final entry = cartEntries[index];
+              final cartId = entry.key;
+              final item = entry.value;
+              return _buildCartItemCard(cartId, item, currencyFormat);
+            },
+          ),
         ),
         Container(
           padding: const EdgeInsets.all(16.0),
           decoration:
-              BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
+          BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
             BoxShadow(
                 color: Colors.black.withAlpha(12),
                 blurRadius: 10,
@@ -2650,13 +2637,13 @@ class _OrderScreenState extends State<OrderScreen> {
                               horizontal: 6, vertical: 12),
                         ),
                         onPressed:
-                            _displayCart.isNotEmpty ? _handlePayment : null,
+                        _displayCart.isNotEmpty ? _handlePayment : null,
                         child: _isPaymentLoading
                             ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2.5))
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2.5))
                             : const Text('Thanh Toán'),
                       ),
                     ),
@@ -2672,12 +2659,15 @@ class _OrderScreenState extends State<OrderScreen> {
 
   void _handleCustomerSelection(CustomerModel? newCustomer) {
     if (_selectedCustomer?.id == newCustomer?.id) return;
+    _selectedCustomer = newCustomer;
+
+    _manuallyDiscountedItems.clear();
+
+    _recalculateCartDiscounts(triggerSetState: false);
 
     setState(() {
-      _selectedCustomer = newCustomer;
-    });
 
-    _recalculateCartDiscounts();
+    });
 
     if (_currentOrder != null) {
       final orderRef = _firestoreService.getOrderReference(_currentOrder!.id);
@@ -2726,7 +2716,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     final serviceProduct =
-        _menuProducts.firstWhereOrNull((product) => product.id == serviceId);
+    _menuProducts.firstWhereOrNull((product) => product.id == serviceId);
 
     if (serviceProduct != null) {
       if (serviceProduct.serviceSetup?['isTimeBased'] == true) {
@@ -2743,7 +2733,7 @@ class _OrderScreenState extends State<OrderScreen> {
     } else {
       ToastService().show(
           message:
-              'Không tìm thấy dịch vụ mặc định ($serviceId) trong thực đơn.',
+          'Không tìm thấy dịch vụ mặc định ($serviceId) trong thực đơn.',
           type: ToastType.error);
     }
   }
@@ -2770,13 +2760,13 @@ class _OrderScreenState extends State<OrderScreen> {
         contentPadding: EdgeInsets.zero,
         suffixIcon: _searchController.text.isNotEmpty
             ? IconButton(
-                icon: const Icon(Icons.clear,
-                    size: 20, color: AppTheme.primaryColor),
-                onPressed: () {
-                  _searchController.clear();
-                  _searchFocusNode.requestFocus();
-                },
-              )
+          icon: const Icon(Icons.clear,
+              size: 20, color: AppTheme.primaryColor),
+          onPressed: () {
+            _searchController.clear();
+            _searchFocusNode.requestFocus();
+          },
+        )
             : null,
       ),
     );
@@ -2821,7 +2811,7 @@ class _OrderScreenState extends State<OrderScreen> {
     if (!mounted || barcodeScanRes == null) return;
 
     final foundProduct = _menuProducts.firstWhereOrNull((p) =>
-        p.productCode == barcodeScanRes ||
+    p.productCode == barcodeScanRes ||
         p.additionalBarcodes.contains(barcodeScanRes));
 
     if (foundProduct != null) {
@@ -2886,7 +2876,7 @@ class _OrderScreenState extends State<OrderScreen> {
           TextButton(
               onPressed: () => Navigator.of(context).pop(true),
               child:
-                  const Text('Hủy đơn', style: TextStyle(color: Colors.red))),
+              const Text('Hủy đơn', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -2981,7 +2971,7 @@ class _OrderScreenState extends State<OrderScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Xác nhận Hủy'),
         content:
-            Text('Bạn có chắc muốn hủy "${item.product.productName}" không?'),
+        Text('Bạn có chắc muốn hủy "${item.product.productName}" không?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -3074,7 +3064,7 @@ class _OrderScreenState extends State<OrderScreen> {
       // Chỉ lấy các món tính giờ từ bộ nhớ tạm
       localChangesToProcess = Map.from(_localChanges)
         ..removeWhere(
-            (key, item) => item.product.serviceSetup?['isTimeBased'] != true);
+                (key, item) => item.product.serviceSetup?['isTimeBased'] != true);
     } else {
       // Lấy tất cả (hành vi cũ)
       localChangesToProcess = Map<String, OrderItem>.from(_localChanges);
@@ -3115,7 +3105,7 @@ class _OrderScreenState extends State<OrderScreen> {
           }
         }
         final totalAmount =
-            grouped.values.fold(0.0, (tong, item) => tong + item.subtotal);
+        grouped.values.fold(0.0, (tong, item) => tong + item.subtotal);
         final itemsToSave = grouped.values.map((e) => e.toMap()).toList();
         finalCart = {for (var item in grouped.values) item.lineId: item};
         return (items: itemsToSave, total: totalAmount);
@@ -3128,8 +3118,8 @@ class _OrderScreenState extends State<OrderScreen> {
         if (result.items.isEmpty) return true;
 
         final currentVersion = ((serverSnapshot.data()
-                    as Map<String, dynamic>?)?['version'] as num?)
-                ?.toInt() ??
+        as Map<String, dynamic>?)?['version'] as num?)
+            ?.toInt() ??
             0;
         final newOrderData = {
           'id': orderRef.id,
@@ -3143,7 +3133,7 @@ class _OrderScreenState extends State<OrderScreen> {
           'createdAt': FieldValue.serverTimestamp(),
           'createdByUid': widget.currentUser.uid,
           'createdByName':
-              widget.currentUser.name ?? widget.currentUser.phoneNumber,
+          widget.currentUser.name ?? widget.currentUser.phoneNumber,
           'customerId': _selectedCustomer?.id,
           'customerName': _selectedCustomer?.name,
           'customerPhone': _selectedCustomer?.phone,
@@ -3198,7 +3188,7 @@ class _OrderScreenState extends State<OrderScreen> {
         setState(() {
           if (onlyTimeBasedUpdates) {
             _localChanges.removeWhere((key, item) =>
-                item.product.serviceSetup?['isTimeBased'] == true);
+            item.product.serviceSetup?['isTimeBased'] == true);
           } else {
             _localChanges.clear();
           }
@@ -3239,7 +3229,7 @@ class _OrderScreenState extends State<OrderScreen> {
     if (onlyTimeBasedUpdates) {
       localChangesToProcess = Map.from(_localChanges)
         ..removeWhere(
-            (key, item) => item.product.serviceSetup?['isTimeBased'] != true);
+                (key, item) => item.product.serviceSetup?['isTimeBased'] != true);
     } else {
       localChangesToProcess = Map<String, OrderItem>.from(_localChanges);
     }
@@ -3264,7 +3254,7 @@ class _OrderScreenState extends State<OrderScreen> {
         if (!serverSnapshot.exists ||
             ['paid', 'cancelled'].contains(serverStatus)) {
           Map<String, OrderItem> finalCart =
-              Map<String, OrderItem>.from(localChangesToProcess);
+          Map<String, OrderItem>.from(localChangesToProcess);
           finalCart.removeWhere((key, item) => item.quantity <= 0);
           if (finalCart.isEmpty) {
             finalCartAfterSave = {};
@@ -3273,7 +3263,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
           final currentVersion = (serverData?['version'] as num?)?.toInt() ?? 0;
           final itemsToSave =
-              finalCart.values.map((item) => item.toMap()).toList();
+          finalCart.values.map((item) => item.toMap()).toList();
           final finalTotalAmount = finalCart.values
               .fold(0.0, (total, item) => total + item.subtotal);
 
@@ -3289,7 +3279,7 @@ class _OrderScreenState extends State<OrderScreen> {
             'createdAt': FieldValue.serverTimestamp(),
             'createdByUid': widget.currentUser.uid,
             'createdByName':
-                widget.currentUser.name ?? widget.currentUser.phoneNumber,
+            widget.currentUser.name ?? widget.currentUser.phoneNumber,
             'customerId': _selectedCustomer?.id,
             'customerName': _selectedCustomer?.name,
             'customerPhone': _selectedCustomer?.phone,
@@ -3337,7 +3327,7 @@ class _OrderScreenState extends State<OrderScreen> {
             transaction.update(orderRef, {
               'status': 'cancelled',
               'items':
-                  mergedByGroupKey.values.map((item) => item.toMap()).toList(),
+              mergedByGroupKey.values.map((item) => item.toMap()).toList(),
               'totalAmount': 0.0,
               'updatedAt': FieldValue.serverTimestamp(),
               'version': currentVersion + 1,
@@ -3345,7 +3335,7 @@ class _OrderScreenState extends State<OrderScreen> {
             finalCartAfterSave = {};
           } else {
             final itemsToSave =
-                mergedByGroupKey.values.map((item) => item.toMap()).toList();
+            mergedByGroupKey.values.map((item) => item.toMap()).toList();
 
             final finalTotalAmount = mergedByGroupKey.values
                 .fold(0.0, (total, item) => total + item.subtotal);
@@ -3377,7 +3367,7 @@ class _OrderScreenState extends State<OrderScreen> {
           // Chỉ xóa những món đã xử lý
           if (onlyTimeBasedUpdates) {
             _localChanges.removeWhere((key, item) =>
-                item.product.serviceSetup?['isTimeBased'] == true);
+            item.product.serviceSetup?['isTimeBased'] == true);
           } else {
             _localChanges.clear();
           }
@@ -3432,7 +3422,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }
     try {
       final itemsSentToKitchen =
-          _cart.values.where((item) => item.sentQuantity > 0).toList();
+      _cart.values.where((item) => item.sentQuantity > 0).toList();
       if (itemsSentToKitchen.isNotEmpty) {
         final itemsToCancelPayload = itemsSentToKitchen.map((item) {
           final printItemMap = item.toMap();
@@ -3482,7 +3472,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }
     try {
       final itemsSentToKitchen =
-          _cart.values.where((item) => item.sentQuantity > 0).toList();
+      _cart.values.where((item) => item.sentQuantity > 0).toList();
       if (itemsSentToKitchen.isNotEmpty) {
         final itemsToCancelPayload = itemsSentToKitchen.map((item) {
           final printItemMap = item.toMap();
@@ -3563,7 +3553,7 @@ class _OrderScreenState extends State<OrderScreen> {
       for (final entry in _cart.entries) {
         if (entry.value.product.id == productId) {
           final revertedItem =
-              entry.value.copyWith(quantity: entry.value.sentQuantity);
+          entry.value.copyWith(quantity: entry.value.sentQuantity);
           if (revertedItem.quantity > 0) {
             revertedItemsInCart[entry.key] = revertedItem;
           }
@@ -3599,7 +3589,7 @@ class _OrderScreenState extends State<OrderScreen> {
           Card(
             clipBehavior: Clip.antiAlias,
             shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -3618,22 +3608,22 @@ class _OrderScreenState extends State<OrderScreen> {
                 // 2. Hình ảnh
                 Expanded(
                   child: (product.imageUrl != null &&
-                          product.imageUrl!.isNotEmpty)
+                      product.imageUrl!.isNotEmpty)
                       ? Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                          child: CachedNetworkImage(
-                            imageUrl: product.imageUrl!,
-                            fit: BoxFit.contain,
-                            placeholder: (context, url) => const Center(
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2.0)),
-                            errorWidget: (context, url, error) => const Icon(
-                                Icons.image_not_supported,
-                                color: Colors.grey),
-                          ),
-                        )
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                    child: CachedNetworkImage(
+                      imageUrl: product.imageUrl!,
+                      fit: BoxFit.contain,
+                      placeholder: (context, url) => const Center(
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.0)),
+                      errorWidget: (context, url, error) => const Icon(
+                          Icons.image_not_supported,
+                          color: Colors.grey),
+                    ),
+                  )
                       : const Icon(Icons.fastfood,
-                          size: 40, color: Colors.grey),
+                      size: 40, color: Colors.grey),
                 ),
                 // 3. Giá & Tồn kho
                 Padding(
@@ -3751,7 +3741,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     // Lấy GIÁ NIÊM YẾT CHUẨN
     double originalUnitPrice =
-        _getBasePriceForUnit(item.product, item.selectedUnit);
+    _getBasePriceForUnit(item.product, item.selectedUnit);
     // Giá đang bán (có thể là giá đã sửa tay)
     double sellingPrice = item.price;
 
@@ -3802,8 +3792,8 @@ class _OrderScreenState extends State<OrderScreen> {
                         : Icons.notifications_on_outlined,
                     color: item.sentQuantity > 0
                         ? (item.hasUnsentChanges
-                            ? Colors.orange.shade700
-                            : AppTheme.primaryColor)
+                        ? Colors.orange.shade700
+                        : AppTheme.primaryColor)
                         : Colors.grey,
                     size: 20,
                   ),
@@ -3829,7 +3819,7 @@ class _OrderScreenState extends State<OrderScreen> {
                           style: textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                             color:
-                                isCancelled ? Colors.grey : AppTheme.textColor,
+                            isCancelled ? Colors.grey : AppTheme.textColor,
                             decoration: isCancelled
                                 ? TextDecoration.lineThrough
                                 : TextDecoration.none,
@@ -3878,7 +3868,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                   color: Colors.red.shade50,
                                   borderRadius: BorderRadius.circular(4),
                                   border:
-                                      Border.all(color: Colors.red.shade100)),
+                                  Border.all(color: Colors.red.shade100)),
                               child: Text(
                                 item.discountUnit == '%'
                                     ? "-${formatNumber(item.discountValue ?? 0)}%"
@@ -3922,8 +3912,8 @@ class _OrderScreenState extends State<OrderScreen> {
                                 .textTheme
                                 .bodyMedium
                                 ?.copyWith(
-                                  color: Colors.red,
-                                ),
+                              color: Colors.red,
+                            ),
                           ),
                         ),
                     ],
@@ -3951,7 +3941,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   Container(
                     decoration: BoxDecoration(
                       color:
-                          isCancelled ? Colors.transparent : Colors.grey[100],
+                      isCancelled ? Colors.transparent : Colors.grey[100],
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -4052,7 +4042,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final textTheme = Theme.of(context).textTheme;
     final timeFormat = DateFormat('HH:mm dd/MM');
 
-    // Lấy kết quả tính toán gốc (Chứa giá gốc chuẩn chưa bị xào nấu)
+    // 1. Lấy kết quả tính toán khối thời gian gốc
     final result = _timeBasedDataCache[item.lineId] ??
         TimeBasedPricingService.calculatePriceWithBreakdown(
           product: item.product,
@@ -4062,11 +4052,9 @@ class _OrderScreenState extends State<OrderScreen> {
           totalPausedDurationInSeconds: item.totalPausedDurationInSeconds,
         );
 
-    // Giá gốc thực tế để hiển thị gạch ngang
-
     final startTime = item.addedAt.toDate();
     final billableEndTime =
-        startTime.add(Duration(minutes: result.totalMinutesBilled));
+    startTime.add(Duration(minutes: result.totalMinutesBilled));
 
     String formatMinutes(int totalMinutes) {
       if (totalMinutes <= 0) return "0'";
@@ -4078,10 +4066,10 @@ class _OrderScreenState extends State<OrderScreen> {
       return "$minutes'";
     }
 
-    // --- TÍNH TOÁN GIÁ TRỊ GIẢM ---
+    // --- 2. CHUẨN BỊ THÔNG SỐ KHUYẾN MÃI ---
     String badgeText = '';
     double percentDiscount = 0;
-    double reductionPerHour = 0;
+    double reductionPerHour = 0; // Giảm bao nhiêu tiền 1 giờ
 
     if (item.discountValue != null && item.discountValue! > 0) {
       if (item.discountUnit == '%') {
@@ -4091,9 +4079,12 @@ class _OrderScreenState extends State<OrderScreen> {
         badgeText = "-${formatNumber(rawPercent)}%";
       } else {
         reductionPerHour = item.discountValue!;
-        badgeText = "-${formatNumber(reductionPerHour)}đ/h";
+        badgeText = "-${formatNumber(reductionPerHour)}/h";
       }
     }
+
+    // [QUAN TRỌNG] Biến này dùng để cộng dồn tiền hiển thị
+    double totalDisplayCost = 0;
 
     return Card(
       child: InkWell(
@@ -4104,11 +4095,10 @@ class _OrderScreenState extends State<OrderScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // === DÒNG 1: HEADER ===
+              // === DÒNG 1: HEADER (Giữ nguyên) ===
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // ... (Icon Pause/Play giữ nguyên) ...
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     splashRadius: 20,
@@ -4133,7 +4123,6 @@ class _OrderScreenState extends State<OrderScreen> {
                               fontWeight: FontWeight.bold,
                               color: AppTheme.textColor),
                         ),
-                        // Badge giảm giá
                         if (badgeText.isNotEmpty)
                           WidgetSpan(
                             alignment: PlaceholderAlignment.middle,
@@ -4145,7 +4134,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                   color: Colors.red.shade50,
                                   borderRadius: BorderRadius.circular(4),
                                   border:
-                                      Border.all(color: Colors.red.shade100)),
+                                  Border.all(color: Colors.red.shade100)),
                               child: Text(
                                 badgeText,
                                 style: const TextStyle(
@@ -4167,155 +4156,147 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                 ],
               ),
-
               if (item.note != null && item.note!.isNotEmpty)
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Padding(
                     padding: const EdgeInsets.only(left: 12, top: 2, bottom: 4),
-                    child: Text(
-                      'Ghi chú: ${item.note}',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.red,
-                          ),
-                    ),
+                    child: Text('Ghi chú: ${item.note}',
+                        style: textTheme.bodyMedium?.copyWith(color: Colors.red)),
                   ),
                 ),
 
               // === DÒNG 2: CHI TIẾT (BLOCKS) ===
               if (result.blocks.isNotEmpty) ...[
+                // Duyệt qua từng block để tính và hiển thị
                 ...result.blocks.map((block) {
-                  // ... (Logic tính toán displayRate, displayCost như đã sửa trước đó) ...
                   final isLastBlock = block == result.blocks.last;
                   final blockEndTimeToShow =
-                      isLastBlock ? billableEndTime : block.endTime;
+                  isLastBlock ? billableEndTime : block.endTime;
 
+                  // A. TÍNH ĐƠN GIÁ (RATE) ĐÃ TRỪ KHUYẾN MÃI
                   double displayRate = block.ratePerHour;
-                  double displayCost = block.cost;
 
-                  if (item.discountValue != null && item.discountValue! > 0) {
-                    if (item.discountUnit == '%') {
-                      displayRate = block.ratePerHour * (1 - percentDiscount);
-                      displayCost = block.cost * (1 - percentDiscount);
-                    } else {
-                      displayRate = block.ratePerHour - reductionPerHour;
-                      if (displayRate < 0) displayRate = 0;
-                      displayCost = (displayRate / 60.0) * block.minutes;
-                    }
+                  // Áp dụng logic giảm giá vào đơn giá giờ
+                  if (item.discountUnit == '%') {
+                    displayRate = block.ratePerHour * (1 - percentDiscount);
+                  } else {
+                    // Trừ trực tiếp tiền mặt trên giờ (VD: 90k - 10k = 80k)
+                    displayRate = block.ratePerHour - reductionPerHour;
                   }
+                  if (displayRate < 0) displayRate = 0;
 
-                  // Làm tròn
+
+                  // B. TÍNH THÀNH TIỀN (COST) CỦA LINE NÀY
+                  // Công thức: (Đơn giá mới / 60 phút) * số phút
+                  double displayCost = (displayRate / 60.0) * block.minutes;
+
+                  // Làm tròn số hiển thị
                   displayRate = displayRate.roundToDouble();
                   displayCost = displayCost.roundToDouble();
+
+                  // [FIX CHÍNH] CỘNG DỒN VÀO TỔNG CARD
+                  totalDisplayCost += displayCost;
 
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2.0),
                     child: isDesktop
                         ? Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Icon(
-                                isLastBlock
-                                    ? Icons.timer_outlined
-                                    : Icons.access_time,
-                                color: isLastBlock
-                                    ? AppTheme.primaryColor
-                                    : Colors.grey.shade600,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                flex: 4,
-                                child: Text.rich(
-                                  TextSpan(
-                                    style: textTheme.bodyMedium,
-                                    children: [
-                                      TextSpan(
-                                          text:
-                                              '${timeFormat.format(block.startTime)} -> '),
-                                      TextSpan(
-                                          text: timeFormat
-                                              .format(blockEndTimeToShow)),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 3,
-                                child: Center(
-                                  child: Text(
-                                    // Hiển thị Đơn giá ĐÃ GIẢM
-                                    "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
-                                    style: textTheme.bodyMedium,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 3,
-                                child: Text(
-                                  currencyFormat.format(displayCost),
-                                  textAlign: TextAlign.end,
-                                  style: textTheme.bodyMedium,
-                                ),
-                              ),
-                            ],
-                          )
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // ... (Giữ nguyên layout Desktop) ...
+                        Icon(
+                          isLastBlock
+                              ? Icons.timer_outlined
+                              : Icons.access_time,
+                          color: isLastBlock
+                              ? AppTheme.primaryColor
+                              : Colors.grey.shade600,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 4,
+                          child: Text.rich(
+                            TextSpan(
+                              style: textTheme.bodyMedium,
+                              children: [
+                                TextSpan(text: '${timeFormat.format(block.startTime)} -> '),
+                                TextSpan(text: timeFormat.format(blockEndTimeToShow)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Center(
+                            child: Text(
+                              "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
+                              style: textTheme.bodyMedium,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Text(
+                            currencyFormat.format(displayCost),
+                            textAlign: TextAlign.end,
+                            style: textTheme.bodyMedium,
+                          ),
+                        ),
+                      ],
+                    )
                         : Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isLastBlock
+                              ? Icons.timer_outlined
+                              : Icons.access_time,
+                          color: isLastBlock
+                              ? AppTheme.primaryColor
+                              : Colors.grey.shade600,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(
-                                isLastBlock
-                                    ? Icons.timer_outlined
-                                    : Icons.access_time,
-                                color: isLastBlock
-                                    ? AppTheme.primaryColor
-                                    : Colors.grey.shade600,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                              Text.rich(
+                                TextSpan(
+                                  style: textTheme.bodyMedium,
                                   children: [
-                                    Text.rich(
-                                      TextSpan(
-                                        style: textTheme.bodyMedium,
-                                        children: [
-                                          TextSpan(
-                                              text:
-                                                  '${timeFormat.format(block.startTime)} -> '),
-                                          TextSpan(
-                                              text: timeFormat
-                                                  .format(blockEndTimeToShow)),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    // Hiển thị Đơn giá ĐÃ GIẢM
-                                    Text(
-                                        "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
-                                        style: textTheme.bodyMedium),
+                                    TextSpan(text: '${timeFormat.format(block.startTime)} -> '),
+                                    TextSpan(text: timeFormat.format(blockEndTimeToShow)),
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      currencyFormat.format(displayCost),
-                                      style: textTheme.bodyMedium?.copyWith(
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ]),
+                              const SizedBox(height: 2),
+                              Text(
+                                  "${formatMinutes(block.minutes)} x ${formatNumber(displayRate)}đ/h",
+                                  style: textTheme.bodyMedium),
                             ],
                           ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                currencyFormat.format(displayCost),
+                                style: textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ]),
+                      ],
+                    ),
                   );
                 }),
                 const Divider(height: 8, thickness: 0.5, color: Colors.grey),
               ],
 
-              // === FOOTER ===
+              // === FOOTER (HIỂN THỊ TỔNG) ===
               Padding(
                 padding: const EdgeInsets.only(top: 4.0),
                 child: Row(
@@ -4344,9 +4325,11 @@ class _OrderScreenState extends State<OrderScreen> {
                         ],
                       ),
                     ),
-                    // item.subtotal sẽ trả về đúng Real Cost nhờ "thủ thuật" ở bước 1
+
+                    // [FIX CHÍNH] HIỂN THỊ totalDisplayCost THAY VÌ item.subtotal
+                    // Để đảm bảo con số này khớp tuyệt đối với các dòng bên trên cộng lại
                     Text(
-                      currencyFormat.format(item.subtotal),
+                      currencyFormat.format(totalDisplayCost),
                       style: textTheme.titleMedium?.copyWith(
                         color: Colors.grey.shade600,
                         fontWeight: FontWeight.bold,
@@ -4367,7 +4350,7 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() => _isLoadingStaff = true);
     try {
       _staffList =
-          await _firestoreService.getUsersByStore(widget.currentUser.storeId);
+      await _firestoreService.getUsersByStore(widget.currentUser.storeId);
     } catch (e) {
       debugPrint("Lỗi tải danh sách nhân viên: $e");
       ToastService()
@@ -4414,7 +4397,7 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() {
       final newNote = (result['note'] as String?).nullIfEmpty;
       final newCommissionStaff =
-          result['commissionStaff'] as Map<String, String?>;
+      result['commissionStaff'] as Map<String, String?>;
       final double newQuantity = result['quantity'] as double;
 
       // LẤY GIÁ TRỊ THÔ TỪ DIALOG (Người dùng nhập gì lấy nấy)
@@ -4445,7 +4428,7 @@ class _OrderScreenState extends State<OrderScreen> {
       if (newQuantity < item.sentQuantity) {
         ToastService().show(
             message:
-                "Không thể đặt SL (${formatNumber(newQuantity)}) ít hơn số đã báo chế biến (${formatNumber(item.sentQuantity)}).",
+            "Không thể đặt SL (${formatNumber(newQuantity)}) ít hơn số đã báo chế biến (${formatNumber(item.sentQuantity)}).",
             type: ToastType.warning,
             duration: const Duration(seconds: 3));
         return;
@@ -4460,7 +4443,11 @@ class _OrderScreenState extends State<OrderScreen> {
       } else {
         currentPrice = result['price'] as double;
       }
-
+      if (finalDiscountValToSave == 0) {
+        _manuallyDiscountedItems.remove(cartId);
+      } else {
+        _manuallyDiscountedItems.add(cartId);
+      }
       _localChanges[cartId] = item.copyWith(
         price: currentPrice,
         priceBreakdown: currentBlocks,
@@ -4471,7 +4458,7 @@ class _OrderScreenState extends State<OrderScreen> {
         selectedUnit: result['selectedUnit'],
         note: () => newNote,
         commissionStaff: () =>
-            newCommissionStaff.isNotEmpty ? newCommissionStaff : null,
+        newCommissionStaff.isNotEmpty ? newCommissionStaff : null,
       );
       _applyBuyXGetYLogic();
     });
@@ -4483,7 +4470,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     final additionalUnitData = product.additionalUnits.firstWhereOrNull(
-        (unitData) => (unitData['unitName'] as String?) == selectedUnit);
+            (unitData) => (unitData['unitName'] as String?) == selectedUnit);
 
     if (additionalUnitData != null) {
       return (additionalUnitData['sellPrice'] as num?)?.toDouble() ??
@@ -4537,22 +4524,22 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
 
   void _onConfirm() {
     final selectedUnitData =
-        _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
+    _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
     final priceForSelectedUnit =
-        (selectedUnitData['sellPrice'] as num).toDouble();
+    (selectedUnitData['sellPrice'] as num).toDouble();
 
     final Map<ProductModel, double> toppingsMap = {};
     _selectedToppings.forEach((productId, quantity) {
       if (quantity > 0) {
         final product =
-            _accompanyingProducts.firstWhere((p) => p.id == productId);
+        _accompanyingProducts.firstWhere((p) => p.id == productId);
         toppingsMap[product] = quantity;
       }
     });
 
     // Gộp ghi chú nhanh thành một chuỗi
     final String noteText =
-        _selectedQuickNotes.map((n) => n.noteText).join(', ');
+    _selectedQuickNotes.map((n) => n.noteText).join(', ');
 
     Navigator.of(context).pop({
       'selectedUnit': _selectedUnit,
