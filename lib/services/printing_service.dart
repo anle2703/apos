@@ -635,7 +635,9 @@ class PrintingService {
       bool isConnected = await printerManager.connect(type: type, model: model);
 
       if (isConnected) {
-        await printerManager.send(type: type, bytes: Uint8List.fromList(bytes));
+        // Fix: Truyền trực tiếp bytes (List<int>) thay vì bọc trong Uint8List
+        // để tránh lỗi ClassCastException trên Android Native
+        await printerManager.send(type: type, bytes: bytes);
         await Future.delayed(const Duration(milliseconds: 200));
         await printerManager.disconnect(type: type);
         return true;

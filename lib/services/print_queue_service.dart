@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart'; // Bắt buộc để dùng PlatformException
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -35,12 +36,59 @@ class PrintQueueService {
   final ValueNotifier<List<PrintJob>> failedJobsNotifier = ValueNotifier([]);
 
   bool _isInitialized = false;
-  Completer<void>? _fixCompleter;
+  static Completer<List<ConfiguredPrinter>?>? _fixCompleter;
+
+  // Cache RAM để đồng bộ tức thì
+  static List<ConfiguredPrinter>? _cachedPrinters;
+
   Future<void> initialize(String storeId) async {
     await _loadFailedJobsFromPrefs();
+
+    // [AUTO-FIX STARTUP] Tự động kiểm tra và sửa lỗi cổng USB ngay khi mở app
+    _autoCheckPrintersOnStartup();
+
     if (!_isInitialized) {
       _startListeningForCloudErrors(storeId);
       _isInitialized = true;
+    }
+  }
+
+  // Hàm chạy ngầm khi khởi động để fix cổng USB bị đổi
+  Future<void> _autoCheckPrintersOnStartup() async {
+    try {
+      debugPrint(">>> [Startup] Đang kiểm tra kết nối máy in...");
+      final currentConfig = await _getPrintersConfig();
+      // Gọi hàm fix nhưng không cần await kết quả để không chặn UI
+      final fixed = await _tryFixPrinterAddress(currentConfig);
+      if (fixed != null) {
+        debugPrint(">>> [Startup] Đã tự động cập nhật lại cổng USB máy in.");
+        _cachedPrinters = fixed;
+      } else {
+        debugPrint(">>> [Startup] Các máy in vẫn ổn định hoặc không tìm thấy thiết bị mới.");
+      }
+    } catch (e) {
+      debugPrint(">>> [Startup] Lỗi kiểm tra máy in: $e");
+    }
+  }
+
+  Future<List<ConfiguredPrinter>> _getPrintersConfig() async {
+    if (_cachedPrinters != null && _cachedPrinters!.isNotEmpty) {
+      return _cachedPrinters!;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString('printer_assignments');
+    if (jsonString == null) {
+      // Trả về list rỗng thay vì throw lỗi để app không crash lúc startup
+      return [];
+    }
+
+    try {
+      final jsonList = jsonDecode(jsonString);
+      final loaded = (jsonList as List).map((j) => ConfiguredPrinter.fromJson(j)).toList();
+      _cachedPrinters = loaded;
+      return loaded;
+    } catch (e) {
+      return [];
     }
   }
 
@@ -96,7 +144,6 @@ class PrintQueueService {
 
       if (jobsByPrinter.isEmpty) return;
 
-      // --- THAY ĐỔI QUAN TRỌNG: DÙNG Future.wait ĐỂ IN SONG SONG ---
       debugPrint(">>> [PQ] Bắt đầu in song song ${jobsByPrinter.length} lệnh bếp...");
 
       final List<Future<void>> parallelJobs = [];
@@ -116,11 +163,9 @@ class PrintQueueService {
           createdAt: DateTime.now(),
         );
 
-        // Thêm vào danh sách chạy song song
         parallelJobs.add(_processSingleJob(job));
       }
 
-      // Chờ tất cả các máy in nhận lệnh xong (hoặc chạy ngầm cũng được)
       await Future.wait(parallelJobs);
       debugPrint(">>> [PQ] Đã gửi toàn bộ lệnh in bếp.");
       return;
@@ -186,7 +231,6 @@ class PrintQueueService {
 
       if (data.containsKey('customerName')) payload['customerName'] = data['customerName'];
       if (data.containsKey('storeInfo')) payload['storeInfo'] = data['storeInfo'];
-
       if (data.containsKey('totalAmount')) payload['totalAmount'] = data['totalAmount'];
       if (data.containsKey('showPrices'))  payload['showPrices']  = data['showPrices'];
 
@@ -200,18 +244,9 @@ class PrintQueueService {
       }
 
       for (final k in const [
-        'subtotal',
-        'discount',
-        'discountType',
-        'surcharges',
-        'taxPercent',
-        'payments',
-        'customerPointsUsed',
-        'changeAmount',
-        'totalPayable',
-        'pointsValue',
-        'customer',
-        'printReceipt',
+        'subtotal', 'discount', 'discountType', 'surcharges', 'taxPercent',
+        'payments', 'customerPointsUsed', 'changeAmount', 'totalPayable',
+        'pointsValue', 'customer', 'printReceipt',
       ]) {
         if (data.containsKey(k)) payload[k] = data[k];
       }
@@ -232,9 +267,7 @@ class PrintQueueService {
       payload.remove('error');
 
       final docRef = await _firestoreService.createPrintJobDocument(payload, storeId);
-
       _startJobTimeoutCheck(docRef.id, storeId, job);
-      debugPrint("Đã tạo print job trên Cloud với ID: ${docRef.id}");
       return true;
     } catch (e) {
       debugPrint("Lỗi khi gửi job lên Cloud: $e");
@@ -246,22 +279,14 @@ class PrintQueueService {
       String docId, String storeId, PrintJob originalJob) {
     Future.delayed(const Duration(seconds: 4), () async {
       try {
-        final doc = await FirebaseFirestore.instance
-            .collection('print_jobs')
-            .doc(docId)
-            .get();
-
+        final doc = await FirebaseFirestore.instance.collection('print_jobs').doc(docId).get();
         if (doc.exists && doc.data()?['status'] == 'pending') {
-          debugPrint(
-              ">>> Job $docId bị timeout, server có thể đang offline hoặc sai chế độ.");
           await doc.reference.update({
             'status': 'failed',
             'error': 'Client timeout: Server did not respond.'
           });
-
           final failedJob = originalJob.copyWith(firestoreId: docId);
-          if (!failedJobsNotifier.value
-              .any((j) => j.firestoreId == failedJob.firestoreId)) {
+          if (!failedJobsNotifier.value.any((j) => j.firestoreId == failedJob.firestoreId)) {
             _addFailedJob(failedJob);
           }
         }
@@ -275,196 +300,219 @@ class PrintQueueService {
     debugPrint(">>> [PQ] Bắt đầu xử lý Job cục bộ (Mode: $printMode)");
 
     final prefs = await SharedPreferences.getInstance();
-
-    // Check Server LAN
     final bool isMobileAndInServerMode = printMode == 'server' &&
         !(Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
     if (isMobileAndInServerMode) {
       final serverIp = prefs.getString('print_server_ip');
-      if (serverIp == null || serverIp.isEmpty) {
-        throw Exception("Chưa cấu hình IP máy chủ.");
-      }
+      if (serverIp == null || serverIp.isEmpty) throw Exception("Chưa cấu hình IP máy chủ.");
       return await _sendJobToServerLAN(serverIp, job);
     }
 
-    // Load Config
-    var jsonString = prefs.getString('printer_assignments');
-    if (jsonString == null) throw Exception('Chưa cấu hình máy in.');
-
-    var jsonList = jsonDecode(jsonString);
-    List<ConfiguredPrinter> allConfiguredPrinters =
-    (jsonList as List).map((j) => ConfiguredPrinter.fromJson(j)).toList();
+    // 1. Lấy config từ RAM
+    List<ConfiguredPrinter> currentPrinters = await _getPrintersConfig();
+    if (currentPrinters.isEmpty) throw Exception("Chưa cấu hình máy in.");
 
     try {
       debugPrint(">>> [PQ] Thử in lần 1...");
-      // Nếu in thất bại, PrintingService giờ sẽ ném lỗi (rethrow) -> nhảy xuống catch
-      return await _dispatchPrintJob(job, allConfiguredPrinters);
+      return await _dispatchPrintJob(job, currentPrinters);
     } catch (e) {
       debugPrint(">>> [PQ] In thất bại lần 1. Lỗi: $e");
 
-      if (_fixCompleter != null && !_fixCompleter!.isCompleted) {
-        debugPrint(">>> [PQ] Đang có tiến trình sửa lỗi khác. Job ${job.id} sẽ đứng chờ...");
-        await _fixCompleter!.future;
-        debugPrint(">>> [PQ] Tiến trình sửa lỗi xong. Job ${job.id} thử in lại...");
+      List<ConfiguredPrinter>? fixedPrinters;
 
-        // Sau khi chờ xong, reload lại config mới nhất từ đĩa
-        jsonString = prefs.getString('printer_assignments');
-        if (jsonString != null) {
-          jsonList = jsonDecode(jsonString);
-          allConfiguredPrinters = (jsonList as List).map((j) => ConfiguredPrinter.fromJson(j)).toList();
-        }
-        // Và thử in lại luôn (không chạy fix nữa)
-        return await _dispatchPrintJob(job, allConfiguredPrinters);
+      // 2. Check xem RAM đã đổi chưa
+      final latestConfigInRam = _cachedPrinters;
+      bool configChanged = false;
+      if (latestConfigInRam != null && currentPrinters.isNotEmpty) {
+        final jsonCurrent = jsonEncode(currentPrinters);
+        final jsonLatest = jsonEncode(latestConfigInRam);
+        if (jsonCurrent != jsonLatest) configChanged = true;
       }
 
-      // Nếu chưa có ai Fix, mình sẽ là thằng đi Fix (Tạo khóa)
-      _fixCompleter = Completer<void>();
+      if (configChanged && latestConfigInRam != null) {
+        debugPrint(">>> [PQ] Config RAM đã thay đổi. In lại ngay...");
+        return await _dispatchPrintJob(job, latestConfigInRam);
+      }
 
-      try {
-        debugPrint(">>> [PQ] Đang xác định máy in mục tiêu để sửa lỗi...");
-        final targetPrinter = _identifyTargetPrinter(job, allConfiguredPrinters);
+      // 3. Cơ chế Leader/Follower sửa lỗi
+      if (_fixCompleter != null) {
+        debugPrint(">>> [PQ] Đã có Leader. Job ${job.id} chuyển sang CHỜ...");
+        fixedPrinters = await _fixCompleter!.future;
+      } else {
+        _fixCompleter = Completer<List<ConfiguredPrinter>?>();
+        try {
+          debugPrint(">>> [PQ] Job ${job.id} là LEADER. Đã khóa luồng.");
 
-        if (targetPrinter == null) rethrow;
-        if (targetPrinter.physicalPrinter.type.name != 'usb') rethrow;
+          // Thử reload đĩa & RAM lần cuối
+          await prefs.reload();
+          final reloaded = await _getPrintersConfig();
 
-        final String oldAddress = targetPrinter.physicalPrinter.device.address ?? '';
-        final String role = targetPrinter.logicalName;
+          try {
+            debugPrint(">>> [PQ] Leader thử in lại với config reload...");
+            final result = await _dispatchPrintJob(job, reloaded);
+            _fixCompleter!.complete(reloaded);
+            return result;
+          } catch (_) {}
 
-        // Gọi hàm fix (Hàm _tryFixPrinterAddress bạn đang dùng đã OK, giữ nguyên)
-        final updatedPrinters = await _tryFixPrinterAddress(oldAddress, role, allConfiguredPrinters);
+          // AUTO-FIX (Logic mới)
+          final updated = await _tryFixPrinterAddress(reloaded);
 
-        if (updatedPrinters != null) {
-          // Fix thành công
-          allConfiguredPrinters = updatedPrinters;
+          if (updated != null) _cachedPrinters = updated; // Cập nhật RAM ngay
 
-          // Mở khóa cho các thằng đang chờ
-          _fixCompleter!.complete();
-
-          // Thử in lại lần 2
-          return await _dispatchPrintJob(job, allConfiguredPrinters);
-        } else {
-          // Fix thất bại
-          _fixCompleter!.complete(); // Vẫn phải mở khóa để các thằng khác không chờ mãi
+          _fixCompleter!.complete(updated);
+          fixedPrinters = updated;
+        } catch (err) {
+          if (!_fixCompleter!.isCompleted) _fixCompleter!.complete(null);
           rethrow;
+        } finally {
+          Future.delayed(const Duration(seconds: 2), () {
+            _fixCompleter = null;
+            debugPrint(">>> [PQ] Đã giải phóng khóa Leader.");
+          });
         }
-      } catch (err) {
-        // Đảm bảo luôn mở khóa dù có lỗi
-        if (!_fixCompleter!.isCompleted) _fixCompleter!.complete();
-        rethrow; // Ném lỗi ra ngoài
-      } finally {
-        // Reset khóa
-        _fixCompleter = null;
+      }
+
+      if (fixedPrinters != null) {
+        debugPrint(">>> [PQ] Dùng config ĐÃ FIX để in lại...");
+        return await _dispatchPrintJob(job, fixedPrinters);
+      } else {
+        debugPrint(">>> [PQ] Fix thất bại. Thử in lần cuối...");
+        currentPrinters = await _getPrintersConfig();
+        return await _dispatchPrintJob(job, currentPrinters);
       }
     }
   }
 
   Future<List<ConfiguredPrinter>?> _tryFixPrinterAddress(
-      String oldAddress,
-      String printerRole,
       List<ConfiguredPrinter> currentAssignments
       ) async {
     final nativeService = NativePrinterService();
     try {
-      // 1. Quét danh sách thiết bị thực tế
-      final devices = await nativeService.getPrinters();
+      debugPrint(">>> [Auto-Fix] Quét và sửa lỗi máy in USB (Thuật toán Pool)...");
 
-      // 2. Lấy thông tin cấu hình của máy in đang bị lỗi
-      final targetConfig = currentAssignments.firstWhere(
-              (p) => p.logicalName == printerRole,
-          orElse: () => currentAssignments.first
-      );
+      // 1. Lấy tất cả thiết bị USB đang cắm
+      // Returns: List<NativePrinter>
+      final allDevices = await nativeService.getPrinters();
 
-      // Lấy thông tin gốc từ cấu hình
-      final String savedVid = targetConfig.physicalPrinter.device.vendorId.toString();
-      final String savedPid = targetConfig.physicalPrinter.device.productId.toString();
-      final String savedFullName = targetConfig.physicalPrinter.device.name;
+      List<ConfiguredPrinter> updatedAssignments = List.from(currentAssignments);
 
-      // --- SỬA LỖI Ở ĐÂY: Lấy tên gốc bằng cách cắt bỏ phần phụ tố "(USB..." ---
-      // Ví dụ: "USB Device (USB 8137:8214)" -> "USB Device"
-      String savedBaseName = savedFullName;
-      if (savedFullName.contains(" (USB")) {
-        savedBaseName = savedFullName.split(" (USB")[0].trim();
-      }
+      // 2. Xác định các thiết bị ĐANG ĐƯỢC DÙNG
+      final Set<String> usedAddresses = {};
 
-      debugPrint(">>> [Auto-Fix] Tìm máy in: BaseName='$savedBaseName', VID=$savedVid, PID=$savedPid");
-
-      // 3. Tìm trong danh sách thiết bị thực tế
-      for (var device in devices) {
-        final String currentVid = device.vendorId.toString();
-        final String currentPid = device.productId.toString();
-        final String currentName = device.name; // Tên thực tế từ phần cứng (thường ngắn gọn)
-        final String newAddress = device.identifier;
-
-        // So sánh VID, PID
-        bool matchVid = currentVid == savedVid;
-        bool matchPid = currentPid == savedPid;
-
-        // So sánh tên:
-        // 1. Giống hệt nhau
-        // 2. HOẶC Tên đã lưu chứa tên thực tế (đề phòng trường hợp khác biến thể)
-        bool matchName = (currentName == savedBaseName) || (savedBaseName.contains(currentName));
-
-        if (matchVid && matchPid && matchName) {
-          debugPrint(">>> [Auto-Fix] TÌM THẤY! Address mới: $newAddress (Device: $currentName)");
-
-          if (newAddress != oldAddress) {
-            debugPrint(">>> [Auto-Fix] -> CẬP NHẬT ĐỒNG LOẠT CHO NHÓM '$savedBaseName'...");
-            bool hasAnyChange = false;
-
-            // 4. Cập nhật cho TẤT CẢ các vai trò có cùng VID/PID/Tên Gốc
-            final updatedAssignments = currentAssignments.map((p) {
-              final pVid = p.physicalPrinter.device.vendorId.toString();
-              final pPid = p.physicalPrinter.device.productId.toString();
-              final pFullName = p.physicalPrinter.device.name;
-
-              // Lấy base name của mục cấu hình này để so sánh
-              String pBaseName = pFullName;
-              if (pFullName.contains(" (USB")) {
-                pBaseName = pFullName.split(" (USB")[0].trim();
-              }
-
-              // Kiểm tra xem cấu hình này có khớp với thiết bị vừa tìm thấy không
-              if (pVid == savedVid && pPid == savedPid && pBaseName == savedBaseName) {
-                if (p.physicalPrinter.device.address != newAddress) {
-                  debugPrint(">>> [Auto-Fix] -> Update role '${p.logicalName}': $newAddress");
-                  hasAnyChange = true;
-
-                  // Tạo device mới giữ nguyên tên hiển thị cũ (để không làm rối UI)
-                  final newDev = pos_printer.PrinterDevice(
-                    name: pFullName, // Giữ nguyên tên đầy đủ cũ
-                    vendorId: p.physicalPrinter.device.vendorId,
-                    productId: p.physicalPrinter.device.productId,
-                    address: newAddress, // Address MỚI
-                  );
-
-                  final newPhys = ScannedPrinter(
-                    device: newDev,
-                    type: p.physicalPrinter.type,
-                  );
-
-                  return ConfiguredPrinter(
-                    logicalName: p.logicalName,
-                    physicalPrinter: newPhys,
-                  );
-                }
-              }
-              return p;
-            }).toList();
-
-            if (hasAnyChange) {
-              final prefs = await SharedPreferences.getInstance();
-              final listToSave = updatedAssignments.map((p) => p.toJson()).toList();
-              await prefs.setString('printer_assignments', jsonEncode(listToSave));
-              debugPrint(">>> [Auto-Fix] Đã lưu cấu hình mới.");
-              return updatedAssignments;
-            } else {
-              return currentAssignments;
-            }
+      for (var config in updatedAssignments) {
+        if (config.physicalPrinter.type == pos_printer.PrinterType.usb) {
+          final addr = config.physicalPrinter.device.address;
+          // Lưu ý: d.identifier là thuộc tính của NativePrinter
+          if (addr != null && allDevices.any((d) => d.identifier == addr)) {
+            usedAddresses.add(addr);
           }
         }
       }
-      debugPrint(">>> [Auto-Fix] Không tìm thấy thiết bị nào khớp BaseName + VID + PID.");
+
+      // 3. Tạo "Kho thiết bị rảnh" (Candidate Pool)
+      // FIX LỖI: Không ép kiểu về PrinterDevice, để nó là NativePrinter
+      final freeUsbDevices = allDevices.where((d) {
+        return !usedAddresses.contains(d.identifier);
+      }).toList();
+
+      debugPrint(">>> [Auto-Fix] Tìm thấy ${freeUsbDevices.length} cổng USB rảnh: ${freeUsbDevices.map((e) => e.identifier).toList()}");
+
+      bool hasAnyChange = false;
+
+      // 4. Duyệt qua từng máy in cấu hình để sửa
+      for (int i = 0; i < updatedAssignments.length; i++) {
+        final config = updatedAssignments[i];
+
+        if (config.physicalPrinter.type != pos_printer.PrinterType.usb) continue;
+
+        final savedDevice = config.physicalPrinter.device;
+        final String savedVid = savedDevice.vendorId.toString();
+        final String savedPid = savedDevice.productId.toString();
+        final String currentAddress = savedDevice.address ?? '';
+
+        String savedBaseName = savedDevice.name;
+        if (savedBaseName.contains(" (USB")) {
+          savedBaseName = savedBaseName.split(" (USB")[0].trim();
+        }
+
+        // Kiểm tra xem máy in này còn sống không
+        // So sánh address cũ với identifier của NativePrinter
+        bool isStillConnected = allDevices.any((d) => d.identifier == currentAddress);
+
+        if (!isStillConnected) {
+          debugPrint(">>> [Auto-Fix] Máy '${config.logicalName}' (cổng cũ $currentAddress) bị mất kết nối. Đang tìm trong Pool...");
+
+          // 5. Tìm ứng viên trong Pool
+          int matchIndex = -1;
+          for (int j = 0; j < freeUsbDevices.length; j++) {
+            // candidate là NativePrinter
+            final candidate = freeUsbDevices[j];
+
+            final String devVid = candidate.vendorId.toString();
+            final String devPid = candidate.productId.toString();
+            final String devName = candidate.name;
+
+            // So khớp VID/PID
+            bool matchVid = devVid == savedVid;
+            bool matchPid = devPid == savedPid;
+
+            // So khớp tên tương đối
+            bool matchName = (devName == savedBaseName) || (savedBaseName.contains(devName));
+
+            if (matchVid && matchPid && matchName) {
+              matchIndex = j;
+              break;
+            }
+          }
+
+          if (matchIndex != -1) {
+            // Lấy thiết bị ra khỏi Pool
+            final matchedNativePrinter = freeUsbDevices[matchIndex];
+
+            // FIX LỖI: Lấy identifier từ NativePrinter
+            final newAddress = matchedNativePrinter.identifier;
+
+            // Xóa khỏi Pool ngay lập tức
+            freeUsbDevices.removeAt(matchIndex);
+
+            debugPrint(">>> [Auto-Fix] -> GÁN '${config.logicalName}' VÀO CỔNG MỚI: $newAddress");
+
+            // Tạo lại PrinterDevice (của thư viện) từ NativePrinter
+            final newDev = pos_printer.PrinterDevice(
+              name: savedDevice.name,
+              vendorId: savedDevice.vendorId,
+              productId: savedDevice.productId,
+              address: newAddress, // Gán cổng mới vào đây
+            );
+
+            updatedAssignments[i] = ConfiguredPrinter(
+              logicalName: config.logicalName,
+              physicalPrinter: ScannedPrinter(
+                device: newDev,
+                type: config.physicalPrinter.type,
+              ),
+            );
+
+            hasAnyChange = true;
+          } else {
+            debugPrint(">>> [Auto-Fix] Không tìm thấy cổng mới phù hợp cho '${config.logicalName}' trong Pool.");
+          }
+        }
+      }
+
+      if (hasAnyChange) {
+        // Cập nhật RAM trước
+        _cachedPrinters = updatedAssignments;
+
+        final prefs = await SharedPreferences.getInstance();
+        final listToSave = updatedAssignments.map((p) => p.toJson()).toList();
+        await prefs.setString('printer_assignments', jsonEncode(listToSave));
+
+        debugPrint(">>> [Auto-Fix] Đã cập nhật xong RAM và Đĩa.");
+        return updatedAssignments;
+      }
+
     } catch (e) {
       debugPrint(">>> [Auto-Fix] Lỗi ngoại lệ: $e");
     }
@@ -472,63 +520,37 @@ class PrintQueueService {
   }
 
   Future<bool> _dispatchPrintJob(PrintJob job, List<ConfiguredPrinter> printers) async {
+    bool result = false;
+    bool useSunmi = false;
+
     if (job.type == PrintJobType.kitchen || job.type == PrintJobType.cancel) {
-      final useSunmi = printers.any((p) =>
+      useSunmi = printers.any((p) =>
       p.logicalName.startsWith('kitchen_printer_') &&
           p.physicalPrinter.device.address == 'sunmi_internal');
-
-      if (useSunmi) {
-        return await _printWithSunmiSDK(job);
-      } else {
-        return await _printWithGenericService(job, printers);
-      }
     }
-
-    if (job.type == PrintJobType.provisional ||
-        job.type == PrintJobType.detailedProvisional ||
-        job.type == PrintJobType.receipt ||
-        job.type == PrintJobType.cashFlow ||
-        job.type == PrintJobType.endOfDayReport ||
-        job.type == PrintJobType.tableManagement) {
-
+    else if (job.type != PrintJobType.label) {
       final target = _getTargetPrinterForJob(job.type, printers);
       if (target == null) throw Exception("Chưa cấu hình máy in thu ngân.");
-
       if (target.physicalPrinter.device.address == 'sunmi_internal' &&
           job.type != PrintJobType.cashFlow &&
           job.type != PrintJobType.endOfDayReport &&
           job.type != PrintJobType.tableManagement) {
-        return await _printWithSunmiSDK(job);
-      } else {
-        return await _printWithGenericService(job, printers);
+        useSunmi = true;
       }
     }
 
-    if (job.type == PrintJobType.label) {
-      return await _printWithGenericService(job, printers);
-    }
-
-    return true;
-  }
-
-  ConfiguredPrinter? _identifyTargetPrinter(PrintJob job, List<ConfiguredPrinter> printers) {
-    String? targetRole;
-
-    if (job.type == PrintJobType.kitchen || job.type == PrintJobType.cancel) {
-      targetRole = job.data['targetPrinterRole'];
-    } else if (job.type == PrintJobType.label) {
-      targetRole = 'label_printer';
+    if (useSunmi) {
+      result = await _printWithSunmiSDK(job);
     } else {
-      targetRole = 'cashier_printer';
+      result = await _printWithGenericService(job, printers);
     }
 
-    if (targetRole == null) return null;
-
-    try {
-      return printers.firstWhere((p) => p.logicalName == targetRole);
-    } catch (_) {
-      return null;
+    // ÉP NÉM LỖI NẾU IN THẤT BẠI (ĐỂ KÍCH HOẠT AUTO-FIX)
+    if (!result) {
+      throw PlatformException(code: 'PRINT_FAILED', message: 'Máy in trả về false (kết nối thất bại).');
     }
+
+    return result;
   }
 
   ConfiguredPrinter? _getTargetPrinterForJob(

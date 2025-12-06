@@ -16,6 +16,8 @@ import '../../models/discount_model.dart';
 import 'discount_form_screen.dart';
 import 'buy_x_get_y_form_screen.dart';
 import '../sales/payment_screen.dart';
+import '../../models/surcharge_model.dart';
+import 'package:omni_datetime_picker/omni_datetime_picker.dart';
 
 // --- WIDGET CHÍNH ---
 class PromotionsScreen extends StatelessWidget {
@@ -26,7 +28,7 @@ class PromotionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Scaffold(
         appBar: AppBar(
           title: const Text("Cài đặt Khuyến mãi"),
@@ -38,6 +40,7 @@ class PromotionsScreen extends StatelessWidget {
               _buildTab(icon: Icons.receipt_long_outlined, text: "Voucher"),
               _buildTab(
                   icon: Icons.card_giftcard_outlined, text: "Mua X Tặng Y"),
+              _buildTab(icon: Icons.attach_money_outlined, text: "Phụ Thu"),
             ],
           ),
         ),
@@ -47,6 +50,7 @@ class PromotionsScreen extends StatelessWidget {
             DiscountsTab(currentUser: currentUser),
             VouchersTab(currentUser: currentUser),
             BuyXGetYTab(currentUser: currentUser),
+            SurchargesTab(currentUser: currentUser),
           ],
         ),
       ),
@@ -550,71 +554,64 @@ class _AddEditVoucherDialogState extends State<_AddEditVoucherDialog> {
     super.dispose();
   }
 
+  // --- CHỌN NGÀY BẮT ĐẦU (RIÊNG BIỆT) ---
   Future<void> _pickStartDate() async {
-    final pickedDate = await showDatePicker(
+    FocusScope.of(context).unfocus(); // Ẩn bàn phím
+
+    final DateTime? pickedDate = await showOmniDateTimePicker(
       context: context,
       initialDate: _selectedStartDate ?? DateTime.now(),
       firstDate: DateTime(2020),
       lastDate: DateTime(2100),
+      is24HourMode: true,
+      isShowSeconds: false,
+      minutesInterval: 1,
+      borderRadius: const BorderRadius.all(Radius.circular(16)),
+      constraints: const BoxConstraints(
+        maxWidth: 350,
+        maxHeight: 650,
+      ),
+      barrierDismissible: true,
     );
-    if (pickedDate == null) return;
 
-    // --- SỬA LỖI ---
-    // 1. Kiểm tra xem widget (và context) có còn tồn tại không
-    if (!context.mounted) return;
-
-    // 2. Lưu context vào biến mới để "tắt" cảnh báo
-    final BuildContext safeContext = context;
-
-    final pickedTime = await showTimePicker(
-      context: safeContext, // Dùng biến an toàn
-      initialTime: TimeOfDay.fromDateTime(_selectedStartDate ?? DateTime.now()),
-    );
-    if (pickedTime == null) return;
-
-    setState(() {
-      _selectedStartDate = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
-      _startDateController.text =
-          DateFormat('dd/MM/yyyy HH:mm').format(_selectedStartDate!);
-    });
+    if (pickedDate != null) {
+      setState(() {
+        _selectedStartDate = pickedDate;
+        _startDateController.text = DateFormat('dd/MM/yyyy HH:mm').format(_selectedStartDate!);
+      });
+    }
   }
 
+  // --- CHỌN NGÀY KẾT THÚC (RIÊNG BIỆT) ---
   Future<void> _pickExpiryDate() async {
-    final pickedDate = await showDatePicker(
+    FocusScope.of(context).unfocus(); // Ẩn bàn phím
+
+    final DateTime? pickedDate = await showOmniDateTimePicker(
       context: context,
+      // Nếu đã có ngày bắt đầu, ngày kết thúc mặc định nên sau ngày bắt đầu
       initialDate: _selectedExpiryDate ?? _selectedStartDate ?? DateTime.now(),
-      firstDate: _selectedStartDate ?? DateTime.now(),
+      // Không cho chọn ngày kết thúc trước ngày bắt đầu (nếu muốn chặt chẽ)
+      firstDate: _selectedStartDate ?? DateTime(2020),
       lastDate: DateTime(2100),
+      is24HourMode: true,
+      isShowSeconds: false,
+      minutesInterval: 1,
+      borderRadius: const BorderRadius.all(Radius.circular(16)),
+      constraints: const BoxConstraints(
+        maxWidth: 350,
+        maxHeight: 650,
+      ),
+      barrierDismissible: true,
     );
-    if (pickedDate == null) return;
-    if (!context.mounted) return;
-    final BuildContext safeContext = context;
 
-    final pickedTime = await showTimePicker(
-      context: safeContext,
-      initialTime:
-          TimeOfDay.fromDateTime(_selectedExpiryDate ?? DateTime.now()),
-    );
-    if (pickedTime == null) return;
-
-    setState(() {
-      _selectedExpiryDate = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
-      );
-      _expiryDateController.text =
-          DateFormat('dd/MM/yyyy HH:mm').format(_selectedExpiryDate!);
-    });
+    if (pickedDate != null) {
+      setState(() {
+        _selectedExpiryDate = pickedDate;
+        _expiryDateController.text = DateFormat('dd/MM/yyyy HH:mm').format(_selectedExpiryDate!);
+      });
+    }
   }
+
 
   Future<void> _saveVoucher() async {
     if (!_formKey.currentState!.validate()) return;
@@ -750,6 +747,7 @@ class _AddEditVoucherDialogState extends State<_AddEditVoucherDialog> {
               const SizedBox(height: 8),
               SwitchListTile(
                 title: const Text("Kích hoạt"),
+                secondary: Icon(Icons.toggle_on_outlined, color: _isActive ? AppTheme.primaryColor : Colors.grey),
                 value: _isActive,
                 onChanged: (val) => setState(() => _isActive = val),
                 contentPadding: EdgeInsets.zero,
@@ -1104,6 +1102,393 @@ class _BuyXGetYTabState extends State<BuyXGetYTab> {
               backgroundColor: AppTheme.primaryColor,
             )
           : null,
+    );
+  }
+}
+
+// --- TAB PHỤ THU (MỚI) ---
+// --- TAB PHỤ THU (ĐÃ CẬP NHẬT GIAO DIỆN) ---
+class SurchargesTab extends StatefulWidget {
+  final UserModel currentUser;
+  const SurchargesTab({super.key, required this.currentUser});
+
+  @override
+  State<SurchargesTab> createState() => _SurchargesTabState();
+}
+
+class _SurchargesTabState extends State<SurchargesTab> {
+  final _firestoreService = FirestoreService();
+  bool _canSetupPromotions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.currentUser.role == 'owner') {
+      _canSetupPromotions = true;
+    } else {
+      _canSetupPromotions = widget.currentUser.permissions?['promotions']?['canSetupPromotions'] ?? false;
+    }
+  }
+
+  void _showAddEditDialog({SurchargeModel? item}) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _AddEditSurchargeDialog(
+        currentUser: widget.currentUser,
+        surcharge: item,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[100], // Thêm màu nền nhẹ
+      body: StreamBuilder<List<SurchargeModel>>(
+        stream: _firestoreService.getSurchargesStream(widget.currentUser.storeId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text("Lỗi: ${snapshot.error}"));
+          }
+
+          final list = snapshot.data ?? [];
+          if (list.isEmpty) {
+            return const Center(child: Text("Chưa có phụ thu nào.", style: TextStyle(color: Colors.grey)));
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: list.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final item = list[index];
+
+              String timeStr = "Vô thời hạn";
+              if (item.startAt != null || item.endAt != null) {
+                final start = item.startAt != null ? DateFormat('dd/MM HH:mm').format(item.startAt!.toDate()) : '...';
+                final end = item.endAt != null ? DateFormat('dd/MM HH:mm').format(item.endAt!.toDate()) : '...';
+                timeStr = "$start - $end";
+              }
+
+              // --- GIAO DIỆN CARD MỚI ---
+              return Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: InkWell(
+                  onTap: _canSetupPromotions ? () => _showAddEditDialog(item: item) : null,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      children: [
+                        // Icon trạng thái
+                        CircleAvatar(
+                          backgroundColor: item.isActive ? Colors.green.withAlpha(30) : Colors.grey.withAlpha(40),
+                          child: Icon(Icons.attach_money, color: item.isActive ? Colors.green : Colors.grey),
+                        ),
+                        const SizedBox(width: 16),
+                        // Nội dung chính
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Dòng 1: Tên
+                              Text(
+                                item.name,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 6),
+                              // Dòng 2: Giá trị | Thời gian (Gộp lại cho gọn)
+                              Row(
+                                children: [
+                                  Text(
+                                    item.isPercent ? "${formatNumber(item.value)}%" : "${formatNumber(item.value)} đ",
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text("|", style: TextStyle(fontSize: 14, color: Colors.grey[400])),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      timeStr,
+                                      style: const TextStyle(fontSize: 14, color: Colors.grey),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: _canSetupPromotions
+          ? FloatingActionButton.extended(
+        onPressed: () => _showAddEditDialog(),
+        icon: const Icon(Icons.add),
+        label: const Text("Tạo Phụ Thu"),
+        backgroundColor: AppTheme.primaryColor,
+      )
+          : null,
+    );
+  }
+}
+
+class _AddEditSurchargeDialog extends StatefulWidget {
+  final UserModel currentUser;
+  final SurchargeModel? surcharge;
+
+  const _AddEditSurchargeDialog({required this.currentUser, this.surcharge});
+
+  @override
+  State<_AddEditSurchargeDialog> createState() => _AddEditSurchargeDialogState();
+}
+
+class _AddEditSurchargeDialogState extends State<_AddEditSurchargeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late TextEditingController _nameController;
+  late TextEditingController _valueController;
+  late TextEditingController _dateRangeController;
+
+  bool _isPercent = false;
+  bool _isActive = true;
+  DateTime? _startAt;
+  DateTime? _endAt;
+
+  bool get _isEdit => widget.surcharge != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.surcharge;
+    _nameController = TextEditingController(text: s?.name ?? '');
+    _valueController = TextEditingController(text: s != null ? formatNumber(s.value) : '');
+    _dateRangeController = TextEditingController();
+
+    _isPercent = s?.isPercent ?? false;
+    _isActive = s?.isActive ?? true;
+    _startAt = s?.startAt?.toDate();
+    _endAt = s?.endAt?.toDate();
+
+    _updateDateText();
+  }
+
+  void _updateDateText() {
+    if (_startAt != null && _endAt != null) {
+      _dateRangeController.text = "${DateFormat('dd/MM HH:mm').format(_startAt!)} - ${DateFormat('dd/MM HH:mm').format(_endAt!)}";
+    } else {
+      _dateRangeController.text = "";
+    }
+  }
+
+  Future<void> _pickDateRange() async {
+    // Ẩn bàn phím nếu đang mở
+    FocusScope.of(context).unfocus();
+
+    final List<DateTime>? result = await showOmniDateTimeRangePicker(
+      context: context,
+      startInitialDate: _startAt ?? DateTime.now(),
+      startFirstDate: DateTime(2020),
+      startLastDate: DateTime(2100),
+      endInitialDate: _endAt ?? DateTime.now(),
+      endFirstDate: DateTime(2020),
+      endLastDate: DateTime(2100),
+      is24HourMode: true,
+      isShowSeconds: false,
+      minutesInterval: 1,
+      borderRadius: const BorderRadius.all(Radius.circular(16)),
+      constraints: const BoxConstraints(
+        maxWidth: 350,
+        maxHeight: 650,
+      ),
+      barrierDismissible: true,
+    );
+
+    if (result != null && result.length == 2) {
+      setState(() {
+        _startAt = result[0];
+        _endAt = result[1];
+        _updateDateText();
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final data = {
+      'storeId': widget.currentUser.storeId,
+      'name': _nameController.text.trim(),
+      'value': parseVN(_valueController.text),
+      'isPercent': _isPercent,
+      'isActive': _isActive,
+      'startAt': _startAt != null ? Timestamp.fromDate(_startAt!) : null,
+      'endAt': _endAt != null ? Timestamp.fromDate(_endAt!) : null,
+    };
+
+    try {
+      if (_isEdit) {
+        await FirestoreService().updateSurcharge(widget.surcharge!.id, data);
+      } else {
+        await FirestoreService().addSurcharge(data);
+      }
+
+      // Xóa cache để PaymentScreen tải lại dữ liệu mới
+      PaymentScreen.clearCache();
+
+      ToastService().show(message: "Đã lưu phụ thu", type: ToastType.success);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      ToastService().show(message: "Lỗi: $e", type: ToastType.error);
+    }
+  }
+
+  // Hàm xóa phụ thu
+  Future<void> _delete() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Xác nhận xóa"),
+        content: Text("Bạn có chắc muốn xóa phụ thu '${widget.surcharge!.name}' không?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Hủy")),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text("Xóa")),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      try {
+        await FirestoreService().deleteSurcharge(widget.surcharge!.id);
+        PaymentScreen.clearCache(); // Xóa cache sau khi xóa
+        ToastService().show(message: "Đã xóa phụ thu", type: ToastType.success);
+        if (mounted) Navigator.pop(context); // Đóng dialog sửa
+      } catch (e) {
+        ToastService().show(message: "Lỗi khi xóa: $e", type: ToastType.error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_isEdit ? "Sửa Phụ Thu" : "Tạo Phụ Thu", style: const TextStyle(fontWeight: FontWeight.bold)),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 500),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                CustomTextFormField(
+                  controller: _nameController,
+                  // SỬA LỖI: Chuyển prefixIcon vào trong InputDecoration
+                  decoration: const InputDecoration(
+                    labelText: "Tên phụ thu (VD: Tết, Lễ...)",
+                    prefixIcon: Icon(Icons.label_outline),
+                  ),
+                  validator: (v) => (v?.isEmpty ?? true) ? "Bắt buộc" : null,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: CustomTextFormField(
+                        controller: _valueController,
+                        // SỬA LỖI: Chuyển prefixIcon vào trong InputDecoration
+                        decoration: const InputDecoration(
+                          labelText: "Giá trị",
+                          prefixIcon: Icon(Icons.attach_money_outlined),
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [ThousandDecimalInputFormatter()],
+                        validator: (v) => (v?.isEmpty ?? true) ? "Bắt buộc" : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: AppDropdown<bool>(
+                        labelText: "Loại",
+                        value: _isPercent,
+                        items: const [
+                          DropdownMenuItem(value: false, child: Text("VNĐ")),
+                          DropdownMenuItem(value: true, child: Text("%")),
+                        ],
+                        onChanged: (val) => setState(() => _isPercent = val ?? false),
+                      ),
+                    )
+                  ],
+                ),
+                const SizedBox(height: 16),
+                CustomTextFormField(
+                  controller: _dateRangeController,
+                  readOnly: true,
+                  onTap: _pickDateRange,
+                  // SỬA LỖI: Chuyển prefixIcon vào trong InputDecoration
+                  decoration: const InputDecoration(
+                    labelText: "Thời gian áp dụng",
+                    hintText: "Chọn ngày & giờ",
+                    prefixIcon: Icon(Icons.calendar_today_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text("Kích hoạt"),
+                  secondary: Icon(Icons.toggle_on_outlined, color: _isActive ? AppTheme.primaryColor : Colors.grey),
+                  value: _isActive,
+                  onChanged: (val) => setState(() => _isActive = val),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      actions: [
+        if (_isEdit)
+          TextButton.icon(
+            onPressed: _delete,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text("Xóa"),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+          ),
+        const Spacer(),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Hủy"),
+        ),
+        ElevatedButton(
+          onPressed: _save,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primaryColor,
+            foregroundColor: Colors.white,
+          ),
+          child: Text(_isEdit ? "Cập nhật" : "Lưu"),
+        ),
+      ],
     );
   }
 }

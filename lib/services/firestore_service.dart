@@ -18,6 +18,7 @@ import '../models/quick_note_model.dart';
 import '../models/payment_method_model.dart';
 import '../models/web_order_model.dart';
 import '../models/discount_model.dart';
+import '../models/surcharge_model.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -1765,4 +1766,43 @@ class FirestoreService {
       }).toList();
     });
   }
+
+  Stream<List<SurchargeModel>> getSurchargesStream(String storeId) {
+    return _db
+        .collection('surcharges')
+        .where('storeId', isEqualTo: storeId)
+    // .orderBy('createdAt', descending: true) // <--- BỎ DÒNG NÀY
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+        .map((doc) => SurchargeModel.fromFirestore(doc))
+        .toList());
+  }
+
+  // 2. Lấy danh sách active (Dùng cho Payment)
+  Future<List<SurchargeModel>> getActiveSurcharges(String storeId) async {
+    final now = Timestamp.now();
+    try {
+      final snapshot = await _db
+          .collection('surcharges')
+          .where('storeId', isEqualTo: storeId)
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      final allActive = snapshot.docs.map((doc) => SurchargeModel.fromFirestore(doc)).toList();
+
+      // Lọc thủ công ngày giờ
+      return allActive.where((s) {
+        final startOk = s.startAt == null || s.startAt!.compareTo(now) <= 0;
+        final endOk = s.endAt == null || s.endAt!.compareTo(now) >= 0;
+        return startOk && endOk;
+      }).toList();
+    } catch (e) {
+      debugPrint("Lỗi lấy phụ thu active: $e");
+      return [];
+    }
+  }
+
+  Future<void> addSurcharge(Map<String, dynamic> data) async => await _db.collection('surcharges').add(data);
+  Future<void> updateSurcharge(String id, Map<String, dynamic> data) async => await _db.collection('surcharges').doc(id).update(data);
+  Future<void> deleteSurcharge(String id) async => await _db.collection('surcharges').doc(id).delete();
 }

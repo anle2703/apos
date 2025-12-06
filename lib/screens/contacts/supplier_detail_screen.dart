@@ -375,8 +375,6 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-
               // --- HÀNG 2: NGƯỜI TẠO / NGÀY GIỜ ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -407,16 +405,14 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   ),
                 ],
               ),
-              const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
+              const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
               _buildDebtRow('Nợ đầu kỳ:', supplierTx.openingDebt, isCancelled: isCancelled),
-              const SizedBox(height: 4),
               _buildDebtRow(
                   'Phát sinh:',
                   isCancelled ? 0 : -manualTx.amount,
                   isChange: true,
                   isCancelled: isCancelled
               ),
-              const SizedBox(height: 4),
               _buildDebtRow('Nợ cuối kỳ:', supplierTx.closingDebt, isFinal: true, isCancelled: isCancelled),
             ],
           ),
@@ -488,11 +484,9 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   ),
                 ],
               ),
-              const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
+              const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
               _buildDebtRow('Nợ đầu kỳ:', supplierTx.openingDebt),
-              const SizedBox(height: 4),
               _buildDebtRow('Phát sinh:', po.debtAmount, isChange: true),
-              const SizedBox(height: 4),
               _buildDebtRow('Nợ cuối kỳ:', supplierTx.closingDebt, isFinal: true),
             ],
           ),
@@ -521,15 +515,13 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
       children: [
         Text(
             label,
-            style: TextStyle(
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: isCancelled ? Colors.grey.shade600 : Colors.black,
-              fontSize: 16,
             )
         ),
         Text(
           '$prefix${formatNumber(value)} đ',
-          style: TextStyle(
-            fontSize: 16,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: valueColor,
           ),
         ),

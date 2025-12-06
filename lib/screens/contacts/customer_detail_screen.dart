@@ -440,7 +440,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
               // --- HÀNG 2: NGƯỜI TẠO / NGÀY GIỜ ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -467,16 +466,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ],
               ),
               // --- CÔNG NỢ ---
-              const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
+              const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
               _buildDebtRow('Nợ đầu kỳ:', tx.openingDebt),
-              const SizedBox(height: 4),
               _buildDebtRow('Phát sinh:', (tx.transaction as BillModel).debtAmount, isChange: true),
-              const SizedBox(height: 4),
               _buildDebtRow('Nợ cuối kỳ:', tx.closingDebt, isFinal: true),
 
               // --- BỔ SUNG LẠI CODE HIỂN THỊ ĐIỂM ---
               if (bill.pointsEarned > 0 || bill.customerPointsUsed > 0) ...[
-                const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
+                const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
                 if (bill.pointsEarned > 0)
                   _buildPointsRow(
                       label: 'Điểm thưởng cộng:',
@@ -565,8 +562,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
-
               // --- HÀNG 2: NGƯỜI TẠO / NGÀY GIỜ (ĐÃ SỬA) ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -597,19 +592,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   ),
                 ],
               ),
-              const Divider(height: 8, thickness: 0.5, color: Colors.grey,),
+              const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
 
               // --- CÔNG NỢ (ĐÃ SỬA) ---
               _buildDebtRow('Nợ đầu kỳ:', tx.openingDebt, isCancelled: isCancelled),
-              const SizedBox(height: 4),
-              // Yêu cầu: Phát sinh = 0
               _buildDebtRow(
                   'Phát sinh:',
                   isCancelled ? 0 : -manualTx.amount,
                   isChange: true,
                   isCancelled: isCancelled
               ),
-              const SizedBox(height: 4),
               _buildDebtRow('Nợ cuối kỳ:', tx.closingDebt, isFinal: true, isCancelled: isCancelled),
             ],
           ),
@@ -655,15 +647,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       children: [
         Text(
             label,
-            style: TextStyle(
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: isCancelled ? Colors.grey.shade600 : Colors.black,
-              fontSize: 16,
             )
         ),
         Text(
           '$prefix${formatNumber(value)} đ',
-          style: TextStyle(
-            fontSize: 16,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
             color: valueColor,
           ),
         ),

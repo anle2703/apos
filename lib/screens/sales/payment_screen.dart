@@ -24,6 +24,7 @@ import '../../screens/tax_management_screen.dart'
     show kDirectRates, kDeductionRates;
 import 'package:intl/intl.dart';
 import 'dart:math';
+import '../../models/surcharge_model.dart';
 
 class PaymentState {
   final double discountAmount;
@@ -140,9 +141,9 @@ class PaymentScreen extends StatelessWidget {
     if (_PaymentPanelState._cachedPaymentMethods != null &&
         _PaymentPanelState._cachedStoreTaxSettings != null &&
         _PaymentPanelState._cachedDefaultMethodId != null &&
-        _PaymentPanelState._cachedStoreDetails != null && // Check mới
-        _PaymentPanelState._cachedStoreSettingsObj != null) {
-      // Check mới
+        _PaymentPanelState._cachedStoreDetails != null &&
+        _PaymentPanelState._cachedStoreSettingsObj != null &&
+        _PaymentPanelState._cachedSurcharges != null) {
       debugPrint(">>> [Preload] Dữ liệu đã có sẵn, bỏ qua.");
       return;
     }
@@ -187,6 +188,7 @@ class PaymentScreen extends StatelessWidget {
           // 4: [MỚI] Store Details
           SettingsService().getStoreSettings(ownerUid),
           // 5: [MỚI] Store Settings Object
+          firestore.getActiveSurcharges(storeId),
         ]);
 
         _PaymentPanelState._cachedStoreTaxSettings =
@@ -221,10 +223,12 @@ class PaymentScreen extends StatelessWidget {
         _PaymentPanelState._cachedStoreDetails =
             results[4] as Map<String, String>?;
         _PaymentPanelState._cachedStoreSettingsObj = results[5];
-      }
+        _PaymentPanelState._cachedSurcharges = results[6] as List<SurchargeModel>;
 
+      }
       debugPrint(
           ">>> [Preload] Hoàn tất! PTTT Mặc định: ${_PaymentPanelState._cachedDefaultMethodId}");
+      debugPrint(">>> [Preload] Đã tải ${_PaymentPanelState._cachedSurcharges?.length} phụ thu.");
     } catch (e) {
       debugPrint(">>> [Preload] Lỗi: $e");
     }
@@ -349,7 +353,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   static String? get sharedDefaultMethodId => _cachedDefaultMethodId;
   static Map<String, String>? _cachedStoreDetails;
   static dynamic _cachedStoreSettingsObj;
-
+  static List<SurchargeModel>? _cachedSurcharges;
   static void resetCache() {
     _cachedStoreTaxSettings = null;
     _cachedPaymentMethods = null;
@@ -360,6 +364,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     _cachedDefaultVoucher = null;
     _cachedStoreDetails = null;
     _cachedStoreSettingsObj = null;
+    _cachedSurcharges = null;
   }
 
   final Map<String, String> _productTaxRateMap = {};
@@ -544,6 +549,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _applyVoucher(silent: true);
         });
+      }
+
+      if (_cachedSurcharges != null && _surcharges.isEmpty) {
+        // Chỉ thêm nếu danh sách hiện tại đang trống (tránh duplicate khi hot reload)
+        _surcharges = _cachedSurcharges!.map((s) => SurchargeItem(
+          name: s.name,
+          amount: s.value,
+          isPercent: s.isPercent,
+        )).toList();
       }
 
       // Tính lại tổng tiền ngay lập tức
@@ -812,12 +826,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _voucherDiscountValue = widget.subtotal * (voucher.value / 100);
         } else {
           _voucherDiscountValue = voucher.value;
-        }
-
-        if (!silent) {
-          ToastService().show(
-              message: "Đã áp dụng voucher: ${voucher.code}",
-              type: ToastType.success);
         }
       });
     } else {
@@ -2112,6 +2120,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                     ),
+                  const SizedBox(height: 12),
                   _buildSurchargeInputs(),
                 ],
               ),
@@ -2275,7 +2284,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final isWide =
-                    constraints.maxWidth > 750; // desktop/pos android
+                    constraints.maxWidth > 600;
                 if (isWide) {
                   return Row(
                     children: [

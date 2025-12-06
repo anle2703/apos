@@ -307,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ListTile(
                   leading: const Icon(Icons.sell_outlined),
-                  title: const Text('Chương trình khuyến mãi'),
+                  title: const Text('Phụ thu & Khuyến mãi'),
                   onTap: () {
                     if (_currentUser != null && _canViewPromotions) {
                       Navigator.push(
