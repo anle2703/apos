@@ -435,24 +435,36 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   // 1. Hàm điều phối chính (Đã tối ưu)
   Future<void> _loadAllInitialDataOptimized() async {
-    // 1. Kiểm tra đủ cache chưa (Thêm check 2 biến mới)
+    // 1. LUÔN LUÔN Tải cấu hình E-Invoice (Dù có Cache hay không)
+    // Đưa đoạn này lên đầu hàm để đảm bảo nó luôn được chạy
+    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    _eInvoiceService.getConfigStatus(ownerUid).then((configStatus) {
+      if (mounted) {
+        setState(() {
+          // Nếu đã cấu hình thì lấy giá trị autoIssueOnPayment, ngược lại là false
+          _autoIssueEInvoice = configStatus.isConfigured && configStatus.autoIssueOnPayment;
+          debugPrint(">>> [E-INVOICE STATUS] Auto Issue: $_autoIssueEInvoice");
+        });
+      }
+    });
+
+    // 2. Kiểm tra Cache các dữ liệu khác (Logic cũ)
     if (_cachedPaymentMethods != null &&
         _cachedStoreTaxSettings != null &&
         _cachedEarnRate != null &&
         _cachedStoreDetails != null &&
         _cachedStoreSettingsObj != null) {
       _applyCachedData();
-      return;
+      return; // Code cũ return ở đây, làm đoạn E-Invoice bên dưới không chạy được
     }
 
-    // 2. Nếu chưa có Cache -> Tải lại
+    // 3. Nếu chưa có Cache -> Tải lại (Logic cũ)
     final futures = <Future>[];
 
     if (_cachedPaymentMethods == null) {
       futures.add(_loadPaymentMethods(forceRefresh: true));
     }
 
-    // Tải Settings tổng hợp
     if (_cachedStoreTaxSettings == null ||
         _cachedEarnRate == null ||
         _cachedStoreDetails == null) {
@@ -463,16 +475,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       await Future.wait(futures);
       if (mounted) _applyCachedData();
     }
-
-    // 3. Check E-Invoice (Giữ nguyên)
-    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-    _eInvoiceService.getConfigStatus(ownerUid).then((configStatus) {
-      if (mounted && configStatus.isConfigured) {
-        setState(() {
-          _autoIssueEInvoice = configStatus.autoIssueOnPayment;
-        });
-      }
-    });
   }
 
   // 2. Hàm Apply dữ liệu từ Cache vào biến State (Thay thế logic của các hàm cũ)
@@ -1019,7 +1021,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     // 1. Tính toán lại lần cuối
     _calculateTotal();
 
-    // 2. Kiểm tra logic tiền mặt & PTTT
+    // 2. Kiểm tra logic tiền mặt
     if (widget.promptForCash &&
         _selectedMethodIds.contains(_cashMethod!.id) &&
         _debtAmount > 0) {
@@ -1034,8 +1036,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             message: 'Vui lòng nhập số tiền mặt khách đưa',
             type: ToastType.warning);
         await _showCashDialog();
-        _calculateTotal(); // Tính lại dư nợ
-        if (_debtAmount > 0) return; // Vẫn thiếu tiền thì dừng
+        _calculateTotal();
+        if (_debtAmount > 0) return;
       }
     }
 
@@ -1055,10 +1057,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       if (firstUnconfirmedBankMethod != null) {
         ToastService().show(
             message:
-                'Vui lòng xác nhận đã nhận thanh toán qua ${firstUnconfirmedBankMethod.name}',
+            'Vui lòng xác nhận đã nhận thanh toán qua ${firstUnconfirmedBankMethod.name}',
             type: ToastType.warning);
         final bool wasConfirmed =
-            await _showQrPopup(firstUnconfirmedBankMethod);
+        await _showQrPopup(firstUnconfirmedBankMethod);
         if (!wasConfirmed) return;
       } else {
         break;
@@ -1082,19 +1084,17 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     });
 
     try {
-      // 1. TẠO BILL CODE CLIENT-SIDE (Tạo ID tại chỗ)
+      // 1. TẠO BILL CODE CLIENT-SIDE
       final now = DateTime.now();
-
-      final String billCodeTimestamp = DateFormat('ddMMyyHHmmss').format(now);
+      final String billCodeTimestamp = DateFormat('ddMMyyHHmm').format(now);
       final String randomSuffix = Random().nextInt(1000).toString().padLeft(3, '0');
-      final String shortBillCode = 'BILL$billCodeTimestamp$randomSuffix';
+      final String shortBillCode = 'HĐ$billCodeTimestamp$randomSuffix';
       final String newBillId = '${widget.currentUser.storeId}_$shortBillCode';
 
-      // 2. CHUẨN BỊ DỮ LIỆU (Giữ nguyên logic chuẩn bị data)
+      // 2. CHUẨN BỊ DỮ LIỆU
       final validPayments =
-          Map.fromEntries(_paymentAmounts.entries.where((e) => e.value > 0));
+      Map.fromEntries(_paymentAmounts.entries.where((e) => e.value > 0));
 
-      // Lấy thông tin ngân hàng để in bill (nếu có)
       String? firstBankMethodId;
       try {
         firstBankMethodId =
@@ -1135,23 +1135,21 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         bankDetailsForPrinting: bankDetails,
       );
 
-      // Chuẩn bị Items (kèm thông tin thuế chi tiết)
+      // Chuẩn bị Items
       final bool isDeduction = _calcMethod == 'deduction';
       final rateMap = isDeduction ? kDeductionRates : kDirectRates;
       final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
 
       final List<Map<String, dynamic>> billItems =
-          widget.order.items.map((item) {
+      widget.order.items.map((item) {
         final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
         final productData = item['product'] as Map<String, dynamic>? ?? {};
 
-        // Xử lý món tính giờ
-        final serviceSetup =
-            productData['serviceSetup'] as Map<String, dynamic>?;
+        final serviceSetup = productData['serviceSetup'] as Map<String, dynamic>?;
         final isTimeBased = serviceSetup?['isTimeBased'] == true;
         if (isTimeBased) {
           final priceBreakdown =
-              List<Map<String, dynamic>>.from(item['priceBreakdown'] ?? []);
+          List<Map<String, dynamic>>.from(item['priceBreakdown'] ?? []);
           int totalMinutes = 0;
           for (var block in priceBreakdown) {
             totalMinutes += (block['minutes'] as num?)?.toInt() ?? 0;
@@ -1161,7 +1159,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           }
         }
 
-        // Xử lý thuế từng món
         final productId = productData['id'] as String?;
         String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
         if (!rateMap.containsKey(taxKey)) taxKey = defaultTaxKey;
@@ -1175,14 +1172,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         return newItem;
       }).toList();
 
-      // Tính lợi nhuận & Điểm
       final double totalProfit = _calculateTotalProfit();
       int pointsEarned = 0;
       if (widget.customer != null && _earnRate > 0) {
         pointsEarned = (_totalPayable / _earnRate).floor();
       }
 
-      // Xử lý hoa hồng nhân viên (Staff Commissions)
+      // Xử lý Staff Commissions
       final List<Map<String, dynamic>> staffCommissions = [];
       for (var item in billItems) {
         final productData = (item['product'] as Map<String, dynamic>?) ?? {};
@@ -1209,6 +1205,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         }
       }
 
+      // --- [MỚI] TẠO BILL DATA SỚM ĐỂ DÙNG CHO HĐĐT ---
       final billData = {
         'orderId': widget.order.id,
         'storeId': widget.order.storeId,
@@ -1221,7 +1218,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'discountInput': parseVN(_discountController.text),
         'surcharges': result.surcharges
             .map((s) =>
-                {'name': s.name, 'amount': s.amount, 'isPercent': s.isPercent})
+        {'name': s.name, 'amount': s.amount, 'isPercent': s.isPercent})
             .toList(),
         'taxPercent': 0.0,
         'taxAmount': _calculatedVatAmount,
@@ -1234,7 +1231,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'clientCreatedAt': now,
         'createdByUid': widget.currentUser.uid,
         'createdByName':
-            widget.currentUser.name ?? widget.currentUser.phoneNumber,
+        widget.currentUser.name ?? widget.currentUser.phoneNumber,
         'voucherCode': _appliedVoucher?.code,
         'voucherDiscount': _voucherDiscountValue,
         'customerPointsUsed': result.customerPointsUsed,
@@ -1247,35 +1244,54 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'customerName': widget.customer?.name,
         'customerPhone': widget.customer?.phone,
         'guestAddress': widget.customerAddress,
-        'eInvoiceInfo': null,
+        'eInvoiceInfo': null, // Mặc định là null
         'billCode': shortBillCode,
         'status': 'completed',
       };
 
+      // --- [MỚI] GỌI API HÓA ĐƠN ĐIỆN TỬ (CHỜ KẾT QUẢ) ---
+      EInvoiceResult? eInvoiceResult;
+
+      if (_autoIssueEInvoice) {
+        try {
+          // Hàm này trả về dữ liệu hoặc throw lỗi, không bao giờ trả về null
+          eInvoiceResult = await _eInvoiceService.createInvoice(
+            billData,
+            widget.customer,
+            widget.currentUser.ownerUid ?? widget.currentUser.uid,
+          );
+          billData['eInvoiceInfo'] = eInvoiceResult.toJson();
+
+        } catch (e) {
+          debugPrint("Lỗi HĐĐT (Vẫn cho phép thanh toán): $e");
+          ToastService().show(message: "Không thể xuất HĐĐT: ${e.toString()}", type: ToastType.warning);
+        }
+      }
+
       final bool shouldPrint = forcePrint ?? _printReceipt;
 
-      // 1. Gởi lệnh in (Không cần await kết quả để chặn UI)
+      // 1. Gởi lệnh in (Kèm eInvoiceResult để hiện QR)
       if (shouldPrint) {
         _sendReceiptToPrintQueue(
           firestore: FirestoreService(),
           billItems: billItems,
           result: result,
           billData: billData,
-          eInvoiceResult: null,
+          eInvoiceResult: eInvoiceResult, // <--- QUAN TRỌNG: Truyền kết quả vào đây
           newBillId: newBillId,
         ).catchError(
-            (e) => debugPrint("Lỗi in ngầm: $e")); // Bắt lỗi để không crash
+                (e) => debugPrint("Lỗi in ngầm: $e"));
       }
 
-      // 2. Gọi callback xác nhận thanh toán NGAY LẬP TỨC để đóng màn hình Retail/Order
+      // 2. Callback xác nhận
       widget.onConfirmPayment(result);
 
-      // 3. Đóng màn hình Payment (Nếu đang push navigation)
+      // 3. Đóng màn hình
       if (mounted && Navigator.canPop(context)) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
 
-      // 4. Lưu dữ liệu chạy ngầm (Logic cũ giữ nguyên)
+      // 4. Lưu dữ liệu chạy ngầm (Kèm preCreatedEInvoiceResult để không tạo lại)
       _performFullBackgroundSave(
         newBillId: newBillId,
         billData: billData,
@@ -1283,9 +1299,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         result: result,
         ownerUid: widget.currentUser.ownerUid ?? widget.currentUser.uid,
         pointsEarned: pointsEarned,
+        preCreatedEInvoiceResult: eInvoiceResult, // <--- QUAN TRỌNG: Truyền vào đây
       );
     } catch (e) {
-      // Chỉ hiện lỗi nếu UI chưa đóng (thường là lỗi ở bước chuẩn bị data)
       if (mounted) {
         setState(() => _isProcessingPayment = false);
         ToastService().show(message: 'Lỗi: $e', type: ToastType.error);
@@ -1300,13 +1316,16 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     required PaymentResult result,
     required String ownerUid,
     required int pointsEarned,
+    EInvoiceResult? preCreatedEInvoiceResult,
   }) async {
     final firestore = FirestoreService();
 
     try {
-      // 1. [QUAN TRỌNG] Cập nhật Order thành 'paid' ĐẦU TIÊN để giải phóng bàn ngay lập tức
-      // Việc này giúp F&B bàn chuyển từ Đỏ -> Trắng ngay, không bị delay bởi việc lưu Bill.
-      await firestore.updateOrder(widget.order.id, {
+      // 1. Cập nhật Order (SỬA ĐỔI QUAN TRỌNG)
+      // Thay vì updateOrder (chỉ update), ta dùng set với merge: true để an toàn cho đơn bán lẻ chưa tồn tại
+      final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.order.id);
+
+      await orderRef.set({
         'status': 'paid',
         'billId': newBillId,
         'paidAt': FieldValue.serverTimestamp(),
@@ -1314,15 +1333,31 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'paidByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
         'finalAmount': _totalPayable,
         'debtAmount': _debtAmount,
-        'items': billItems, // Lưu items chốt giá cuối cùng
+        'items': billItems,
         'updatedAt': FieldValue.serverTimestamp(),
         'version': widget.order.version + 1,
-      });
 
-      // 2. Sau đó mới lưu Bill vào Firestore
+        // Các trường cần thiết để tạo mới nếu chưa có
+        'storeId': widget.order.storeId,
+        'tableName': widget.order.tableName,
+        'totalAmount': widget.order.totalAmount,
+        'createdAt': widget.order.createdAt ?? FieldValue.serverTimestamp(),
+        'createdByUid': widget.order.createdByUid,
+        'createdByName': widget.order.createdByName,
+        'customerId': widget.order.customerId,
+        'customerName': widget.order.customerName,
+        'customerPhone': widget.order.customerPhone,
+      }, SetOptions(merge: true));
+
+      // 2. Lưu Bill vào Firestore
+      // Nếu đã có kết quả HĐĐT từ trước (được truyền vào), cập nhật luôn vào billData
+      if (preCreatedEInvoiceResult != null) {
+        billData['eInvoiceInfo'] = preCreatedEInvoiceResult.toJson();
+      }
+
       await firestore.setBill(newBillId, billData);
 
-      // 3. Dọn dẹp bàn & Web Order (Giữ nguyên)
+      // 3. Dọn dẹp bàn & Web Order
       await firestore.unlinkMergedTables(widget.order.tableId);
       final String webOrderId = widget.order.id;
       final String expectedTableId = 'ship_$webOrderId';
@@ -1335,13 +1370,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             'status': 'Đã hoàn tất',
             'completedAt': FieldValue.serverTimestamp(),
             'completedBy':
-                widget.currentUser.name ?? widget.currentUser.phoneNumber,
+            widget.currentUser.name ?? widget.currentUser.phoneNumber,
           });
           await firestore.deleteTable(widget.order.tableId);
         } catch (_) {}
       }
 
-      // 4. Trừ kho (Inventory) - Chạy sau cùng để không chặn UI
+      // 4. Trừ kho (Inventory)
       try {
         await InventoryService()
             .processStockDeductionForOrder(billItems, widget.order.storeId);
@@ -1349,7 +1384,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         debugPrint("Background Inventory Error: $e");
       }
 
-      // 5. Cập nhật Voucher & Điểm (Giữ nguyên)
+      // 5. Cập nhật Voucher & Điểm
       if (_appliedVoucher != null && _appliedVoucher!.quantity != null) {
         firestore.updateVoucher(_appliedVoucher!.id, {
           'quantity': FieldValue.increment(-1),
@@ -1359,16 +1394,29 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       if (widget.customer != null) {
         final int pointsUsed = parseVN(_pointsController.text).toInt();
         final int pointsChange = pointsEarned - pointsUsed;
+
         if (pointsChange != 0) {
           firestore.updateCustomerPoints(widget.customer!.id, pointsChange);
         }
         if (_debtAmount > 0) {
           firestore.updateCustomerDebt(widget.customer!.id, _debtAmount);
         }
+        try {
+          await FirebaseFirestore.instance
+              .collection('customers')
+              .doc(widget.customer!.id)
+              .update({
+            'totalSpent': FieldValue.increment(result.totalPayable), // Cộng dồn tiền
+            'lastVisit': FieldValue.serverTimestamp(), // Cập nhật ngày ghé thăm
+          });
+        } catch (e) {
+          debugPrint("Lỗi cập nhật TotalSpent: $e");
+        }
       }
 
-      // 6. Xuất Hóa đơn điện tử (Giữ nguyên)
-      if (_autoIssueEInvoice) {
+      // 6. Xuất Hóa đơn điện tử (Logic Mới)
+      // Chỉ tạo mới nếu chưa có kết quả (tức là preCreatedEInvoiceResult là null)
+      if (_autoIssueEInvoice && preCreatedEInvoiceResult == null) {
         try {
           final eResult = await _eInvoiceService.createInvoice(
             billData,
@@ -1391,17 +1439,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     required List<Map<String, dynamic>> billItems,
     required PaymentResult result,
     required Map<String, dynamic> billData,
-    required EInvoiceResult? eInvoiceResult,
+    required EInvoiceResult? eInvoiceResult, // <--- Đảm bảo có tham số này
     required String newBillId,
   }) async {
     debugPrint(">>> [DEBUG PAYMENT] Chuẩn bị in song song (Optimized)...");
 
     try {
-      // SỬA: Ưu tiên dùng Cache để in NGAY LẬP TỨC
       Map<String, String>? storeInfo = _cachedStoreDetails;
       dynamic settings = _cachedStoreSettingsObj;
 
-      // Nếu không có cache (hiếm), mới phải tải lại
       if (storeInfo == null || settings == null) {
         final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
         final results = await Future.wait([
@@ -1412,7 +1458,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         settings = results[1];
       }
 
-      // --- Phần logic in bên dưới giữ nguyên ---
       final bool shouldPrintLabel = (settings?.printLabelOnPayment ?? false) && !widget.isRetailMode;
 
       // 1. IN TEM
@@ -1442,14 +1487,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         await Future.delayed(const Duration(milliseconds: 100));
       }
 
-      // 2. IN BILL
+      // 2. IN BILL (Quan trọng: Gọi hàm build payload mới)
       if (widget.printBillAfterPayment && _printReceipt && storeInfo != null) {
         final receiptPayload = _buildReceiptPayload(
           storeInfo: storeInfo,
           billItems: billItems,
           result: result,
           billData: billData,
-          eInvoiceResult: eInvoiceResult,
+          eInvoiceResult: eInvoiceResult, // <--- Truyền xuống đây
           newBillId: newBillId,
         );
         PrintQueueService().addJob(PrintJobType.receipt, receiptPayload);
@@ -1466,12 +1511,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     required List<Map<String, dynamic>> billItems,
     required PaymentResult result,
     required Map<String, dynamic> billData,
-    required EInvoiceResult? eInvoiceResult,
+    required EInvoiceResult? eInvoiceResult, // <--- Đảm bảo có tham số này
     required String newBillId,
   }) {
-    // 1. Xử lý hiển thị Phụ thu (Logic cũ của bạn)
     final List<Map<String, dynamic>> formattedSurcharges =
-        result.surcharges.map((s) {
+    result.surcharges.map((s) {
       if (s.isPercent) {
         final double calculatedAmount = widget.subtotal * (s.amount / 100);
         return {
@@ -1488,11 +1532,17 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       }
     }).toList();
 
-    // 2. Xử lý hiển thị Chiết khấu (Logic MỚI THÊM)
     final double discountInput = parseVN(_discountController.text);
     String discountName = 'Chiết khấu';
     if (result.discountType == '%') {
       discountName = 'Chiết khấu (${formatNumber(discountInput)}%)';
+    }
+
+    // Debug log để kiểm tra xem có dữ liệu HĐĐT không
+    if (eInvoiceResult != null) {
+      debugPrint(">>> [PAYLOAD] Đang đóng gói HĐĐT vào lệnh in: ${eInvoiceResult.lookupUrl}");
+    } else {
+      debugPrint(">>> [PAYLOAD] Không có thông tin HĐĐT để in.");
     }
 
     return {
@@ -1504,13 +1554,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       'showPrices': widget.showPricesOnReceipt,
       'summary': {
         'subtotal': widget.subtotal,
-
-        // Các trường liên quan đến chiết khấu
         'discount': result.discountAmount,
         'discountType': result.discountType,
         'discountInput': discountInput,
-        'discountName': discountName, // <--- KEY MỚI ĐỂ IN TÊN KÈM %
-
+        'discountName': discountName,
         'surcharges': formattedSurcharges,
         'taxPercent': result.taxPercent,
         'taxAmount': result.totalTaxAmount,
@@ -1528,9 +1575,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           'guestAddress': billData['guestAddress'] ?? '',
         },
         'bankDetails': result.bankDetailsForPrinting,
+
+        // --- CÁC TRƯỜNG MỚI CHO HĐĐT (Khớp với ReceiptWidget) ---
         'eInvoiceCode': eInvoiceResult?.reservationCode,
         'eInvoiceFullUrl': eInvoiceResult?.lookupUrl,
         'eInvoiceMst': eInvoiceResult?.mst,
+        // --------------------------------------------------------
+
         'billCode': newBillId.split('_').last,
         'items': billItems,
       },
@@ -2192,7 +2243,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     );
   }
 
-  // Thêm hàm này vào class _PaymentPanelState
   void _onPaymentInputChanged() {
     // Chỉ dùng để trigger tính lại dư nợ, KHÔNG gán lại giá trị ô nhập (syncPayment: false)
     if (_debounce?.isActive ?? false) _debounce!.cancel();
@@ -2535,7 +2585,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     );
   }
 
-  // --- BỘ NÚT CHO F&B (LOGIC CŨ) ---
   Widget _buildFnBButtons(bool isMobile) {
     return Row(
       children: [
@@ -2580,7 +2629,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     );
   }
 
-  // --- BỘ NÚT CHO BÁN LẺ (LOGIC MỚI) ---
   Widget _buildRetailButtons(bool isMobile) {
     return Row(
       children: [

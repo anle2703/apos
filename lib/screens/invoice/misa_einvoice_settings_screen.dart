@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/user_model.dart';
 import '../../services/misa_invoice_service.dart';
 import '../../services/toast_service.dart';
@@ -19,16 +18,12 @@ class _MisaEInvoiceSettingsScreenState
     extends State<MisaEInvoiceSettingsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _misaService = MisaEInvoiceService();
-  final _db = FirebaseFirestore.instance;
 
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isTesting = false;
   bool _obscurePassword = true;
   bool _autoIssueOnPayment = false;
-
-  // Biến logic ngầm
-  String _invoiceType = 'vat';
 
   late final TextEditingController _taxCodeController;
   late final TextEditingController _usernameController;
@@ -62,23 +57,6 @@ class _MisaEInvoiceSettingsScreenState
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
-      // 1. Xác định loại hóa đơn ngầm
-      final taxDoc = await _db.collection('store_tax_settings').doc(widget.currentUser.storeId).get();
-      if (taxDoc.exists) {
-        final taxData = taxDoc.data()!;
-        final String calcMethod = taxData['calcMethod'] ?? 'direct';
-        final String entityType = taxData['entityType'] ?? 'hkd';
-
-        if (entityType == 'dn' || calcMethod == 'deduction') {
-          _invoiceType = 'vat';
-        } else {
-          _invoiceType = 'sale';
-        }
-      } else {
-        _invoiceType = 'sale'; // Mặc định
-      }
-
-      // 2. Load cấu hình MISA
       final config = await _misaService.getMisaConfig(ownerUid);
       if (config != null) {
         _taxCodeController.text = config.taxCode;
@@ -86,7 +64,8 @@ class _MisaEInvoiceSettingsScreenState
         _passwordController.text = config.password;
         _templateCodeController.text = config.templateCode;
         _invoiceSeriesController.text = config.invoiceSeries;
-        _autoIssueOnPayment = config.autoIssueOnPayment;
+
+        if (mounted) setState(() => _autoIssueOnPayment = config.autoIssueOnPayment);
       }
     } catch (e) {
       ToastService().show(message: "Lỗi tải cấu hình: $e", type: ToastType.error);
@@ -97,8 +76,6 @@ class _MisaEInvoiceSettingsScreenState
 
   Future<void> _saveSettings() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_isSaving) return;
-
     setState(() => _isSaving = true);
     try {
       final config = MisaConfig(
@@ -108,7 +85,6 @@ class _MisaEInvoiceSettingsScreenState
         templateCode: _templateCodeController.text.trim(),
         invoiceSeries: _invoiceSeriesController.text.trim(),
         autoIssueOnPayment: _autoIssueOnPayment,
-        invoiceType: _invoiceType, // Lưu ngầm
       );
 
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -157,6 +133,10 @@ class _MisaEInvoiceSettingsScreenState
         child: ListView(
           padding: const EdgeInsets.all(20.0),
           children: [
+            // ... (Phần giao diện giữ nguyên như file cũ của bạn) ...
+            // Tôi đã bỏ qua phần UI để tiết kiệm chỗ, bạn giữ nguyên UI cũ là được
+            // Chỉ cần đảm bảo các controller và hàm onPressed map đúng như trên.
+
             const Text(
               'Nhập thông tin tài khoản MISA meInvoice.',
               style: TextStyle(fontSize: 15, color: Colors.black54),

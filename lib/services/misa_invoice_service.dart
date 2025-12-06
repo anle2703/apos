@@ -7,14 +7,12 @@ import '../screens/invoice/e_invoice_provider.dart';
 import 'package:flutter/foundation.dart';
 
 class MisaConfig {
-  // Đã xóa apiUrl
   final String taxCode;
   final String username;
   final String password;
   final String templateCode;
   final String invoiceSeries;
   final bool autoIssueOnPayment;
-  final String invoiceType; // 'vat' hoặc 'sale'
 
   MisaConfig({
     required this.taxCode,
@@ -23,7 +21,6 @@ class MisaConfig {
     required this.templateCode,
     required this.invoiceSeries,
     this.autoIssueOnPayment = false,
-    this.invoiceType = "vat",
   });
 }
 
@@ -31,12 +28,12 @@ class MisaEInvoiceService implements EInvoiceProvider {
   final _db = FirebaseFirestore.instance;
   static const String _configCollection = 'e_invoice_configs';
   static const String _mainConfigCollection = 'e_invoice_main_configs';
+  static const String _taxSettingsCollection = 'store_tax_settings';
 
   final _dio = Dio();
   final _uuid = const Uuid();
 
-  // --- CẤU HÌNH CỐ ĐỊNH ---
-  static const String _misaBaseUrl = 'https://api.meinvoice.vn'; // URL chuẩn
+  static const String _misaBaseUrl = 'https://api.meinvoice.vn';
   static const String _misaAppId = '4bfc97cc-80e6-41d9-9a9b-9bbe71069a3d';
 
   Future<void> saveMisaConfig(MisaConfig config, String ownerUid) async {
@@ -44,14 +41,12 @@ class MisaEInvoiceService implements EInvoiceProvider {
       final encodedPassword = base64Encode(utf8.encode(config.password));
       final dataToSave = {
         'provider': 'misa',
-        // Không cần lưu apiUrl nữa
         'taxCode': config.taxCode,
         'username': config.username,
         'password': encodedPassword,
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
-        'invoiceType': config.invoiceType,
         'appId': _misaAppId,
       };
 
@@ -88,7 +83,6 @@ class MisaEInvoiceService implements EInvoiceProvider {
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
-        invoiceType: data['invoiceType'] ?? 'vat',
       );
     } catch (e) {
       debugPrint ("Lỗi khi tải cấu hình MISA: $e");
@@ -108,7 +102,6 @@ class MisaEInvoiceService implements EInvoiceProvider {
     );
   }
 
-  // Hàm login dùng URL cố định
   Future<String?> loginToMisa(String taxCode, String username, String password) async {
     try {
       final String authUrl = "$_misaBaseUrl/api/integration/auth/token";
@@ -147,6 +140,39 @@ class MisaEInvoiceService implements EInvoiceProvider {
     return await loginToMisa(config.taxCode, config.username, config.password);
   }
 
+  // --- LOGIC XÁC ĐỊNH LOẠI HÓA ĐƠN ---
+  Future<String> _determineInvoiceTypeFromSettings(String storeId) async {
+    try {
+      final docSnapshot = await _db.collection(_taxSettingsCollection).doc(storeId).get();
+
+      if (!docSnapshot.exists) {
+        return "2"; // Mặc định Bán hàng
+      }
+
+      final data = docSnapshot.data() as Map<String, dynamic>;
+
+      final String calcMethod = data['calcMethod'] ?? 'direct';
+      if (calcMethod == 'deduction') {
+        return "1"; // GTGT
+      }
+
+      final String entityType = data['entityType'] ?? 'hkd';
+      final String revenueRange = data['revenueRange'] ?? 'medium';
+
+      if (entityType == 'dn') return "1";
+
+      if (entityType == 'hkd') {
+        if (revenueRange == 'high') return "1";
+        return "2";
+      }
+
+      return "2";
+    } catch (e) {
+      debugPrint("Lỗi lấy cấu hình thuế MISA: $e");
+      return "2";
+    }
+  }
+
   @override
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
@@ -160,9 +186,16 @@ class MisaEInvoiceService implements EInvoiceProvider {
 
       final config = (await getMisaConfig(ownerUid))!;
       final transactionId = _uuid.v4();
-      final payload = _buildMisaPayload(billData, customer, config, transactionId);
 
-      // Dùng URL cố định
+      final String storeId = billData['storeId'] ?? '';
+
+      // Xác định loại hóa đơn
+      final String determinedType = await _determineInvoiceTypeFromSettings(storeId);
+      debugPrint(">>> MISA Service: Loại hóa đơn: $determinedType (1=VAT, 2=Sale)");
+
+      // Build payload phân bổ
+      final payload = _buildPayloadWithAllocation(billData, customer, config, transactionId, determinedType);
+
       final String apiUrl = "$_misaBaseUrl/api/integration/invoice/publish";
 
       final response = await _dio.post(
@@ -237,54 +270,126 @@ class MisaEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Map<String, dynamic> _buildMisaPayload(Map<String, dynamic> billData,
-      CustomerModel? customer, MisaConfig config, String transactionId) {
+  // --- LOGIC PHÂN BỔ CHIẾT KHẤU ĐỂ KHỚP THUẾ ---
+  Map<String, dynamic> _buildPayloadWithAllocation(
+      Map<String, dynamic> billData,
+      CustomerModel? customer,
+      MisaConfig config,
+      String transactionId,
+      String invoiceType
+      ) {
 
-    final double taxPercent = (billData['taxPercent'] as num?)?.toDouble() ?? 0.0;
-    int misaTaxRate;
+    final List<dynamic> billItems = billData['items'] ?? [];
+    final double billDiscount = (billData['discount'] as num?)?.toDouble() ?? 0.0;
 
-    // Logic thuế chuẩn: Dựa vào loại hóa đơn từ config (tự động từ Tax Manager)
-    if (config.invoiceType == 'vat') {
-      // Hóa đơn GTGT (Khấu trừ)
-      if (taxPercent == 10) {misaTaxRate = 10;}
-      else if (taxPercent == 8) {misaTaxRate = 8;}
-      else if (taxPercent == 5) {misaTaxRate = 5;}
-      else if (taxPercent == 0) {misaTaxRate = 0;}
-      else {misaTaxRate = 10;}
-    } else {
-      misaTaxRate = -2;
+    // Tính tổng tiền hàng để phân bổ
+    double totalGoodsValue = 0.0;
+    for (var item in billItems) {
+      if (item['status'] == 'cancelled') continue;
+      final double q = (item['quantity'] as num?)?.toDouble() ?? 1.0;
+      final double p = (item['price'] as num?)?.toDouble() ?? 0.0;
+
+      final double itemSpecificDisc = (item['discountValue'] as num?)?.toDouble() ?? 0.0;
+      double lineVal;
+      if (item['discountUnit'] == '%') {
+        lineVal = (p * q) * (1 - itemSpecificDisc / 100);
+      } else {
+        lineVal = (p * q) - itemSpecificDisc;
+      }
+      totalGoodsValue += lineVal;
     }
 
     final List<Map<String, dynamic>> items = [];
-    final List<dynamic> billItems = billData['items'] ?? [];
+    double totalAmountNet = 0; // Tổng tiền hàng sau giảm giá
+    double totalTaxVal = 0; // Tổng tiền thuế
 
     for (var item in billItems) {
       if (item['status'] == 'cancelled') continue;
 
-      final quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
-      final unitPrice = (item['price'] as num?)?.toDouble() ?? 0.0;
-      final itemTotal = (quantity * unitPrice).roundToDouble();
+      // Lấy tên và ĐVT chuẩn
+      final productMap = item['product'] as Map<String, dynamic>?;
+      final String itemName = item['productName'] ?? productMap?['productName'] ?? 'Sản phẩm';
+      final String unitName = item['unitName'] ?? item['selectedUnit'] ?? productMap?['unitName'] ?? 'cái';
 
-      double itemVatAmount = 0;
-      if (config.invoiceType == 'vat' && misaTaxRate >= 0) {
-        itemVatAmount = (itemTotal * taxPercent / 100).roundToDouble();
+      final double quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
+      final double originalPrice = (item['price'] as num?)?.toDouble() ?? 0.0;
+
+      // a. Tính giảm giá dòng
+      final double rawLineTotal = originalPrice * quantity;
+      double itemSpecificDiscAmount = 0;
+      final double specDiscVal = (item['discountValue'] as num?)?.toDouble() ?? 0.0;
+
+      if (specDiscVal > 0) {
+        if (item['discountUnit'] == '%') {
+          itemSpecificDiscAmount = rawLineTotal * (specDiscVal / 100);
+        } else {
+          itemSpecificDiscAmount = specDiscVal;
+        }
       }
 
+      double lineTotalAfterSpec = rawLineTotal - itemSpecificDiscAmount;
+
+      // b. Phân bổ giảm giá Bill (5.000đ)
+      double allocatedBillDisc = 0;
+      if (totalGoodsValue > 0 && billDiscount > 0) {
+        allocatedBillDisc = (lineTotalAfterSpec / totalGoodsValue) * billDiscount;
+      }
+
+      // Tổng giảm giá
+      double totalLineDiscount = itemSpecificDiscAmount + allocatedBillDisc;
+
+      // c. Giá trị thực thu (Net Amount)
+      double itemNetAmount = rawLineTotal - totalLineDiscount;
+      itemNetAmount = itemNetAmount.roundToDouble();
+
+      // Tính lại tổng giảm giá theo số làm tròn
+      totalLineDiscount = rawLineTotal - itemNetAmount;
+
+      // d. Đơn giá thực thu (Effective Unit Price)
+      double effectiveUnitPrice = itemNetAmount;
+      if (quantity > 0) {
+        effectiveUnitPrice = itemNetAmount / quantity;
+      }
+
+      // e. Tính Thuế
+      int misaTaxRate = -2;
+      double itemVatAmount = 0;
+
+      if (invoiceType == "1") {
+        // Hóa đơn GTGT
+        final double rawRate = (item['taxRate'] as num?)?.toDouble() ?? 0.0;
+        final double percent = rawRate * 100;
+
+        if ((percent - 10).abs() < 0.1) {misaTaxRate = 10;}
+        else if ((percent - 8).abs() < 0.1) {misaTaxRate = 8;}
+        else if ((percent - 5).abs() < 0.1) {misaTaxRate = 5;}
+        else if ((percent - 0).abs() < 0.1) {misaTaxRate = 0;}
+        else {misaTaxRate = -1;} // KKKNT
+
+        if (misaTaxRate >= 0) {
+          itemVatAmount = (itemNetAmount * misaTaxRate / 100).roundToDouble();
+        }
+      } else {
+        misaTaxRate = -2; // KCT
+      }
+
+      // f. Add vào danh sách
       items.add({
-        "ItemName": item['productName'] ?? 'Sản phẩm',
-        "UnitName": item['unitName'] ?? 'cái',
+        "ItemName": itemName,
+        "UnitName": unitName,
         "Quantity": quantity,
-        "UnitPrice": unitPrice,
-        "Amount": itemTotal,
+        "UnitPrice": effectiveUnitPrice, // Đơn giá đã trừ CK
+        "Amount": itemNetAmount,         // Thành tiền đã trừ CK
         "TaxRate": misaTaxRate,
         "VATAmount": itemVatAmount,
+        "DiscountAmount": 0, // Đã trừ vào giá rồi
       });
+
+      totalAmountNet += itemNetAmount;
+      totalTaxVal += itemVatAmount;
     }
 
-    final double discount = (billData['discount'] as num?)?.toDouble() ?? 0.0;
-    final double taxAmount = (billData['taxAmount'] as num?)?.toDouble() ?? 0.0;
-    final double subtotal = (billData['subtotal'] as num?)?.toDouble() ?? 0.0;
-    final double totalPayable = (billData['totalPayable'] as num?)?.toDouble() ?? 0.0;
+    final double totalPayable = totalAmountNet + totalTaxVal;
 
     final Map<String, dynamic> billPayments = billData['payments'] ?? {};
     String paymentMethod = "Tiền mặt";
@@ -317,10 +422,13 @@ class MisaEInvoiceService implements EInvoiceProvider {
       },
       "Items": items,
       "PaymentMethod": paymentMethod,
-      "TotalSaleAmount": subtotal.roundToDouble(),
-      "DiscountAmount": discount.roundToDouble(),
-      "TotalTaxAmount": taxAmount.roundToDouble(),
+
+      // Các trường tổng hợp (quan trọng để khớp thuế)
+      "TotalSaleAmount": totalAmountNet.roundToDouble(), // Tổng tiền hàng sau giảm
+      "DiscountAmount": 0, // Đã trừ vào từng dòng rồi
+      "TotalTaxAmount": totalTaxVal.roundToDouble(),
       "TotalAmount": totalPayable.roundToDouble(),
+
       "AutoRenderTotalAmountInWords": true,
       "IsGetFromLocalData": false,
     };

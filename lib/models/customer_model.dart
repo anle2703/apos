@@ -81,8 +81,9 @@ class CustomerModel {
     );
   }
 
-  Map<String, dynamic> toMap() {
+  Map<String, dynamic> toMap({bool isLocal = false}) {
     return {
+      'id': id,
       'name': name,
       'phone': phone,
       'email': email,
@@ -92,7 +93,7 @@ class CustomerModel {
       'taxId': taxId,
       'companyAddress': companyAddress,
       'storeId': storeId,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': isLocal ? DateTime.now().millisecondsSinceEpoch : FieldValue.serverTimestamp(),
       'searchKeys': searchKeys,
       'points': points,
       'debt': debt,

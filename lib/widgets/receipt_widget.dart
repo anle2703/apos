@@ -91,6 +91,10 @@ class ReceiptWidget extends StatelessWidget {
     final String khName = customer['name'] ?? 'Khách lẻ';
     final String? billCode = summary['billCode'] as String?;
 
+    final String? eInvoiceUrl = summary['eInvoiceFullUrl'] as String?;
+    final String? eInvoiceCode = summary['eInvoiceCode'] as String?;
+    final String? eInvoiceMst = summary['eInvoiceMst'] as String?;
+
     return Container(
       width: 550,
       color: Colors.white,
@@ -414,16 +418,46 @@ class ReceiptWidget extends StatelessWidget {
           // 7. QR CODE
           if (qrData != null && !isSimplifiedMode && !isCheckDish) ...[
             const SizedBox(height: 16),
-            Center(child: Text('Quét mã để thanh toán', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+            Center(child: Text('Quét mã chuyển khoản', style: baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 4),
             Center(
               child: SizedBox(
-                width: 180,
-                height: 180,
+                width: 140,
+                height: 140,
                 child: QrImageView(
                   data: qrData!,
                   version: QrVersions.auto,
-                  size: 180.0,
+                  size: 140.0,
+                  backgroundColor: Colors.white,
+                  gapless: false,
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+          ],
+
+          if (eInvoiceUrl != null && eInvoiceUrl.isNotEmpty && !isCheckDish) ...[
+            const SizedBox(height: 24),
+            Center(child: Text('QUÉT MÃ TRA CỨU HĐĐT', style: boldTextStyle.copyWith(fontSize: fsInfo))),
+            const SizedBox(height: 8),
+
+            // Hiển thị MST bên bán
+            if (eInvoiceMst != null)
+              Center(child: Text('MST bên bán: $eInvoiceMst', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+
+            // Hiển thị Mã tra cứu (Reservation Code)
+            if (eInvoiceCode != null)
+              Center(child: Text('Mã tra cứu: $eInvoiceCode', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+
+            const SizedBox(height: 8),
+            Center(
+              child: SizedBox(
+                width: 140, // Kích thước QR Code
+                height: 140,
+                child: QrImageView(
+                  data: eInvoiceUrl, // Link tra cứu đầy đủ
+                  version: QrVersions.auto,
+                  size: 140.0,
                   backgroundColor: Colors.white,
                   gapless: false,
                   padding: EdgeInsets.zero,

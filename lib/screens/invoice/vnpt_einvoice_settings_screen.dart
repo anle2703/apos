@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/user_model.dart';
 import '../../services/vnpt_invoice_service.dart';
 import '../../services/toast_service.dart';
@@ -19,7 +18,6 @@ class _VnptEInvoiceSettingsScreenState
     extends State<VnptEInvoiceSettingsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _vnptService = VnptEInvoiceService();
-  final _db = FirebaseFirestore.instance;
 
   bool _isLoading = true;
   bool _isSaving = false;
@@ -27,9 +25,6 @@ class _VnptEInvoiceSettingsScreenState
   bool _obscurePassword = true;
   bool _obscureAppKey = true;
   bool _autoIssueOnPayment = false;
-
-  // Biến logic ngầm
-  String _invoiceType = 'vat';
 
   late final TextEditingController _portalUrlController;
   late final TextEditingController _appIdController;
@@ -69,23 +64,6 @@ class _VnptEInvoiceSettingsScreenState
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
-      // 1. Logic ngầm: Đọc cấu hình thuế để xác định loại hóa đơn
-      final taxDoc = await _db.collection('store_tax_settings').doc(widget.currentUser.storeId).get();
-      if (taxDoc.exists) {
-        final taxData = taxDoc.data()!;
-        final String calcMethod = taxData['calcMethod'] ?? 'direct';
-        final String entityType = taxData['entityType'] ?? 'hkd';
-
-        if (entityType == 'dn' || calcMethod == 'deduction') {
-          _invoiceType = 'vat';
-        } else {
-          _invoiceType = 'sale';
-        }
-      } else {
-        _invoiceType = 'sale';
-      }
-
-      // 2. Đọc cấu hình VNPT
       final config = await _vnptService.getVnptConfig(ownerUid);
       if (config != null) {
         _portalUrlController.text = config.portalUrl;
@@ -95,11 +73,11 @@ class _VnptEInvoiceSettingsScreenState
         _passwordController.text = config.password;
         _templateCodeController.text = config.templateCode;
         _invoiceSeriesController.text = config.invoiceSeries;
-        _autoIssueOnPayment = config.autoIssueOnPayment;
+
+        if (mounted) setState(() => _autoIssueOnPayment = config.autoIssueOnPayment);
       }
     } catch (e) {
-      ToastService()
-          .show(message: "Lỗi tải cấu hình: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi tải cấu hình: $e", type: ToastType.error);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -107,8 +85,6 @@ class _VnptEInvoiceSettingsScreenState
 
   Future<void> _saveSettings() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_isSaving) return;
-
     setState(() => _isSaving = true);
     try {
       final config = VnptConfig(
@@ -120,7 +96,6 @@ class _VnptEInvoiceSettingsScreenState
         templateCode: _templateCodeController.text.trim(),
         invoiceSeries: _invoiceSeriesController.text.trim(),
         autoIssueOnPayment: _autoIssueOnPayment,
-        invoiceType: _invoiceType, // Lưu giá trị ngầm
       );
 
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -171,6 +146,7 @@ class _VnptEInvoiceSettingsScreenState
         child: ListView(
           padding: const EdgeInsets.all(20.0),
           children: [
+            // ... (Giữ nguyên UI của bạn) ...
             const Text(
               'Vui lòng nhập thông tin tài khoản API do VNPT cung cấp.',
               style: TextStyle(fontSize: 15, color: Colors.black54),

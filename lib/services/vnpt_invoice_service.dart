@@ -14,7 +14,6 @@ class VnptConfig {
   final String templateCode;
   final String invoiceSeries;
   final bool autoIssueOnPayment;
-  final String invoiceType; // 'vat' hoặc 'sale'
 
   VnptConfig({
     required this.portalUrl,
@@ -25,7 +24,6 @@ class VnptConfig {
     required this.templateCode,
     required this.invoiceSeries,
     this.autoIssueOnPayment = false,
-    this.invoiceType = 'vat',
   });
 }
 
@@ -33,6 +31,7 @@ class VnptEInvoiceService implements EInvoiceProvider {
   final _db = FirebaseFirestore.instance;
   static const String _configCollection = 'e_invoice_configs';
   static const String _mainConfigCollection = 'e_invoice_main_configs';
+  static const String _taxSettingsCollection = 'store_tax_settings';
 
   final _dio = Dio();
 
@@ -49,7 +48,6 @@ class VnptEInvoiceService implements EInvoiceProvider {
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
-        'invoiceType': config.invoiceType,
       };
 
       await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
@@ -87,7 +85,6 @@ class VnptEInvoiceService implements EInvoiceProvider {
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
-        invoiceType: data['invoiceType'] ?? 'vat',
       );
     } catch (e) {
       debugPrint ("Lỗi khi tải cấu hình VNPT: $e");
@@ -143,6 +140,39 @@ class VnptEInvoiceService implements EInvoiceProvider {
         config.portalUrl, config.appId, config.appKey, config.username, config.password);
   }
 
+  // --- LOGIC XÁC ĐỊNH LOẠI HÓA ĐƠN ---
+  Future<String> _determineInvoiceTypeFromSettings(String storeId) async {
+    try {
+      final docSnapshot = await _db.collection(_taxSettingsCollection).doc(storeId).get();
+
+      if (!docSnapshot.exists) {
+        return "2";
+      }
+
+      final data = docSnapshot.data() as Map<String, dynamic>;
+
+      final String calcMethod = data['calcMethod'] ?? 'direct';
+      if (calcMethod == 'deduction') {
+        return "1"; // GTGT
+      }
+
+      final String entityType = data['entityType'] ?? 'hkd';
+      final String revenueRange = data['revenueRange'] ?? 'medium';
+
+      if (entityType == 'dn') return "1";
+
+      if (entityType == 'hkd') {
+        if (revenueRange == 'high') return "1";
+        return "2";
+      }
+
+      return "2";
+    } catch (e) {
+      debugPrint("Lỗi lấy cấu hình thuế VNPT: $e");
+      return "2";
+    }
+  }
+
   @override
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
@@ -155,7 +185,13 @@ class VnptEInvoiceService implements EInvoiceProvider {
       }
 
       final config = (await getVnptConfig(ownerUid))!;
-      final payload = _buildVnptPayload(billData, customer, config);
+      final String storeId = billData['storeId'] ?? '';
+
+      // Xác định loại hóa đơn
+      final String determinedType = await _determineInvoiceTypeFromSettings(storeId);
+      debugPrint(">>> VNPT Service: Loại hóa đơn: $determinedType (1=VAT, 2=Sale)");
+
+      final payload = _buildPayloadWithAllocation(billData, customer, config, determinedType);
       final String apiUrl = "${config.portalUrl}/business/api/invoice/phathanhd";
 
       final response = await _dio.post(
@@ -194,16 +230,12 @@ class VnptEInvoiceService implements EInvoiceProvider {
     }
   }
 
-
   @override
   Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
     final String? fkey = rawResponse['fkey'] as String?;
     final String? email = rawResponse['email_nguoimua'] as String?;
 
-    if (fkey == null || email == null || email.isEmpty) {
-      debugPrint("Không tìm thấy fkey hoặc email để gửi.");
-      return;
-    }
+    if (fkey == null || email == null || email.isEmpty) return;
 
     final token = await _getValidToken(ownerUid);
     final config = (await getVnptConfig(ownerUid))!;
@@ -220,70 +252,130 @@ class VnptEInvoiceService implements EInvoiceProvider {
           },
         ),
       );
-      debugPrint("Đã gửi yêu cầu email HĐĐT VNPT cho $fkey");
     } on DioException catch (e) {
       debugPrint("Lỗi API VNPT (gửi email): $e");
     }
   }
 
-  Map<String, dynamic> _buildVnptPayload(Map<String, dynamic> billData,
-      CustomerModel? customer, VnptConfig config) {
+  // --- LOGIC PHÂN BỔ CHIẾT KHẤU & TÍNH TOÁN ---
+  Map<String, dynamic> _buildPayloadWithAllocation(
+      Map<String, dynamic> billData,
+      CustomerModel? customer,
+      VnptConfig config,
+      String invoiceType
+      ) {
 
-    // --- LOGIC THUẾ CHUẨN ---
-    final double taxPercent = (billData['taxPercent'] as num?)?.toDouble() ?? 0.0;
-    String taxRateString = "KCT";
+    final List<dynamic> billItems = billData['items'] ?? [];
+    final double billDiscount = (billData['discount'] as num?)?.toDouble() ?? 0.0;
 
-    if (config.invoiceType == 'vat') {
-      if (taxPercent == 0) {taxRateString = "0";}
-      else if (taxPercent == 5) {taxRateString = "5";}
-      else if (taxPercent == 8) {taxRateString = "8";}
-      else if (taxPercent == 10) {taxRateString = "10";}
-      else {taxRateString = "10";}
+    // Tính tổng hàng để phân bổ
+    double totalGoodsValue = 0.0;
+    for (var item in billItems) {
+      if (item['status'] == 'cancelled') continue;
+      final double q = (item['quantity'] as num?)?.toDouble() ?? 1.0;
+      final double p = (item['price'] as num?)?.toDouble() ?? 0.0;
+
+      final double itemSpecificDisc = (item['discountValue'] as num?)?.toDouble() ?? 0.0;
+      double lineVal;
+      if (item['discountUnit'] == '%') {
+        lineVal = (p * q) * (1 - itemSpecificDisc / 100);
+      } else {
+        lineVal = (p * q) - itemSpecificDisc;
+      }
+      totalGoodsValue += lineVal;
     }
 
     final List<Map<String, dynamic>> dsHangHoa = [];
-    final List<dynamic> billItems = billData['items'] ?? [];
-
-    double totalTaxAmount = 0;
+    double totalAmountNet = 0;
+    double totalTaxVal = 0;
 
     for (var item in billItems) {
       if (item['status'] == 'cancelled') continue;
 
-      final quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
-      final unitPrice = (item['price'] as num?)?.toDouble() ?? 0.0;
-      final itemTotal = (quantity * unitPrice).roundToDouble();
+      final productMap = item['product'] as Map<String, dynamic>?;
+      final String itemName = item['productName'] ?? productMap?['productName'] ?? 'Sản phẩm';
+      final String unitName = item['unitName'] ?? item['selectedUnit'] ?? productMap?['unitName'] ?? 'cái';
 
-      // Tính thuế nếu là GTGT
-      if (config.invoiceType == 'vat' && taxRateString != "KCT") {
-        totalTaxAmount += (itemTotal * taxPercent / 100);
+      final double quantity = (item['quantity'] as num?)?.toDouble() ?? 1.0;
+      final double originalPrice = (item['price'] as num?)?.toDouble() ?? 0.0;
+
+      // a. Tính giảm giá dòng
+      final double rawLineTotal = originalPrice * quantity;
+      double itemSpecificDiscAmount = 0;
+      final double specDiscVal = (item['discountValue'] as num?)?.toDouble() ?? 0.0;
+
+      if (specDiscVal > 0) {
+        if (item['discountUnit'] == '%') {
+          itemSpecificDiscAmount = rawLineTotal * (specDiscVal / 100);
+        } else {
+          itemSpecificDiscAmount = specDiscVal;
+        }
+      }
+
+      double lineTotalAfterSpec = rawLineTotal - itemSpecificDiscAmount;
+
+      // b. Phân bổ giảm giá Bill
+      double allocatedBillDisc = 0;
+      if (totalGoodsValue > 0 && billDiscount > 0) {
+        allocatedBillDisc = (lineTotalAfterSpec / totalGoodsValue) * billDiscount;
+      }
+
+      // Tổng giảm giá
+      double totalLineDiscount = itemSpecificDiscAmount + allocatedBillDisc;
+
+      // c. Giá trị thực thu (Net Amount)
+      double itemNetAmount = rawLineTotal - totalLineDiscount;
+      itemNetAmount = itemNetAmount.roundToDouble();
+
+      // d. Đơn giá thực thu
+      double effectiveUnitPrice = itemNetAmount;
+      if (quantity > 0) {
+        effectiveUnitPrice = itemNetAmount / quantity;
+      }
+
+      // e. Tính Thuế
+      String taxRateString = "KCT";
+      double itemVatAmount = 0;
+
+      if (invoiceType == "1") {
+        final double rawRate = (item['taxRate'] as num?)?.toDouble() ?? 0.0;
+        final double percent = rawRate * 100;
+
+        if ((percent - 10).abs() < 0.1) {taxRateString = "10";}
+        else if ((percent - 8).abs() < 0.1) {taxRateString = "8";}
+        else if ((percent - 5).abs() < 0.1) {taxRateString = "5";}
+        else if ((percent - 0).abs() < 0.1) {taxRateString = "0";}
+        else {taxRateString = "KCT";}
+
+        if (taxRateString != "KCT") {
+          double rateVal = double.parse(taxRateString) / 100;
+          itemVatAmount = (itemNetAmount * rateVal).roundToDouble();
+        }
+      } else {
+        taxRateString = "KCT";
       }
 
       dsHangHoa.add({
         "stt": dsHangHoa.length + 1,
-        "ten": item['productName'] ?? 'Sản phẩm',
-        "dvt": item['unitName'] ?? 'cái',
+        "ten": itemName,
+        "dvt": unitName,
         "soluong": quantity,
-        "dongia": unitPrice,
-        "thanhtien": itemTotal,
-        "thuesuat": taxRateString, // Gửi chuỗi thuế đúng
+        "dongia": effectiveUnitPrice, // Đơn giá đã giảm
+        "thanhtien": itemNetAmount,   // Thành tiền đã giảm
+        "thuesuat": taxRateString,
       });
+
+      totalAmountNet += itemNetAmount;
+      totalTaxVal += itemVatAmount;
     }
 
-    final double discount = (billData['discount'] as num?)?.toDouble() ?? 0.0;
-    final double subtotal = (billData['subtotal'] as num?)?.toDouble() ?? 0.0;
-    final double taxableAmount = (subtotal - discount).roundToDouble();
-
-    // Nếu là GTGT -> Tổng thanh toán = Hàng + Thuế
-    // Nếu là Bán hàng -> Tổng thanh toán = Hàng (đã gồm thuế)
-    final double finalPayment = config.invoiceType == 'vat'
-        ? (taxableAmount + totalTaxAmount).roundToDouble()
-        : taxableAmount;
+    final double finalPayment = totalAmountNet + totalTaxVal;
 
     return {
       "thongtinchung": {
         "mau": config.templateCode,
         "kyhieu": config.invoiceSeries,
-        "loaihd": 1,
+        "loaihd": 1, // VNPT thường dùng 1 chung, phân biệt bằng Ký hiệu/Mẫu
         "httt": "TM",
         "tinhchat": 1,
         "tygia": 1,
@@ -299,11 +391,11 @@ class VnptEInvoiceService implements EInvoiceProvider {
       },
       "danhsachhanghoa": dsHangHoa,
       "tongtien": {
-        "tongthanhtien": taxableAmount,
-        "tienchietkhau": discount.roundToDouble(),
-        "tienthue": totalTaxAmount.roundToDouble(), // Tiền thuế
-        "tongtienthanhtoan": finalPayment,
-        "sotienbangchu": "" // Để trống, VNPT tự sinh
+        "tongthanhtien": totalAmountNet.roundToDouble(),
+        "tienchietkhau": 0, // Đã trừ vào giá
+        "tienthue": totalTaxVal.roundToDouble(),
+        "tongtienthanhtoan": finalPayment.roundToDouble(),
+        "sotienbangchu": ""
       }
     };
   }

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/user_model.dart';
 import '../../services/vnpay_invoice_service.dart';
 import '../../services/toast_service.dart';
@@ -18,19 +17,21 @@ class VnpayEInvoiceSettingsScreen extends StatefulWidget {
 class _VnpayEInvoiceSettingsScreenState
     extends State<VnpayEInvoiceSettingsScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _vnpayService = VnpayEInvoiceService();
-  final _db = FirebaseFirestore.instance;
 
+  // Service
+  final _vnpayService = VnpayEInvoiceService();
+
+  // Trạng thái UI
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isTesting = false;
   bool _obscureSecret = true;
   bool _autoIssueOnPayment = false;
 
-  // Biến logic ngầm (Vẫn giữ để xử lý, nhưng không hiển thị)
+  // Biến logic
   bool _isSandbox = false;
-  String _invoiceType = 'vat';
 
+  // Controllers
   late final TextEditingController _clientIdController;
   late final TextEditingController _clientSecretController;
   late final TextEditingController _taxCodeController;
@@ -58,9 +59,10 @@ class _VnpayEInvoiceSettingsScreenState
     super.dispose();
   }
 
-  // Logic ngầm: Tự động xác định môi trường dựa trên MST
+  // Tự động xác định môi trường Test/Prod dựa trên MST
   void _detectEnvironment() {
     final taxCode = _taxCodeController.text.trim();
+    // MST Test mặc định của VNPAY
     if (taxCode == '0102182292-999') {
       setState(() => _isSandbox = true);
     } else {
@@ -73,33 +75,24 @@ class _VnpayEInvoiceSettingsScreenState
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
-      // 1. Đọc cấu hình Thuế để xác định loại hóa đơn (Ngầm)
-      final taxDoc = await _db.collection('store_tax_settings').doc(widget.currentUser.storeId).get();
-      if (taxDoc.exists) {
-        final taxData = taxDoc.data()!;
-        final String calcMethod = taxData['calcMethod'] ?? 'direct';
-        final String entityType = taxData['entityType'] ?? 'hkd';
-
-        if (entityType == 'dn' || calcMethod == 'deduction') {
-          _invoiceType = 'vat';
-        } else {
-          _invoiceType = 'sale';
-        }
-      } else {
-        _invoiceType = 'sale';
-      }
-
-      // 2. Đọc cấu hình VNPAY
+      // Đọc cấu hình VNPAY từ Service
       final config = await _vnpayService.getVnpayConfig(ownerUid);
+
       if (config != null) {
         _clientIdController.text = config.clientId;
         _clientSecretController.text = config.clientSecret;
         _taxCodeController.text = config.sellerTaxCode;
         _invoiceSymbolController.text = config.invoiceSymbol;
-        _autoIssueOnPayment = config.autoIssueOnPayment;
         _paymentMethodController.text = config.paymentMethodCode;
 
-        _detectEnvironment(); // Chạy logic ngầm
+        if (mounted) {
+          setState(() {
+            _autoIssueOnPayment = config.autoIssueOnPayment;
+            _isSandbox = config.isSandbox;
+          });
+        }
+        // Chạy lại logic detect để đảm bảo UI đúng
+        _detectEnvironment();
       }
     } catch (e) {
       ToastService().show(message: "Lỗi tải cấu hình: $e", type: ToastType.error);
@@ -114,8 +107,11 @@ class _VnpayEInvoiceSettingsScreenState
 
     setState(() => _isSaving = true);
     try {
-      _detectEnvironment(); // Cập nhật lại trạng thái trước khi lưu
+      _detectEnvironment(); // Cập nhật trạng thái sandbox trước khi lưu
 
+      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+
+      // Tạo object config (Đã xóa invoiceType)
       final config = VnpayConfig(
         clientId: _clientIdController.text.trim(),
         clientSecret: _clientSecretController.text.trim(),
@@ -123,16 +119,14 @@ class _VnpayEInvoiceSettingsScreenState
         invoiceSymbol: _invoiceSymbolController.text.trim(),
         autoIssueOnPayment: _autoIssueOnPayment,
         paymentMethodCode: _paymentMethodController.text.trim(),
-
-        // Lưu các giá trị tự động
         isSandbox: _isSandbox,
-        invoiceType: _invoiceType,
+        // Đã xóa invoiceType gây lỗi
       );
 
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
       await _vnpayService.saveVnpayConfig(config, ownerUid);
 
       ToastService().show(message: "Đã lưu cấu hình VNPay", type: ToastType.success);
+
       if (mounted) Navigator.of(context).pop();
 
     } catch (e) {
@@ -147,7 +141,7 @@ class _VnpayEInvoiceSettingsScreenState
     setState(() => _isTesting = true);
 
     try {
-      _detectEnvironment(); // Logic ngầm
+      _detectEnvironment();
 
       final token = await _vnpayService.loginToVnpay(
         _clientIdController.text.trim(),
@@ -194,9 +188,10 @@ class _VnpayEInvoiceSettingsScreenState
               controller: _taxCodeController,
               decoration: const InputDecoration(
                 labelText: 'Mã số thuế (Tax Code)',
+                hintText: 'Ví dụ: 0102182292-999 (Test)',
                 prefixIcon: Icon(Icons.business),
               ),
-              onChanged: (val) => _detectEnvironment(), // Logic chạy ngầm
+              onChanged: (val) => _detectEnvironment(),
               validator: (value) => (value == null || value.isEmpty) ? 'Bắt buộc' : null,
             ),
             const SizedBox(height: 16),
@@ -258,6 +253,15 @@ class _VnpayEInvoiceSettingsScreenState
               contentPadding: EdgeInsets.zero,
               controlAffinity: ListTileControlAffinity.leading,
             ),
+
+            if (_isSandbox)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  "Đang ở chế độ SANDBOX (Test)",
+                  style: TextStyle(color: Colors.orange[800], fontStyle: FontStyle.italic),
+                ),
+              ),
 
             const SizedBox(height: 32),
             Row(

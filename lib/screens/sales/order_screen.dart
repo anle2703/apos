@@ -3850,7 +3850,7 @@ class _OrderScreenState extends State<OrderScreen> {
                           TextSpan(
                             text: '$taxText ',
                             style: textTheme.bodyMedium?.copyWith(
-                              color: Colors.grey.shade700,
+                              color: Colors.blue,
                             ),
                           ),
 

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// Đã xóa import cloud_firestore vì không cần nữa
 import '../../models/user_model.dart';
 import '../../services/viettel_invoice_service.dart';
 import '../../services/toast_service.dart';
@@ -18,18 +18,18 @@ class ViettelEInvoiceSettingsScreen extends StatefulWidget {
 class _ViettelEInvoiceSettingsScreenState
     extends State<ViettelEInvoiceSettingsScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _viettelService = ViettelEInvoiceService();
-  final _db = FirebaseFirestore.instance;
 
+  // Service
+  final _viettelService = ViettelEInvoiceService();
+
+  // Trạng thái UI
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isTesting = false;
   bool _obscurePassword = true;
   bool _autoIssueOnPayment = false;
 
-  // Biến logic ngầm
-  String _invoiceType = 'vat';
-
+  // Controllers
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
   late final TextEditingController _templateCodeController;
@@ -59,30 +59,20 @@ class _ViettelEInvoiceSettingsScreenState
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
-      // 1. Logic ngầm: Đọc cấu hình thuế
-      final taxDoc = await _db.collection('store_tax_settings').doc(widget.currentUser.storeId).get();
-      if (taxDoc.exists) {
-        final taxData = taxDoc.data()!;
-        final String calcMethod = taxData['calcMethod'] ?? 'direct';
-        final String entityType = taxData['entityType'] ?? 'hkd';
-
-        if (entityType == 'dn' || calcMethod == 'deduction') {
-          _invoiceType = 'vat';
-        } else {
-          _invoiceType = 'sale';
-        }
-      } else {
-        _invoiceType = 'sale';
-      }
-
-      // 2. Đọc cấu hình Viettel
+      // Đọc cấu hình Viettel từ Service
       final config = await _viettelService.getViettelConfig(ownerUid);
+
       if (config != null) {
         _usernameController.text = config.username;
         _passwordController.text = config.password;
         _templateCodeController.text = config.templateCode;
         _invoiceSeriesController.text = config.invoiceSeries;
-        _autoIssueOnPayment = config.autoIssueOnPayment;
+
+        if (mounted) {
+          setState(() {
+            _autoIssueOnPayment = config.autoIssueOnPayment;
+          });
+        }
       }
     } catch (e) {
       ToastService()
@@ -98,19 +88,22 @@ class _ViettelEInvoiceSettingsScreenState
 
     setState(() => _isSaving = true);
     try {
+      // SỬA: Tạo config không còn tham số invoiceType
       final config = ViettelConfig(
         username: _usernameController.text.trim(),
         password: _passwordController.text.trim(),
         templateCode: _templateCodeController.text.trim(),
         invoiceSeries: _invoiceSeriesController.text.trim(),
         autoIssueOnPayment: _autoIssueOnPayment,
-        invoiceType: _invoiceType, // Lưu giá trị ngầm
+        // Đã xóa dòng invoiceType gây lỗi
       );
 
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
       await _viettelService.saveViettelConfig(config, ownerUid);
 
       ToastService().show(message: "Đã lưu cấu hình Viettel", type: ToastType.success);
+
+      // Tùy chọn: Đóng màn hình sau khi lưu thành công
       if (mounted) Navigator.of(context).pop();
 
     } catch (e) {
@@ -135,6 +128,7 @@ class _ViettelEInvoiceSettingsScreenState
         ToastService().show(message: "Kết nối thất bại: Sai thông tin.", type: ToastType.error);
       }
     } catch (e) {
+      // Hiển thị lỗi chi tiết từ Service (đã update ở bước trước)
       ToastService().show(message: "Lỗi: ${e.toString()}", type: ToastType.error);
     } finally {
       if (mounted) setState(() => _isTesting = false);
@@ -162,7 +156,7 @@ class _ViettelEInvoiceSettingsScreenState
               controller: _usernameController,
               decoration: const InputDecoration(
                 labelText: 'Tên đăng nhập (Username)',
-                hintText: '0100109106-507',
+                hintText: 'Ví dụ: 0100109106-507',
                 prefixIcon: Icon(Icons.person_outline),
               ),
               validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
@@ -188,7 +182,7 @@ class _ViettelEInvoiceSettingsScreenState
               controller: _templateCodeController,
               decoration: const InputDecoration(
                 labelText: 'Ký hiệu Mẫu hóa đơn (Template)',
-                hintText: '1/001',
+                hintText: 'Ví dụ: 1/001',
                 prefixIcon: Icon(Icons.description_outlined),
               ),
               validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,
@@ -198,7 +192,7 @@ class _ViettelEInvoiceSettingsScreenState
               controller: _invoiceSeriesController,
               decoration: const InputDecoration(
                 labelText: 'Ký hiệu Hóa đơn (Series)',
-                hintText: 'K23TXM',
+                hintText: 'Ví dụ: K23TXM',
                 prefixIcon: Icon(Icons.abc_outlined),
               ),
               validator: (v) => v!.isEmpty ? 'Bắt buộc' : null,

@@ -26,6 +26,7 @@ import '../widgets/receipt_widget.dart';
 import 'dart:async';
 import '../models/store_settings_model.dart';
 import '../services/settings_service.dart';
+import '../widgets/vietqr_generator.dart';
 
 enum TimeRange {
   today,
@@ -1216,6 +1217,17 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       isRetailBill = true;
     }
 
+    String? qrDataString;
+    if (widget.bill.bankDetails != null && widget.bill.totalPayable > 0) {
+      final bank = widget.bill.bankDetails!;
+      qrDataString = VietQrGenerator.generate(
+        bankBin: bank['bankBin'] ?? '',
+        bankAccount: bank['bankAccount'] ?? '',
+        amount: widget.bill.totalPayable.toInt().toString(),
+        description: "TT ${widget.bill.billCode}",
+      );
+    }
+
     final Widget receiptWidget = ReceiptWidget(
       title: 'HÓA ĐƠN',
       storeInfo: widget.storeInfo,
@@ -1229,6 +1241,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       showPrices: true,
       isSimplifiedMode: false,
       templateSettings: _templateSettings,
+      qrData: qrDataString,
     );
 
     return Dialog(
