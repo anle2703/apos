@@ -1401,7 +1401,6 @@ class _AddEditSurchargeDialogState extends State<_AddEditSurchargeDialog> {
                 const SizedBox(height: 8),
                 CustomTextFormField(
                   controller: _nameController,
-                  // SỬA LỖI: Chuyển prefixIcon vào trong InputDecoration
                   decoration: const InputDecoration(
                     labelText: "Tên phụ thu (VD: Tết, Lễ...)",
                     prefixIcon: Icon(Icons.label_outline),
@@ -1416,7 +1415,6 @@ class _AddEditSurchargeDialogState extends State<_AddEditSurchargeDialog> {
                       flex: 3,
                       child: CustomTextFormField(
                         controller: _valueController,
-                        // SỬA LỖI: Chuyển prefixIcon vào trong InputDecoration
                         decoration: const InputDecoration(
                           labelText: "Giá trị",
                           prefixIcon: Icon(Icons.attach_money_outlined),
@@ -1446,7 +1444,6 @@ class _AddEditSurchargeDialogState extends State<_AddEditSurchargeDialog> {
                   controller: _dateRangeController,
                   readOnly: true,
                   onTap: _pickDateRange,
-                  // SỬA LỖI: Chuyển prefixIcon vào trong InputDecoration
                   decoration: const InputDecoration(
                     labelText: "Thời gian áp dụng",
                     hintText: "Chọn ngày & giờ",
@@ -1467,27 +1464,36 @@ class _AddEditSurchargeDialogState extends State<_AddEditSurchargeDialog> {
         ),
       ),
       actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      // --- PHẦN SỬA LỖI ---
+      // Thay vì liệt kê các nút rời rạc với Spacer(), ta bọc chúng vào 1 Row duy nhất.
+      // Spacer() hoạt động hợp lệ khi nằm trong Row.
       actions: [
-        if (_isEdit)
-          TextButton.icon(
-            onPressed: _delete,
-            icon: const Icon(Icons.delete_outline),
-            label: const Text("Xóa"),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-          ),
-        const Spacer(),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text("Hủy"),
-        ),
-        ElevatedButton(
-          onPressed: _save,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primaryColor,
-            foregroundColor: Colors.white,
-          ),
-          child: Text(_isEdit ? "Cập nhật" : "Lưu"),
-        ),
+        Row(
+          children: [
+            if (_isEdit)
+              TextButton.icon(
+                onPressed: _delete,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text("Xóa"),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+              ),
+            // Spacer này bây giờ hợp lệ vì nằm trong Row
+            const Spacer(),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Hủy"),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(_isEdit ? "Cập nhật" : "Lưu"),
+            ),
+          ],
+        )
       ],
     );
   }
