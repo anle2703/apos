@@ -2593,10 +2593,10 @@ class _OrderScreenState extends State<OrderScreen> {
             },
           ),
         ),
+        // --- ĐOẠN ĐÃ SỬA ---
         Container(
           padding: const EdgeInsets.all(16.0),
-          decoration:
-          BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
+          decoration: BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
             BoxShadow(
                 color: Colors.black.withAlpha(12),
                 blurRadius: 10,
@@ -2604,10 +2604,13 @@ class _OrderScreenState extends State<OrderScreen> {
           ]),
           child: Column(
             children: [
+              if (!_isPaymentView) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Tổng cộng:',
+                  // [SỬA] Thêm hiển thị tổng số lượng món
+                  Text(
+                      'Tổng cộng (${formatNumber(_displayCart.values.fold(0.0, (tong, item) => tong + item.quantity))}):',
                       style: textTheme.displaySmall?.copyWith(fontSize: 18)),
                   Text(
                     currencyFormat.format(_totalAmount),
@@ -2618,48 +2621,51 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _hasUnsentItems ? _sendToKitchen : null,
-                      child: const Text('Chế Biến'),
-                    ),
-                  ),
-                  if (_canSell) ...[
-                    const SizedBox(width: 8),
-                    if (_allowProvisionalBill) ...[
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _displayCart.isNotEmpty
-                              ? _handlePrintProvisionalBill
-                              : null,
-                          child: const Text('Tạm Tính'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
+
+              // [SỬA] Ẩn cụm nút nếu đang ở màn hình thanh toán
+
+                const SizedBox(height: 16),
+                Row(
+                  children: [
                     Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 12),
-                        ),
-                        onPressed:
-                        _displayCart.isNotEmpty ? _handlePayment : null,
-                        child: _isPaymentLoading
-                            ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2.5))
-                            : const Text('Thanh Toán'),
+                      child: OutlinedButton(
+                        onPressed: _hasUnsentItems ? _sendToKitchen : null,
+                        child: const Text('Chế Biến'),
                       ),
                     ),
+                    if (_canSell) ...[
+                      const SizedBox(width: 8),
+                      if (_allowProvisionalBill) ...[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _displayCart.isNotEmpty
+                                ? _handlePrintProvisionalBill
+                                : null,
+                            child: const Text('Tạm Tính'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 12),
+                          ),
+                          onPressed: _displayCart.isNotEmpty ? _handlePayment : null,
+                          child: _isPaymentLoading
+                              ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2.5))
+                              : const Text('Thanh Toán'),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
+                ),
+              ]
             ],
           ),
         )

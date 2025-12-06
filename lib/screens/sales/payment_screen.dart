@@ -752,8 +752,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   @override
   void didUpdateWidget(covariant _PaymentPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.subtotal != oldWidget.subtotal) {
-      _calculateTotal();
+
+    if (widget.subtotal != oldWidget.subtotal ||
+        widget.customer?.id != oldWidget.customer?.id) {
+      _calculateTotal(syncPayment: true);
     }
   }
 
@@ -1944,7 +1946,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                       color: Colors.black, fontWeight: FontWeight.bold)),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final isWide = constraints.maxWidth > 750;
+                  final isWide = constraints.maxWidth > 600;
                   if (isWide) {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
