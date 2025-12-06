@@ -1404,7 +1404,7 @@ class _OrderScreenState extends State<OrderScreen> {
             message: "Không có thay đổi để báo bếp.", type: ToastType.warning);
       } else {
         String msg = "Đã gửi báo chế biến.";
-        if (_skipKitchenPrint) msg += " (Không in phiếu bếp)";
+        if (_skipKitchenPrint) msg += " (Không in phiếu báo chế biến)";
         ToastService().show(message: msg, type: ToastType.success);
       }
     }
@@ -1424,7 +1424,7 @@ class _OrderScreenState extends State<OrderScreen> {
     _displayCart.values.where((item) => item.quantity > 0).toList();
     if (itemsToPrint.isEmpty) {
       ToastService()
-          .show(message: "Chưa có món nào để in.", type: ToastType.warning);
+          .show(message: "Chưa có sản phẩm nào để in.", type: ToastType.warning);
       return;
     }
 
@@ -2090,7 +2090,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   color: AppTheme.primaryColor,
                   size: 25,
                 ),
-                tooltip: 'Báo chế biến',
+                tooltip: 'Lưu đơn',
                 onPressed: () => _sendToKitchen(),
               ),
             _buildMobileCartIcon(),
@@ -2630,7 +2630,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: _hasUnsentItems ? _sendToKitchen : null,
-                        child: const Text('Chế Biến'),
+                        child: const Text('LƯU ĐƠN'),
                       ),
                     ),
                     if (_canSell) ...[
@@ -2641,7 +2641,7 @@ class _OrderScreenState extends State<OrderScreen> {
                             onPressed: _displayCart.isNotEmpty
                                 ? _handlePrintProvisionalBill
                                 : null,
-                            child: const Text('Tạm Tính'),
+                            child: const Text('TẠM TÍNH'),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -2659,7 +2659,7 @@ class _OrderScreenState extends State<OrderScreen> {
                               height: 20,
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2.5))
-                              : const Text('Thanh Toán'),
+                              : const Text('THANH TOÁN'),
                         ),
                       ),
                     ],
@@ -2875,7 +2875,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     if (hasSentItems && !_canCancelItem) {
       ToastService().show(
-          message: "Đơn đã báo chế biến. Bạn không có quyền hủy đơn.",
+          message: "Đơn đã lưu. Bạn không có quyền hủy đơn.",
           type: ToastType.warning);
       return;
     }
@@ -2966,7 +2966,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     if (item.sentQuantity > 0 && !_canCancelItem) {
       ToastService().show(
-          message: "Bạn không có quyền hủy món đã báo chế biến.",
+          message: "Bạn không có quyền hủy món đã lưu.",
           type: ToastType.warning);
       return;
     }
@@ -3412,14 +3412,11 @@ class _OrderScreenState extends State<OrderScreen> {
         builder: (context) => AlertDialog(
           title: const Text('⚠️ Bàn vừa được cập nhật'),
           content: const Text(
-              'Một thiết bị khác vừa lưu thay đổi. Vui lòng kiểm tra lại đơn hàng và bấm "Chế Biến" hoặc "Thanh Toán" lại một lần nữa.'),
+              'Một thiết bị khác vừa lưu thay đổi. Vui lòng kiểm tra lại đơn hàng và bấm "LƯU ĐƠN" hoặc "THANH TOÁN" lại một lần nữa.'),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                // Không cần setState. StreamBuilder sẽ tự động làm mới giao diện
-                // với dữ liệu mới nhất từ server, trong khi _localChanges vẫn giữ
-                // món ăn mà người dùng vừa thêm.
               },
               child: const Text('Đã hiểu'),
             ),
@@ -3546,7 +3543,7 @@ class _OrderScreenState extends State<OrderScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Xác nhận thoát'),
         content: const Text(
-            'Trong đơn hàng có sản phẩm CHƯA BÁO CHẾ BIẾN. Nếu thoát, các món này sẽ bị xóa khỏi đơn hàng!'),
+            'Trong đơn hàng có sản phẩm CHƯA LƯU. Nếu thoát, các món này sẽ bị xóa khỏi đơn hàng!'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -4444,7 +4441,7 @@ class _OrderScreenState extends State<OrderScreen> {
       if (newQuantity < item.sentQuantity) {
         ToastService().show(
             message:
-            "Không thể đặt SL (${formatNumber(newQuantity)}) ít hơn số đã báo chế biến (${formatNumber(item.sentQuantity)}).",
+            "Không thể đặt SL (${formatNumber(newQuantity)}) ít hơn số đã lưu (${formatNumber(item.sentQuantity)}).",
             type: ToastType.warning,
             duration: const Duration(seconds: 3));
         return;

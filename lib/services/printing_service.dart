@@ -139,8 +139,7 @@ class PrintingService {
             return await nativeService.print(device.address!, Uint8List.fromList(printCommands));
           } catch (e) {
             debugPrint("Lỗi in Native USB (Android): $e");
-            // Fallback sang thư viện thường nếu native fail
-            return await _sendToPrinterManager(printer, printCommands);
+            throw Exception("Mất kết nối máy in USB (Native)");
           }
         } else {
           debugPrint(">>> Cảnh báo: In USB chỉ hỗ trợ trên Android POS. Bỏ qua lệnh in.");

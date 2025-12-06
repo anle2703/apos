@@ -38,7 +38,6 @@ class PrintQueueService {
   bool _isInitialized = false;
   static Completer<List<ConfiguredPrinter>?>? _fixCompleter;
 
-  // Cache RAM để đồng bộ tức thì
   static List<ConfiguredPrinter>? _cachedPrinters;
 
   Future<void> initialize(String storeId) async {
@@ -53,7 +52,6 @@ class PrintQueueService {
     }
   }
 
-  // Hàm chạy ngầm khi khởi động để fix cổng USB bị đổi
   Future<void> _autoCheckPrintersOnStartup() async {
     try {
       debugPrint(">>> [Startup] Đang kiểm tra kết nối máy in...");
@@ -296,6 +294,11 @@ class PrintQueueService {
     });
   }
 
+  void updateLocalConfig(List<ConfiguredPrinter> newConfig) {
+    _cachedPrinters = newConfig;
+    debugPrint(">>> [PQ] Đã cập nhật cache máy in từ màn hình Cài đặt.");
+  }
+
   Future<bool> _executePrintLocally(PrintJob job, String printMode) async {
     debugPrint(">>> [PQ] Bắt đầu xử lý Job cục bộ (Mode: $printMode)");
 
@@ -389,41 +392,19 @@ class PrintQueueService {
       ) async {
     final nativeService = NativePrinterService();
     try {
-      debugPrint(">>> [Auto-Fix] Quét và sửa lỗi máy in USB (Thuật toán Pool)...");
+      debugPrint(">>> [Auto-Fix] Quét và sửa lỗi máy in USB (Logic Shared Device)...");
 
-      // 1. Lấy tất cả thiết bị USB đang cắm
-      // Returns: List<NativePrinter>
+      // 1. Lấy tất cả thiết bị USB đang cắm thực tế
       final allDevices = await nativeService.getPrinters();
 
       List<ConfiguredPrinter> updatedAssignments = List.from(currentAssignments);
-
-      // 2. Xác định các thiết bị ĐANG ĐƯỢC DÙNG
-      final Set<String> usedAddresses = {};
-
-      for (var config in updatedAssignments) {
-        if (config.physicalPrinter.type == pos_printer.PrinterType.usb) {
-          final addr = config.physicalPrinter.device.address;
-          // Lưu ý: d.identifier là thuộc tính của NativePrinter
-          if (addr != null && allDevices.any((d) => d.identifier == addr)) {
-            usedAddresses.add(addr);
-          }
-        }
-      }
-
-      // 3. Tạo "Kho thiết bị rảnh" (Candidate Pool)
-      // FIX LỖI: Không ép kiểu về PrinterDevice, để nó là NativePrinter
-      final freeUsbDevices = allDevices.where((d) {
-        return !usedAddresses.contains(d.identifier);
-      }).toList();
-
-      debugPrint(">>> [Auto-Fix] Tìm thấy ${freeUsbDevices.length} cổng USB rảnh: ${freeUsbDevices.map((e) => e.identifier).toList()}");
-
       bool hasAnyChange = false;
 
-      // 4. Duyệt qua từng máy in cấu hình để sửa
+      // 2. Duyệt qua từng cấu hình để kiểm tra và sửa
       for (int i = 0; i < updatedAssignments.length; i++) {
         final config = updatedAssignments[i];
 
+        // Chỉ xử lý USB
         if (config.physicalPrinter.type != pos_printer.PrinterType.usb) continue;
 
         final savedDevice = config.physicalPrinter.device;
@@ -431,59 +412,52 @@ class PrintQueueService {
         final String savedPid = savedDevice.productId.toString();
         final String currentAddress = savedDevice.address ?? '';
 
+        // Tên gốc để so sánh tương đối
         String savedBaseName = savedDevice.name;
         if (savedBaseName.contains(" (USB")) {
           savedBaseName = savedBaseName.split(" (USB")[0].trim();
         }
 
-        // Kiểm tra xem máy in này còn sống không
-        // So sánh address cũ với identifier của NativePrinter
+        // 3. Kiểm tra xem cổng hiện tại còn sống không?
         bool isStillConnected = allDevices.any((d) => d.identifier == currentAddress);
 
         if (!isStillConnected) {
-          debugPrint(">>> [Auto-Fix] Máy '${config.logicalName}' (cổng cũ $currentAddress) bị mất kết nối. Đang tìm trong Pool...");
+          debugPrint(">>> [Auto-Fix] Vai trò '${config.logicalName}' (cổng cũ $currentAddress) bị mất kết nối. Đang tìm thiết bị thay thế...");
 
-          // 5. Tìm ứng viên trong Pool
+          // 4. Tìm thiết bị trùng khớp trong TOÀN BỘ danh sách thiết bị đang cắm (allDevices)
+          // KHÔNG loại trừ thiết bị đã được gán cho vai trò khác -> Cho phép dùng chung
           int matchIndex = -1;
-          for (int j = 0; j < freeUsbDevices.length; j++) {
-            // candidate là NativePrinter
-            final candidate = freeUsbDevices[j];
+          for (int j = 0; j < allDevices.length; j++) {
+            final candidate = allDevices[j];
 
             final String devVid = candidate.vendorId.toString();
             final String devPid = candidate.productId.toString();
             final String devName = candidate.name;
 
-            // So khớp VID/PID
+            // So khớp VID/PID (Chính xác nhất)
             bool matchVid = devVid == savedVid;
             bool matchPid = devPid == savedPid;
 
-            // So khớp tên tương đối
+            // So khớp tên (Phụ trợ)
             bool matchName = (devName == savedBaseName) || (savedBaseName.contains(devName));
 
             if (matchVid && matchPid && matchName) {
               matchIndex = j;
-              break;
+              break; // Tìm thấy cái đầu tiên khớp là lấy luôn
             }
           }
 
           if (matchIndex != -1) {
-            // Lấy thiết bị ra khỏi Pool
-            final matchedNativePrinter = freeUsbDevices[matchIndex];
-
-            // FIX LỖI: Lấy identifier từ NativePrinter
+            final matchedNativePrinter = allDevices[matchIndex];
             final newAddress = matchedNativePrinter.identifier;
 
-            // Xóa khỏi Pool ngay lập tức
-            freeUsbDevices.removeAt(matchIndex);
+            debugPrint(">>> [Auto-Fix] -> CẬP NHẬT '${config.logicalName}' SANG CỔNG MỚI: $newAddress");
 
-            debugPrint(">>> [Auto-Fix] -> GÁN '${config.logicalName}' VÀO CỔNG MỚI: $newAddress");
-
-            // Tạo lại PrinterDevice (của thư viện) từ NativePrinter
             final newDev = pos_printer.PrinterDevice(
               name: savedDevice.name,
               vendorId: savedDevice.vendorId,
               productId: savedDevice.productId,
-              address: newAddress, // Gán cổng mới vào đây
+              address: newAddress,
             );
 
             updatedAssignments[i] = ConfiguredPrinter(
@@ -496,20 +470,17 @@ class PrintQueueService {
 
             hasAnyChange = true;
           } else {
-            debugPrint(">>> [Auto-Fix] Không tìm thấy cổng mới phù hợp cho '${config.logicalName}' trong Pool.");
+            debugPrint(">>> [Auto-Fix] Không tìm thấy thiết bị phù hợp cho '${config.logicalName}'.");
           }
         }
       }
 
       if (hasAnyChange) {
-        // Cập nhật RAM trước
         _cachedPrinters = updatedAssignments;
-
         final prefs = await SharedPreferences.getInstance();
         final listToSave = updatedAssignments.map((p) => p.toJson()).toList();
         await prefs.setString('printer_assignments', jsonEncode(listToSave));
-
-        debugPrint(">>> [Auto-Fix] Đã cập nhật xong RAM và Đĩa.");
+        debugPrint(">>> [Auto-Fix] Đã lưu cấu hình mới.");
         return updatedAssignments;
       }
 

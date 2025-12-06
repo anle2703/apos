@@ -21,6 +21,7 @@ import '../../widgets/custom_text_form_field.dart';
 import 'package:printing/printing.dart';
 import 'label_setup_screen.dart';
 import '../../services/native_printer_service.dart';
+import '../../services/print_queue_service.dart';
 import 'receipt_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -256,6 +257,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .map((p) => p!.toJson())
           .toList();
       await prefs.setString('printer_assignments', jsonEncode(listToSave));
+
+      final newPrinterConfig = _printerAssignments.values
+          .where((p) => p != null)
+          .cast<ConfiguredPrinter>() // Ép kiểu về non-nullable
+          .toList();
+
+      PrintQueueService().updateLocalConfig(newPrinterConfig);
 
       ToastService().show(message: "Đã lưu cài đặt!", type: ToastType.success);
       if (_isThisDeviceTheServer) {
@@ -561,15 +569,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             secondary: const Icon(Icons.fastfood_outlined),
           ),
           SwitchListTile(
-            title: const Text('Không in báo chế biến khi gởi món'),
+            title: const Text('Không in báo chế biến khi lưu đơn'),
             subtitle: const Text(
-                'Nếu bật sẽ không in báo chế biến từ các máy in A B C D.'),
+                'Nếu bật sẽ không gởi lệnh in phiếu chế biến đến các máy in A B C D.'),
             value: _skipKitchenPrint,
             onChanged: (bool value) => setState(() => _skipKitchenPrint = value),
             secondary: const Icon(Icons.print_disabled_outlined),
           ),
           SwitchListTile(
-            title: const Text('Cho phép in tạm tính nhanh hoặc kiểm món'),
+            title: const Text('Hiện nút in tạm tính nhanh hoặc kiểm món'),
             value: _allowProvisionalBill,
             onChanged: (bool value) =>
                 setState(() => _allowProvisionalBill = value),

@@ -1043,11 +1043,16 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       if (cashNeeded > 0 && cashPaid < cashNeeded) {
         ToastService().show(
-            message: 'Vui lòng nhập số tiền mặt khách đưa',
+            message: 'Vui lòng xác nhận tiền mặt',
             type: ToastType.warning);
-        await _showCashDialog();
+
+        final bool isDebtConfirmed = await _showCashDialog();
+
         _calculateTotal();
-        if (_debtAmount > 0) return;
+
+        if (_debtAmount > 0 && !isDebtConfirmed) {
+          return;
+        }
       }
     }
 
@@ -1098,7 +1103,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final now = DateTime.now();
       final String billCodeTimestamp = DateFormat('ddMMyyHHmm').format(now);
       final String randomSuffix = Random().nextInt(1000).toString().padLeft(3, '0');
-      final String shortBillCode = 'HĐ$billCodeTimestamp$randomSuffix';
+      final String shortBillCode = 'HD$billCodeTimestamp$randomSuffix';
       final String newBillId = '${widget.currentUser.storeId}_$shortBillCode';
 
       // 2. CHUẨN BỊ DỮ LIỆU
@@ -1599,18 +1604,27 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     };
   }
 
-  Future<void> _showCashDialog() async {
-    final result = await showDialog<double>(
+  // Tìm hàm _showCashDialog và thay thế bằng nội dung này
+  Future<bool> _showCashDialog() async {
+    final result = await showDialog<Map<String, dynamic>>( // [SỬA] Kiểu trả về là Map
       context: context,
       builder: (_) => CashDenominationDialog(
         totalPayable: _debtAmount > 0 ? _debtAmount : _totalPayable,
         initialCash: parseVN(_cashInputController.text),
+        hasCustomer: widget.customer != null, // [THÊM] Truyền thông tin có khách hay không
       ),
     );
+
     if (result != null) {
-      _cashInputController.text = formatNumber(result);
-      _onCashInputChanged();
+      final double val = result['value'] as double;
+      final bool isDebtConfirmed = result['isDebtConfirmed'] as bool;
+
+      _cashInputController.text = formatNumber(val);
+      _onCashInputChanged(); // Trigger tính lại tiền thừa/thiếu
+
+      return isDebtConfirmed; // Trả về true nếu bấm Ghi nợ
     }
+    return false;
   }
 
   Future<void> _sendUnsentItemsToKitchen() async {
@@ -2816,9 +2830,9 @@ class _InfoTile extends StatelessWidget {
 class CashDenominationDialog extends StatefulWidget {
   final double totalPayable;
   final double initialCash;
-
+  final bool hasCustomer;
   const CashDenominationDialog(
-      {super.key, required this.totalPayable, required this.initialCash});
+      {super.key, required this.totalPayable, required this.initialCash, required this.hasCustomer,});
 
   @override
   State<CashDenominationDialog> createState() => _CashDenominationDialogState();
@@ -2838,6 +2852,7 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
   ];
   final Map<int, int> _quantities = {};
   double _totalCash = 0;
+  bool _isPopping = false;
 
   @override
   void initState() {
@@ -2866,6 +2881,14 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
       _quantities.clear();
     });
     _recalculateTotal();
+  }
+
+  void _safePop(Map<String, dynamic>? result) {
+    if (_isPopping) return; // Nếu đang đóng thì chặn lại ngay
+    _isPopping = true;
+    if (mounted) {
+      Navigator.of(context).pop(result);
+    }
   }
 
   @override
@@ -2950,11 +2973,21 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
           onPressed: _reset,
           child: const Text('Reset'),
         ),
+        if (widget.hasCustomer)
+          TextButton(
+            // [SỬA LỖI] Dùng _safePop thay vì Navigator.pop
+            onPressed: () => _safePop({'value': _totalCash, 'isDebtConfirmed': true}),
+            child: const Text('Ghi nợ',
+                style:
+                TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
         TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+          // [SỬA LỖI] Dùng _safePop
+            onPressed: () => _safePop(null),
             child: const Text('Hủy')),
         ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(_totalCash),
+          // [SỬA LỖI] Dùng _safePop
+            onPressed: () => _safePop({'value': _totalCash, 'isDebtConfirmed': false}),
             child: const Text('Xác nhận')),
       ],
     );
