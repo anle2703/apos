@@ -108,7 +108,6 @@ class _OrderScreenState extends State<OrderScreen> {
   bool get isDesktop => MediaQuery.of(context).size.width >= 1100;
   bool _allowProvisionalBill = true;
   bool _printBillAfterPayment = true;
-  bool _notifyKitchenAfterPayment = false;
   bool _showPricesOnProvisional = true;
   bool _showPricesOnReceipt = true;
   bool _skipKitchenPrint = false;
@@ -185,7 +184,6 @@ class _OrderScreenState extends State<OrderScreen> {
       setState(() {
         _allowProvisionalBill = s.allowProvisionalBill;
         _printBillAfterPayment = s.printBillAfterPayment;
-        _notifyKitchenAfterPayment = s.notifyKitchenAfterPayment;
         _showPricesOnProvisional = s.showPricesOnProvisional;
         _showPricesOnReceipt = s.showPricesOnReceipt;
         _promptForCash = s.promptForCash ?? true;
@@ -1518,24 +1516,18 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() => _isPaymentLoading = true);
 
     try {
-      // 1. CHUẨN BỊ DỮ LIỆU "LẠC QUAN" (OPTIMISTIC DATA)
-
       if (_currentOrder == null) {
-        // --- TRƯỜNG HỢP: ĐƠN MỚI TINH ---
-
         final DocumentReference orderRef =
         _firestoreService.getOrderReference(widget.table.id);
         final String newOrderId = orderRef.id;
 
-        // Chuẩn bị danh sách món ăn (sentQuantity = quantity)
         final List<Map<String, dynamic>> optimisticItems =
         _displayCart.values.map((item) {
-          return item.copyWith(sentQuantity: item.quantity).toMap();
+          return item.toMap();
         }).toList();
 
         final double currentTotal = _totalAmount;
 
-        // TẠO MAP DỮ LIỆU TRƯỚC
         final Map<String, dynamic> optimisticData = {
           'id': newOrderId,
           'tableId': widget.table.id,
@@ -1556,14 +1548,10 @@ class _OrderScreenState extends State<OrderScreen> {
           widget.currentUser.name ?? widget.currentUser.phoneNumber,
         };
 
-        // SỬA LỖI Ở ĐÂY: Dùng fromMap thay vì Constructor trực tiếp
         final optimisticOrder = OrderModel.fromMap(optimisticData);
 
-        // Cập nhật State
         _currentOrder = optimisticOrder;
 
-        // BẮN LỆNH LƯU NGẦM
-        // Lưu ý: Copy map ra để sửa timestamp cho server
         final serverData = Map<String, dynamic>.from(optimisticData);
         serverData['createdAt'] = FieldValue.serverTimestamp();
         serverData['startTime'] = FieldValue.serverTimestamp();
@@ -1571,52 +1559,34 @@ class _OrderScreenState extends State<OrderScreen> {
         orderRef.set(serverData).then((_) {
           debugPrint(
               ">>> [Background] Đã tạo đơn mới ngầm thành công: $newOrderId");
-          if (_notifyKitchenAfterPayment) {
-            _sendToKitchen(performPrint: true, popOnFinish: false);
-          }
         }).catchError((e) {
           debugPrint(">>> [Background] Lỗi tạo đơn ngầm: $e");
         });
       } else {
-        // --- TRƯỜNG HỢP: ĐƠN CŨ ---
-        if (_hasUnsentItems) {
-          _sendToKitchen(
-            popOnFinish: false,
-            navigateToCartViewOnSuccess: false,
-            performPrint: _notifyKitchenAfterPayment,
-          ).then(
-                  (_) => debugPrint(">>> [Background] Update món mới thành công"));
-        } else {
-          _saveOrder();
-        }
+        await _saveOrder();
       }
 
-      // 2. CHUẨN BỊ MỞ PAYMENT SCREEN
       final savedState = _paymentStateCache[_currentOrder!.id];
       _isFinalizingPayment = true;
 
       final upToDateOrder = _currentOrder!.copyWith(
         items: _displayCart.values.map((item) {
-          return item.copyWith(sentQuantity: item.quantity).toMap();
+          return item.toMap();
         }).toList(),
         totalAmount: _totalAmount,
       );
+
       if (mounted) {
         setState(() {
-          // 1. Đưa các món từ _localChanges vào _cart chính thức
-          // và cập nhật sentQuantity = quantity (coi như đã gửi)
           _localChanges.forEach((key, item) {
-            _cart[key] = item.copyWith(sentQuantity: item.quantity);
+            _cart[key] = item;
           });
 
-          // 2. Xóa sạch danh sách món chờ (Đây là bước quan trọng để tắt cảnh báo)
           _localChanges.clear();
 
-          // 3. Nếu là đơn mới, đảm bảo _cart hiển thị đúng các món vừa tạo
           if (_cart.isEmpty && _currentOrder != null) {
             final itemsMap = {
               for (var item in _currentOrder!.items)
-              // Tái tạo OrderItem từ Map
                 OrderItem.fromMap(item as Map<String, dynamic>,
                     allProducts: _menuProducts)
                     .lineId: OrderItem.fromMap(item, allProducts: _menuProducts)
@@ -1625,8 +1595,7 @@ class _OrderScreenState extends State<OrderScreen> {
           }
         });
       }
-
-      // 3. NAVIGATE
+      if (!mounted) return;
       if (isDesktop) {
         setState(() {
           _isPaymentView = true;
@@ -1652,25 +1621,23 @@ class _OrderScreenState extends State<OrderScreen> {
         if (result == true || result is PaymentResult) {
           debugPrint(">>> [ORDER] Thanh toán thành công. Dọn dẹp...");
 
-          _hasCompletedPayment = true; // Bật cờ chặn lưu
+          _hasCompletedPayment = true;
 
-          // Xóa ngay lập tức mọi dữ liệu giỏ hàng
           setState(() {
             _localChanges.clear();
             _cart.clear();
-            _currentOrder = null; // Gán null luôn để chắc chắn
+            _currentOrder = null;
           });
 
-          // Xóa cache
-          if (_currentOrder != null){
-            _paymentStateCache.remove(_currentOrder!.id);}
+          if (_currentOrder != null) {
+            _paymentStateCache.remove(_currentOrder!.id);
+          }
 
-          // Thoát màn hình ngay
           if (mounted) Navigator.of(context).pop();
         } else if (result is PaymentState) {
-          // Trường hợp chỉ in tạm tính hoặc lưu nháp (chưa thanh toán xong)
-          if (_currentOrder != null){
-            _paymentStateCache[_currentOrder!.id] = result;}
+          if (_currentOrder != null) {
+            _paymentStateCache[_currentOrder!.id] = result;
+          }
         }
       }
     } catch (e) {

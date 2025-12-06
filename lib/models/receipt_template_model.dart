@@ -66,16 +66,16 @@ class ReceiptTemplateModel {
     this.footerText1 = "Cảm ơn quý khách!",
     this.footerText2 = "Hẹn gặp lại!",
 
-    this.kitchenTitleSize = 18.0,
+    this.kitchenTitleSize = 20.0,
     this.kitchenShowTime = true,
     this.kitchenShowStaff = true,
     this.kitchenShowCustomer = true,
     this.kitchenInfoSize = 14.0,
 
     this.kitchenTableHeaderSize = 14.0,
-    this.kitchenQtySize = 14.0,
-    this.kitchenItemNameSize = 14.0,
-    this.kitchenNoteSize = 13.0,
+    this.kitchenQtySize = 16.0,
+    this.kitchenItemNameSize = 16.0,
+    this.kitchenNoteSize = 14.0,
   });
 
   Map<String, dynamic> toMap() {
@@ -134,15 +134,15 @@ class ReceiptTemplateModel {
       billShowFooter: map['billShowFooter'] ?? true,
       footerText1: map['footerText1'] ?? "Cảm ơn quý khách!",
       footerText2: map['footerText2'] ?? "Hẹn gặp lại!",
-      kitchenTitleSize: (map['kitchenTitleSize'] as num?)?.toDouble() ?? 16.0,
+      kitchenTitleSize: (map['kitchenTitleSize'] as num?)?.toDouble() ?? 20.0,
       kitchenShowTime: map['kitchenShowTime'] ?? true,
       kitchenShowStaff: map['kitchenShowStaff'] ?? true,
       kitchenShowCustomer: map['kitchenShowCustomer'] ?? true,
       kitchenInfoSize: (map['kitchenInfoSize'] as num?)?.toDouble() ?? 14.0,
       kitchenTableHeaderSize: (map['kitchenTableHeaderSize'] as num?)?.toDouble() ?? 14.0,
-      kitchenQtySize: (map['kitchenQtySize'] as num?)?.toDouble() ?? 14.0,
-      kitchenItemNameSize: (map['kitchenItemNameSize'] as num?)?.toDouble() ?? 14.0,
-      kitchenNoteSize: (map['kitchenNoteSize'] as num?)?.toDouble() ?? 13.0,
+      kitchenQtySize: (map['kitchenQtySize'] as num?)?.toDouble() ?? 16.0,
+      kitchenItemNameSize: (map['kitchenItemNameSize'] as num?)?.toDouble() ?? 16.0,
+      kitchenNoteSize: (map['kitchenNoteSize'] as num?)?.toDouble() ?? 14.0,
     );
   }
 

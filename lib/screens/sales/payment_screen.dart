@@ -192,7 +192,7 @@ class PaymentScreen extends StatelessWidget {
         ]);
 
         _PaymentPanelState._cachedStoreTaxSettings =
-            results[0] as Map<String, dynamic>?;
+        results[0] as Map<String, dynamic>?;
 
         // Xử lý Voucher (Index 1)
         final promoSnapshot = results[1] as DocumentSnapshot;
@@ -216,12 +216,12 @@ class PaymentScreen extends StatelessWidget {
         if (userSnapshot.exists) {
           final userData = userSnapshot.data() as Map<String, dynamic>;
           _PaymentPanelState._cachedDefaultMethodId =
-              userData['defaultPaymentMethodId'];
+          userData['defaultPaymentMethodId'];
         }
 
         // [MỚI] Xử lý Store Details & Settings (Index 4 & 5)
         _PaymentPanelState._cachedStoreDetails =
-            results[4] as Map<String, String>?;
+        results[4] as Map<String, String>?;
         _PaymentPanelState._cachedStoreSettingsObj = results[5];
         _PaymentPanelState._cachedSurcharges = results[6] as List<SurchargeModel>;
 
@@ -416,7 +416,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       _isDiscountPercent = initialState.isDiscountPercent;
       _surcharges = initialState.surcharges
           .map((s) => SurchargeItem(
-              name: s.name, amount: s.amount, isPercent: s.isPercent))
+          name: s.name, amount: s.amount, isPercent: s.isPercent))
           .toList();
     } else {
       _discountController = TextEditingController();
@@ -489,7 +489,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       // --- Xử lý Thuế (Logic cũ của _loadStoreTaxSettings nằm ở đây) ---
       if (_cachedStoreTaxSettings != null) {
         final rawMap = _cachedStoreTaxSettings!['taxAssignmentMap']
-                as Map<String, dynamic>? ??
+        as Map<String, dynamic>? ??
             {};
         _productTaxRateMap.clear();
         rawMap.forEach((taxKey, productIds) {
@@ -516,7 +516,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       // --- Xử lý PTTT ---
       if (_cachedPaymentMethods != null) {
         _cashMethod = _cachedPaymentMethods!.firstWhere(
-            (m) => m.type == PaymentMethodType.cash,
+                (m) => m.type == PaymentMethodType.cash,
             orElse: () => _createDefaultCashMethod());
         _availableMethods = _cachedPaymentMethods!;
         _methodsLoaded = true;
@@ -705,7 +705,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       // Lấy thông tin phương thức đang được chọn
       // (Tìm trong list, nếu không thấy thì nó chính là cái Fake Cash)
       final currentMethod = _availableMethods.firstWhere(
-          (m) => m.id == currentSelectedId,
+              (m) => m.id == currentSelectedId,
           orElse: () => _createDefaultCashMethod());
 
       // Trường hợp B:
@@ -1020,7 +1020,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     return _surcharges.fold<double>(0.0, (acc, item) {
       if (item.isPercent && item.amount > 100) return acc;
       final surcharge =
-          item.isPercent ? widget.subtotal * (item.amount / 100) : item.amount;
+      item.isPercent ? widget.subtotal * (item.amount / 100) : item.amount;
       return acc + surcharge.toDouble();
     });
   }
@@ -1099,6 +1099,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     });
 
     try {
+      // 1. Lấy biến cài đặt từ cache (đã load sẵn từ lúc mở màn hình)
+      final settings = _cachedStoreSettingsObj;
+      // 2. Lấy giá trị cấu hình (mặc định là false nếu không tìm thấy)
+      final bool shouldPrintToKitchen = settings?.notifyKitchenAfterPayment ?? false;
+      // 3. Chỉ in nếu cấu hình cho phép
+      if (shouldPrintToKitchen) {
+        await _sendUnsentItemsToKitchen();
+      }
+
       // 1. TẠO BILL CODE CLIENT-SIDE
       final now = DateTime.now();
       final String billCodeTimestamp = DateFormat('ddMMyyHHmm').format(now);
@@ -1632,7 +1641,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
     // 1. Tìm các món chưa được gửi đi (logic này đã đúng)
     final allItems =
-        widget.order.items.map((e) => Map<String, dynamic>.from(e)).toList();
+    widget.order.items.map((e) => Map<String, dynamic>.from(e)).toList();
     final unsentItemsMaps = allItems.where((itemMap) {
       final double q = ((itemMap['quantity'] ?? 0) as num).toDouble();
       final double sent = ((itemMap['sentQuantity'] ?? 0) as num).toDouble();
@@ -1763,7 +1772,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     try {
       final firestore = FirestoreService();
       final storeInfo =
-          await firestore.getStoreDetails(widget.currentUser.storeId);
+      await firestore.getStoreDetails(widget.currentUser.storeId);
       if (storeInfo == null) {
         throw Exception("Không tìm thấy thông tin cửa hàng.");
       }
@@ -1786,7 +1795,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _defaultPaymentMethodId != _cashMethod?.id) {
         try {
           final defaultMethod = _availableMethods.firstWhere(
-            (m) => m.id == _defaultPaymentMethodId,
+                (m) => m.id == _defaultPaymentMethodId,
           );
 
           if (defaultMethod.qrDisplayOnProvisionalBill) {
@@ -1808,7 +1817,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       // Map lại items để thêm taxRate và taxKey
       final List<Map<String, dynamic>> detailedItems =
-          widget.order.items.map((item) {
+      widget.order.items.map((item) {
         final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
 
         final productData = item['product'] as Map<String, dynamic>? ?? {};
@@ -1849,14 +1858,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'taxPercent': 0.0,
         'surcharges': _surcharges
             .map((s) => {
-                  'name': s.isPercent
-                      ? '${s.name} (${formatNumber(s.amount)}%)'
-                      : s.name,
-                  'amount': s.isPercent
-                      ? widget.subtotal * (s.amount / 100)
-                      : s.amount,
-                  'isPercent': s.isPercent
-                })
+          'name': s.isPercent
+              ? '${s.name} (${formatNumber(s.amount)}%)'
+              : s.name,
+          'amount': s.isPercent
+              ? widget.subtotal * (s.amount / 100)
+              : s.amount,
+          'isPercent': s.isPercent
+        })
             .toList(),
         'totalPayable': _totalPayable,
         'startTime': widget.order.startTime,
@@ -2059,8 +2068,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             child: CustomTextFormField(
                               controller: _discountController,
                               keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                      decimal: true),
+                              const TextInputType.numberWithOptions(
+                                  decimal: true),
                               inputFormatters: [
                                 ThousandDecimalInputFormatter(),
                                 if (_isDiscountPercent)
@@ -2086,7 +2095,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                               decoration: const InputDecoration(
                                   labelText: 'Voucher',
                                   prefixIcon:
-                                      Icon(Icons.card_giftcard_outlined)),
+                                  Icon(Icons.card_giftcard_outlined)),
                               onChanged: (_) => _calculateTotal(),
                             ),
                           ),
@@ -2338,7 +2347,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                         flex: 2,
                         child: CustomTextFormField(
                           initialValue:
-                              item.amount == 0 ? '' : formatNumber(item.amount),
+                          item.amount == 0 ? '' : formatNumber(item.amount),
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             ThousandDecimalInputFormatter(),
@@ -2346,7 +2355,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                               CenteredRangeTextInputFormatter(min: 0, max: 100),
                           ],
                           decoration:
-                              const InputDecoration(labelText: 'Giá trị'),
+                          const InputDecoration(labelText: 'Giá trị'),
                           onChanged: (val) {
                             final parsed = parseVN(val).toDouble();
                             setState(() {
@@ -2430,7 +2439,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                                 ThousandDecimalInputFormatter()
                               ],
                               decoration:
-                                  const InputDecoration(labelText: 'Giá trị'),
+                              const InputDecoration(labelText: 'Giá trị'),
                               onChanged: (val) {
                                 final parsed = parseVN(val).toDouble();
                                 setState(() {
@@ -2601,7 +2610,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                 offset: const Offset(0, -5))
           ],
           border:
-              Border(top: BorderSide(color: Colors.grey.shade200, width: 1.0))),
+          Border(top: BorderSide(color: Colors.grey.shade200, width: 1.0))),
 
       // KIỂM TRA CHẾ ĐỘ ĐỂ HIỆN NÚT TƯƠNG ỨNG
       child: widget.isRetailMode
@@ -2643,10 +2652,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                 padding: const EdgeInsets.symmetric(vertical: 16)),
             child: _isProcessingPayment
                 ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 3))
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 3))
                 : const Text('Xác Nhận Thanh Toán'),
           ),
         ),
@@ -2695,10 +2704,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             icon: const Icon(Icons.print),
             label: _isProcessingPayment
                 ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 3))
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 3))
                 : const Text('Thanh toán & In'),
             style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16)),
@@ -2933,37 +2942,37 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
               height: isDesktop ? 300 : 250,
               child: isDesktop
                   ? GridView.builder(
-                      // Xóa shrinkWrap: true (vì chiều cao đã được cố định)
-                      itemCount: denominations.length,
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 2,
-                      ),
-                      itemBuilder: (context, index) {
-                        final den = denominations[index];
-                        final qty = _quantities[den] ?? 0;
-                        return _denominationCell(den, qty);
-                      },
-                    )
+                // Xóa shrinkWrap: true (vì chiều cao đã được cố định)
+                itemCount: denominations.length,
+                gridDelegate:
+                const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 2,
+                ),
+                itemBuilder: (context, index) {
+                  final den = denominations[index];
+                  final qty = _quantities[den] ?? 0;
+                  return _denominationCell(den, qty);
+                },
+              )
                   : GridView.builder(
-                      // Xóa shrinkWrap: true
-                      itemCount: denominations.length,
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 2.2,
-                      ),
-                      itemBuilder: (context, index) {
-                        final den = denominations[index];
-                        final qty = _quantities[den] ?? 0;
-                        return _denominationCell(den, qty);
-                      },
-                    ),
+                // Xóa shrinkWrap: true
+                itemCount: denominations.length,
+                gridDelegate:
+                const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 2.2,
+                ),
+                itemBuilder: (context, index) {
+                  final den = denominations[index];
+                  final qty = _quantities[den] ?? 0;
+                  return _denominationCell(den, qty);
+                },
+              ),
             ),
           ],
         ),
@@ -3010,10 +3019,10 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
               child: Text(
                 formatNumber(den.toDouble()),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.textColor,
-                      fontSize: 18,
-                    ),
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textColor,
+                  fontSize: 18,
+                ),
               ),
             ),
           ),
@@ -3052,9 +3061,9 @@ class CenteredRangeTextInputFormatter extends TextInputFormatter {
 
   @override
   TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
+      TextEditingValue oldValue,
+      TextEditingValue newValue,
+      ) {
     if (newValue.text.isEmpty) {
       return newValue;
     }
