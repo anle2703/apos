@@ -1099,12 +1099,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     });
 
     try {
-      // 1. Lấy biến cài đặt từ cache (đã load sẵn từ lúc mở màn hình)
+      // 1. Lấy biến cài đặt từ cache
       final settings = _cachedStoreSettingsObj;
+
       // 2. Lấy giá trị cấu hình (mặc định là false nếu không tìm thấy)
-      final bool shouldPrintToKitchen = settings?.notifyKitchenAfterPayment ?? false;
-      // 3. Chỉ in nếu cấu hình cho phép
-      if (shouldPrintToKitchen) {
+      final bool shouldNotifyKitchen = settings?.notifyKitchenAfterPayment ?? false;
+
+      // 3. Chỉ in nếu: (Có bật cấu hình) VÀ (Không phải bán lẻ)
+      if (shouldNotifyKitchen && !widget.isRetailMode) {
         await _sendUnsentItemsToKitchen();
       }
 
