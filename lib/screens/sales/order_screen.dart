@@ -306,7 +306,7 @@ class _OrderScreenState extends State<OrderScreen> {
       final String giftId = promo['giftProductId'];
       final double giftQtyReward = (promo['giftQuantity'] as num).toDouble();
       final double giftPrice = (promo['giftPrice'] as num).toDouble();
-      final String giftNote = "Tặng kèm (${promo['name']})";
+      final String giftNote = "Tặng kèm ${promo['name']}";
 
       // 1. Tính tổng số lượng hàng MUA
       double currentBuyQty = 0;

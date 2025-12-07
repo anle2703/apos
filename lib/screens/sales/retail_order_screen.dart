@@ -343,6 +343,74 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     super.dispose();
   }
 
+  void _openMobileCart() {
+    if (_currentTab == null) return;
+
+    showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => DraggableScrollableSheet(
+            initialChildSize: 1.0,
+            minChildSize: 0.5,
+            builder: (_, controller) => Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Scaffold(
+                backgroundColor: Colors.white,
+                appBar: AppBar(
+                  // [SỬA] Bọc Title trong StreamBuilder để cập nhật tên khách ngay lập tức
+                  title: StreamBuilder<void>(
+                      stream: _cartUpdateController.stream,
+                      builder: (context, snapshot) {
+                        return SizedBox(
+                          height: 40,
+                          child: CustomerSelector(
+                            currentCustomer: _currentTab!.customer,
+                            firestoreService: _firestoreService,
+                            storeId: widget.currentUser.storeId,
+                            onCustomerSelected: (customer) {
+                              _updateTabCustomer(customer);
+                              // Bắn tín hiệu để StreamBuilder nhận được và vẽ lại tên mới
+                              _cartUpdateController.add(null);
+                            },
+                          ),
+                        );
+                      }
+                  ),
+                  titleSpacing: 0,
+                  centerTitle: false,
+                  elevation: 0,
+                  leading: IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx)),
+                  actions: [
+                    if (_currentTab!.items.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline,
+                            color: Colors.red),
+                        tooltip: "Xóa hết",
+                        onPressed: _confirmClearCart,
+                      ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+                body: StreamBuilder<void>(
+                    stream: _cartUpdateController.stream,
+                    builder: (context, _) {
+                      return _buildCartView(
+                          scrollController: controller,
+                          showCustomerSelector: false);
+                    }),
+              ),
+            )));
+  }
+
   Future<void> _loadTaxSettings() async {
     try {
       final settings = await _firestoreService
@@ -367,7 +435,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
   }
 
-// --- THÊM HÀM NÀY ĐỂ TỰ ĐỘNG CẬP NHẬT GIẢM GIÁ ---
   void _recalculateCartDiscounts() {
     if (_currentTab == null) return;
 
@@ -482,7 +549,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       final double giftQtyReward = (promo['giftQuantity'] as num).toDouble();
       final double giftPrice = (promo['giftPrice'] as num).toDouble();
       final String promoName = promo['name'];
-      final String giftNote = "Tặng kèm ($promoName)";
+      final String giftNote = "Tặng kèm $promoName";
 
       // 1. Tính tổng số lượng hàng MUA
       double currentBuyQty = 0;
@@ -602,7 +669,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
   }
 
-  // --- HÀM MỚI: Tự động tìm tên "Đơn hàng X" chưa được sử dụng ---
   String _generateUniqueDefaultName() {
     int counter = 1;
     while (true) {
@@ -736,6 +802,10 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       // 3. Đóng tab hiện tại
       _closeTab(tab.id);
 
+      if (!isDesktop && mounted) {
+        Navigator.of(context).pop();
+      }
+
       ToastService().show(
           message: "Đã đồng bộ đơn hàng lên hệ thống.",
           type: ToastType.success);
@@ -842,78 +912,79 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                         itemCount: docs.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
-                          final data =
-                              docs[index].data() as Map<String, dynamic>;
+                          final data = docs[index].data() as Map<String, dynamic>;
                           final order = OrderModel.fromMap(data);
 
                           final String displayName =
-                              (order.customerName != null &&
-                                      order.customerName!.isNotEmpty)
-                                  ? order.customerName!
-                                  : order.tableName;
+                          (order.customerName != null && order.customerName!.isNotEmpty)
+                              ? order.customerName!
+                              : order.tableName;
 
                           return Card(
                             elevation: 2,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 8),
-                              leading: CircleAvatar(
-                                backgroundColor:
-                                    AppTheme.primaryColor.withAlpha(30),
-                                child: const Icon(Icons.receipt_long,
-                                    color: AppTheme.primaryColor),
-                              ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () {
+                                Navigator.pop(ctx); // Đóng danh sách cloud
+                                _restoreOrderFromCloud(order, docs[index].reference);
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // HÀNG 1: Tên khách/đơn + Nút xóa
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            displayName,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () => _deleteSavedOrder(docs[index].id),
+                                          child: const Padding(
+                                            padding: EdgeInsets.all(4.0),
+                                            child: Icon(Icons.delete_outline, color: Colors.red, size: 22),
+                                          ),
+                                        )
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
 
-                              // 1. Title: Hiện tên khách hàng (hoặc tên đơn nếu khách lẻ)
-                              title: Text(displayName,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold)),
-
-                              // 2. Subtitle: Chỉ hiện Giờ và Người tạo (Bỏ tên khách để đỡ lặp)
-                              subtitle: Text(
-                                "${DateFormat('HH:mm dd/MM').format(order.createdAt?.toDate() ?? DateTime.now())} - NV: ${order.createdByName}",
-                                style: TextStyle(
-                                    color: Colors.grey[600], fontSize: 14),
-                              ),
-
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Text(formatNumber(order.totalAmount),
+                                    // HÀNG 2: Số lượng sản phẩm + Tổng tiền
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          "${order.items.length} sản phẩm",
+                                          style: TextStyle(color: Colors.grey[800], fontSize: 14),
+                                        ),
+                                        Text(
+                                          formatNumber(order.totalAmount),
                                           style: const TextStyle(
                                               fontWeight: FontWeight.bold,
                                               color: AppTheme.primaryColor,
-                                              fontSize: 15)),
-                                      Text(
-                                        "${order.items.length} sản phẩm",
-                                        style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 14),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline,
-                                        color: Colors.red),
-                                    tooltip: "Xóa đơn này",
-                                    onPressed: () {
-                                      _deleteSavedOrder(docs[index].id);
-                                    },
-                                  ),
-                                ],
+                                              fontSize: 16
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+
+                                    // HÀNG 3: Thời gian + Nhân viên
+                                    Text(
+                                      "${DateFormat('HH:mm dd/MM').format(order.createdAt?.toDate() ?? DateTime.now())} - NV: ${order.createdByName}",
+                                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              onTap: () {
-                                Navigator.pop(ctx);
-                                _restoreOrderFromCloud(
-                                    order, docs[index].reference);
-                              },
                             ),
                           );
                         },
@@ -967,8 +1038,12 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       _session.activeTabId = newTabId;
     });
 
-    ToastService().show(message: "Đã mở lại đơn: $newTabName", type: ToastType.success);
     _session.saveSessionToLocal();
+    if (!isDesktop && newTab.items.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openMobileCart();
+      });
+    }
   }
 
   void _showActiveTabsList() {
@@ -1030,6 +1105,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                         onTap: () {
                           _switchTab(tab.id);
                           Navigator.pop(ctx);
+                          if (!isDesktop && tab.items.isNotEmpty) {
+                            _openMobileCart();
+                          }
                         },
                       );
                     },
@@ -1852,6 +1930,39 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                 ),
               ),
             ),
+          if (quantityInCart > 0 && !isDesktop)
+            Positioned(
+              top: -6,
+              left: -6,
+              child: InkWell(
+                onTap: () {
+                  if (_currentTab == null) return;
+                  // Tìm tất cả các dòng trong giỏ hàng có chứa sản phẩm này
+                  final keysToRemove = _currentTab!.items.entries
+                      .where((entry) => entry.value.product.id == product.id)
+                      .map((entry) => entry.key)
+                      .toList();
+
+                  for (final key in keysToRemove) {
+                    _removeItem(key);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade700, // Màu xám đậm cho nút xóa
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black26, blurRadius: 3)
+                      ]),
+                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                  child: const Center(
+                    child: Icon(Icons.close, size: 11, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -2256,73 +2367,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
           final totalAmount = tab.totalAmount;
 
           return InkWell(
-            onTap: () {
-              showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  useSafeArea: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (ctx) => DraggableScrollableSheet(
-                      initialChildSize: 1.0,
-                      minChildSize: 0.5,
-                      builder: (_, controller) => Container(
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(20)),
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: Scaffold(
-                              backgroundColor: Colors.white,
-                              appBar: AppBar(
-                                // [SỬA QUAN TRỌNG] Đưa CustomerSelector vào vị trí Title
-                                title: SizedBox(
-                                  height: 40,
-                                  // Chiều cao vừa phải cho ô chọn
-                                  child: CustomerSelector(
-                                    currentCustomer: tab.customer,
-                                    firestoreService: _firestoreService,
-                                    storeId: widget.currentUser.storeId,
-                                    onCustomerSelected: (customer) {
-                                      // Gọi hàm update gốc
-                                      _updateTabCustomer(customer);
-                                      // Cập nhật lại UI popup ngay lập tức
-                                      _cartUpdateController.add(null);
-                                    },
-                                  ),
-                                ),
-                                titleSpacing: 0,
-                                // Bỏ khoảng cách thừa để ô chọn khách rộng hơn
-                                centerTitle: false,
-                                // Canh trái
-                                elevation: 0,
-                                leading: IconButton(
-                                    icon: const Icon(Icons.close),
-                                    onPressed: () => Navigator.pop(ctx)),
-                                actions: [
-                                  if (tab.items.isNotEmpty)
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline,
-                                          color: Colors.red),
-                                      tooltip: "Xóa hết",
-                                      onPressed: _confirmClearCart,
-                                    ),
-                                  const SizedBox(width: 8),
-                                ],
-                              ),
-                              body: StreamBuilder<void>(
-                                  stream: _cartUpdateController.stream,
-                                  builder: (context, _) {
-                                    // [SỬA] Truyền showCustomerSelector: false để ẩn cái cũ đi
-                                    return _buildCartView(
-                                        scrollController: controller,
-                                        showCustomerSelector: false);
-                                  }),
-                            ),
-                          )));
-            },
-            // --- GIAO DIỆN THANH TỔNG BÊN DƯỚI (Làm gọn lại) ---
+            onTap: _openMobileCart, // <--- GỌI HÀM MỚI TẠI ĐÂY
             child: Container(
+              // ... (Giữ nguyên phần UI thanh tổng tiền bên dưới)
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: const BoxDecoration(
                   color: AppTheme.primaryColor,

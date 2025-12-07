@@ -851,60 +851,68 @@ class _BillCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // --- HÀNG 1: TÊN BÀN + GIÁ TIỀN ---
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // 1. Tên Bàn / Mã đơn (Bên trái)
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // --- LOGIC HIỂN THỊ TIÊU ĐỀ CARD ---
-                                  Builder(
-                                      builder: (context) {
-                                        final String safeTableName = (bill.tableName).trim();
-                                        final String safeCustomerName = (bill.customerName ?? '').trim();
+                              child: Builder(builder: (context) {
+                                final String safeTableName = (bill.tableName).trim();
+                                final String safeCustomerName = (bill.customerName ?? '').trim();
 
-                                        // Logic kiểm tra y hệt bên trên
-                                        bool isRetailBill = false;
-                                        if (safeTableName.toLowerCase().startsWith('đơn hàng') || safeTableName.isEmpty) {
-                                          isRetailBill = true;
-                                        }
-                                        if (safeTableName.isNotEmpty && safeTableName == safeCustomerName) {
-                                          isRetailBill = true;
-                                        }
+                                bool isRetailBill = false;
+                                if (safeTableName.toLowerCase().startsWith('đơn hàng') ||
+                                    safeTableName.isEmpty) {
+                                  isRetailBill = true;
+                                }
+                                if (safeTableName.isNotEmpty &&
+                                    safeTableName == safeCustomerName) {
+                                  isRetailBill = true;
+                                }
 
-                                        final String displayTitle = isRetailBill
-                                            ? bill.billCode
-                                            : '$safeTableName - ${bill.billCode}';
+                                final String displayTitle = isRetailBill
+                                    ? bill.billCode
+                                    : '$safeTableName - ${bill.billCode}';
 
-                                        return Text(
-                                          displayTitle,
-                                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                                          overflow: TextOverflow.ellipsis,
-                                        );
-                                      }
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${bill.customerName ?? 'Khách lẻ'} • ${DateFormat('HH:mm dd/MM/yyyy').format(bill.createdAt)}',
-                                    style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
-                                  ),
-                                ],
-                              ),
+                                return Text(
+                                  displayTitle,
+                                  style: theme.textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                );
+                              }),
                             ),
+
+                            // 2. Giá tiền (Bên phải)
                             Padding(
                               padding: const EdgeInsets.only(left: 8.0),
                               child: Text(
                                 '${formatNumber(bill.totalPayable)} đ',
                                 style: theme.textTheme.titleLarge?.copyWith(
-                                  fontSize: 17, color: statusColor, fontWeight: FontWeight.bold,
+                                  fontSize: 17,
+                                  color: statusColor,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ),
                           ],
                         ),
+
+                        const SizedBox(height: 4),
+
+                        // --- HÀNG 2: KHÁCH HÀNG + NGÀY GIỜ (FULL WIDTH) ---
+                        // Đã đưa ra ngoài Row để không bị ép cột
+                        Text(
+                          '${bill.customerName ?? 'Khách lẻ'} • ${DateFormat('HH:mm dd/MM/yyyy').format(bill.createdAt)}',
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(color: Colors.grey.shade600),
+                        ),
+
                         const SizedBox(height: 8),
+
+                        // --- HÀNG 3: TRẠNG THÁI (FULL WIDTH) ---
                         Wrap(
                           spacing: 8.0,
                           runSpacing: 4.0,
@@ -912,7 +920,8 @@ class _BillCard extends StatelessWidget {
                             Chip(
                               label: Text(
                                 isCancelled ? "ĐÃ HỦY" : "HOÀN THÀNH",
-                                style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                                style: AppTheme.boldTextStyle
+                                    .copyWith(color: statusColor, fontSize: 12),
                               ),
                               backgroundColor: statusColor.withAlpha(30),
                               padding: EdgeInsets.zero,
@@ -923,7 +932,8 @@ class _BillCard extends StatelessWidget {
                               Chip(
                                 label: Text(
                                   "DƯ NỢ: ${formatNumber(bill.debtAmount)} đ",
-                                  style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                                  style: AppTheme.boldTextStyle
+                                      .copyWith(color: statusColor, fontSize: 12),
                                 ),
                                 backgroundColor: statusColor.withAlpha(30),
                                 padding: EdgeInsets.zero,
@@ -934,7 +944,8 @@ class _BillCard extends StatelessWidget {
                               Chip(
                                 label: Text(
                                   "ĐÃ XUẤT HĐĐT",
-                                  style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                                  style: AppTheme.boldTextStyle
+                                      .copyWith(color: statusColor, fontSize: 12),
                                 ),
                                 backgroundColor: statusColor.withAlpha(30),
                                 padding: EdgeInsets.zero,

@@ -864,7 +864,8 @@ class _KpiCard extends StatelessWidget {
                               .titleSmall
                               ?.copyWith(
                               color: Colors.grey.shade700,
-                              fontWeight: FontWeight.bold),
+                              fontSize: 13,
+                          fontWeight: FontWeight.bold),
                           overflow: TextOverflow.ellipsis)),
                 ],
               ),
@@ -876,7 +877,7 @@ class _KpiCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: Colors.grey.shade700,
-                      fontSize: 20),
+                      fontSize: 17),
                   maxLines: 1,
                 ),
               ),
