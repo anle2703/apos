@@ -73,14 +73,15 @@ class OrderItem {
     }
 
     // Tính toán cho món ăn/dịch vụ thông thường
-    double toppingsTotal = 0.0;
-    toppings.forEach((product, quantity) {
-      toppingsTotal += product.sellPrice * quantity;
+    double toppingsTotalPerUnit = 0.0;
+    // Lưu ý: Đổi tên biến quantity trong vòng lặp thành toppingQty để tránh nhầm lẫn với quantity của OrderItem
+    toppings.forEach((toppingProduct, toppingQty) {
+      toppingsTotalPerUnit += toppingProduct.sellPrice * toppingQty;
     });
 
-    // (Đơn giá đã chiết khấu * số lượng) + topping
-    // Đã xóa "this." khỏi quantity
-    return (discountedPrice * quantity) + toppingsTotal;
+    // [ĐÃ SỬA]: Nhân số lượng với tổng (Giá đã giảm + Giá Topping)
+    // Công thức cũ sai: (discountedPrice * quantity) + toppingsTotal
+    return quantity * (discountedPrice + toppingsTotalPerUnit);
   }
 
   String get groupKey {

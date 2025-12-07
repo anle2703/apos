@@ -1204,19 +1204,19 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     // Tính toán cho món thường + topping
-    double toppingsTotal = 0.0;
+    double toppingsTotalPerUnit = 0.0;
     final tops = m['toppings'];
     if (tops is List) {
       for (final t in tops) {
         if (t is Map) {
           final tp = (t['price'] as num?)?.toDouble() ?? 0.0;
           final tq = (t['quantity'] as num?)?.toDouble() ?? 0.0;
-          toppingsTotal += tp * tq;
+          toppingsTotalPerUnit += tp * tq;
         }
       }
     }
 
-    return q * discountedPrice + toppingsTotal;
+    return q * (discountedPrice + toppingsTotalPerUnit);
   }
 
   Future<void> _scanBarcode() async {
@@ -2406,28 +2406,21 @@ class _OrderScreenState extends State<OrderScreen> {
         LayoutBuilder(builder: (context, constraints) {
           return Builder(
             builder: (context) {
-              // PHẢI DÙNG var ĐỂ CÓ THỂ THAY ĐỔI GIÁ TRỊ SAU
-              var guestName = _customerNameFromOrder;
               var guestPhone = _customerPhoneFromOrder;
               var guestAddress = _customerAddressFromOrder;
-              final guestNote = _customerNoteFromOrder; // Note vẫn giữ nguyên
+              final guestNote = _customerNoteFromOrder;
 
               final bool isShipOrder = widget.table.id.startsWith('ship_');
               final bool isScheduleOrder =
               widget.table.id.startsWith('schedule_');
               final bool isOnlineOrder = isShipOrder || isScheduleOrder;
 
-              // --- SỬA LỖI LOGIC: Chỉ giữ lại Name/Phone/Address nếu là đơn ONLINE ---
               if (!isOnlineOrder) {
-                // Nếu là bàn thường, loại bỏ thông tin khách hàng chi tiết
-                guestName = null;
                 guestPhone = null;
                 guestAddress = null;
               }
-              // -----------------------------------------------------------------------
 
               // 1. Không hiển thị tên cho đơn online (Đã bị loại bỏ bởi logic trên)
-              final bool showName = (guestName != null && guestName.isNotEmpty);
               final bool showPhone =
               (guestPhone != null && guestPhone.isNotEmpty);
               // 2. Đổi icon cho đơn đặt lịch
@@ -2437,8 +2430,7 @@ class _OrderScreenState extends State<OrderScreen> {
               // 3. Hiển thị ghi chú
               final bool showNote = (guestNote != null && guestNote.isNotEmpty);
 
-              final bool hasInfo =
-                  showName || showPhone || showAddressOrTime || showNote;
+              final bool hasInfo = showPhone || showAddressOrTime || showNote;
 
               if (hasInfo) {
                 return Padding(
@@ -2455,23 +2447,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (showName)
-                          Row(
-                            children: [
-                              Icon(Icons.person_outline,
-                                  size: 16, color: Colors.grey.shade700),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                  child: Text(guestName,
-                                      style: textTheme.bodyMedium?.copyWith(
-                                          fontWeight: FontWeight.bold))),
-                            ],
-                          ),
-
-                        if (showName &&
-                            (showPhone || showAddressOrTime || showNote))
-                          const SizedBox(height: 8),
-
+                        if (showPhone || showAddressOrTime || showNote)
                         // 4. Dùng Wrap để SĐT, Địa chỉ, Ghi chú tự xuống dòng
                         Wrap(
                           spacing: 16.0, // Khoảng cách ngang
