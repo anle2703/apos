@@ -1,6 +1,6 @@
 {
-    "name": "app_4cash",
-    "short_name": "app_4cash",
+    "name": "Phần mềm bán hàng APOS",
+    "short_name": "APOS",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

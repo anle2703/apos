@@ -59,7 +59,6 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   double get _totalAmount =>
       _displayCart.values.fold(0, (total, item) => total + item.subtotal);
 
-
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -101,7 +100,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         _firestoreService.getAllProductsStream(widget.currentUser.storeId);
 
     _searchController.addListener(() {
-      if (mounted) setState(() => _searchQuery = _searchController.text.toLowerCase());
+      if (mounted) {
+        setState(() => _searchQuery = _searchController.text.toLowerCase());
+      }
     });
 
     _webOrderCancelStream = FirebaseFirestore.instance
@@ -109,7 +110,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         .where('tableId', isEqualTo: widget.table.id)
         .where('status', isEqualTo: 'cancelled')
         .where('type', isEqualTo: 'at_table')
-        .where('createdAt', isGreaterThan: Timestamp.fromDate(DateTime.now().subtract(const Duration(minutes: 15))))
+        .where('createdAt',
+            isGreaterThan: Timestamp.fromDate(
+                DateTime.now().subtract(const Duration(minutes: 15))))
         .snapshots()
         .listen(_handleCancelledWebOrders);
 
@@ -140,7 +143,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   }
 
   Future<void> _listenQuickNotes() async {
-    _quickNotesSub = _firestoreService.getQuickNotes(widget.currentUser.storeId).listen((notes) {
+    _quickNotesSub = _firestoreService
+        .getQuickNotes(widget.currentUser.storeId)
+        .listen((notes) {
       if (mounted) {
         setState(() {
           _quickNotes = notes;
@@ -155,7 +160,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     if (!mounted) return;
     bool didRevert = false;
 
-    final Map<String, OrderItem> currentPendingChanges = Map.from(_pendingChanges);
+    final Map<String, OrderItem> currentPendingChanges =
+        Map.from(_pendingChanges);
 
     for (final doc in snapshot.docs) {
       if (_processedCancellations.contains(doc.id)) continue;
@@ -165,14 +171,13 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
       final List<OrderItem> deltaItems = itemsData
           .map((itemMap) {
-        try {
-          return OrderItem.fromMap(
-              (itemMap as Map).cast<String, dynamic>(),
-              allProducts: _menuProducts);
-        } catch(e) {
-          return null;
-        }
-      })
+            try {
+              return OrderItem.fromMap((itemMap as Map).cast<String, dynamic>(),
+                  allProducts: _menuProducts);
+            } catch (e) {
+              return null;
+            }
+          })
           .whereType<OrderItem>()
           .toList();
 
@@ -186,8 +191,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
         // 1. Kiểm tra PENDING changes
         final pendingEntry = currentPendingChanges.entries.firstWhereOrNull(
-                (entry) => entry.value.groupKey == deltaItem.groupKey
-        );
+            (entry) => entry.value.groupKey == deltaItem.groupKey);
 
         if (pendingEntry != null) {
           final pendingItem = pendingEntry.value;
@@ -201,7 +205,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           if (newPendingQty <= originalQty) {
             currentPendingChanges.remove(pendingKey);
           } else {
-            currentPendingChanges[pendingKey] = pendingItem.copyWith(quantity: newPendingQty);
+            currentPendingChanges[pendingKey] =
+                pendingItem.copyWith(quantity: newPendingQty);
           }
           didRevert = true;
         }
@@ -223,15 +228,19 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           final cartItem = _cart[key];
           // Nếu local item khớp với pending (đã revert) hoặc cart (gốc)
           // thì xóa local item
-          return (pendingItem != null && localItem.quantity == pendingItem.quantity) ||
-              (pendingItem == null && cartItem != null && localItem.quantity == cartItem.quantity) ||
-              (pendingItem == null && cartItem == null && localItem.quantity == 0);
+          return (pendingItem != null &&
+                  localItem.quantity == pendingItem.quantity) ||
+              (pendingItem == null &&
+                  cartItem != null &&
+                  localItem.quantity == cartItem.quantity) ||
+              (pendingItem == null &&
+                  cartItem == null &&
+                  localItem.quantity == 0);
         });
       });
       ToastService().show(
           message: "Một số món đã bị thu ngân từ chối.",
-          type: ToastType.warning
-      );
+          type: ToastType.warning);
     }
   }
 
@@ -271,7 +280,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
             // Thêm món mới
             tempProposedCart[key] = deltaItem.copyWith(quantity: deltaQty);
           }
-        } catch(e) {
+        } catch (e) {
           debugPrint("Lỗi parse pending item: $e");
         }
       }
@@ -285,7 +294,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final proposedItem = proposedEntry.value;
 
       // Phải tìm lại item gốc trong _cart bằng groupKey
-      final cartItem = _cart.values.firstWhereOrNull((item) => item.groupKey == key);
+      final cartItem =
+          _cart.values.firstWhereOrNull((item) => item.groupKey == key);
 
       if (cartItem == null) {
         // Món này mới hoàn toàn
@@ -293,7 +303,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       } else if (cartItem.quantity != proposedItem.quantity) {
         // Món này bị thay đổi số lượng
         // Lưu ý: dùng lineId của món gốc (cartItem)
-        newPendingChanges[cartItem.lineId] = proposedItem.copyWith(lineId: cartItem.lineId);
+        newPendingChanges[cartItem.lineId] =
+            proposedItem.copyWith(lineId: cartItem.lineId);
       }
       // Nếu SL bằng nhau -> không phải pending change
     }
@@ -323,7 +334,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final pendingItem = _pendingChanges[lineId];
       final double pendingQty = pendingItem?.quantity ?? originalQty;
 
-      bool isRevertedToPending = (pendingItem != null && newQuantity == pendingQty);
+      bool isRevertedToPending =
+          (pendingItem != null && newQuantity == pendingQty);
       bool isRevertedToCart = (newQuantity == originalQty);
 
       if (isRevertedToPending || isRevertedToCart) {
@@ -352,7 +364,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final int currentVersion;
 
       if (_currentOrder != null && _currentOrder!.status == 'active') {
-        orderRef = FirebaseFirestore.instance.collection('orders').doc(_currentOrder!.id);
+        orderRef = FirebaseFirestore.instance
+            .collection('orders')
+            .doc(_currentOrder!.id);
         serverSnapshot = await orderRef.get();
         serverData = serverSnapshot.data() as Map<String, dynamic>?;
         currentVersion = (serverData?['version'] as num?)?.toInt() ?? 0;
@@ -384,9 +398,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           }
         }
         final totalAmount =
-        grouped.values.fold(0.0, (tong, item) => tong + item.subtotal);
+            grouped.values.fold(0.0, (tong, item) => tong + item.subtotal);
         final itemsToSave = grouped.values.map((e) => e.toMap()).toList();
-        finalCart = { for (var item in grouped.values) item.lineId: item};
+        finalCart = {for (var item in grouped.values) item.lineId: item};
         return (items: itemsToSave, total: totalAmount);
       }
 
@@ -396,7 +410,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       mergedForSaving.addAll(_pendingChanges);
       mergedForSaving.addAll(localChanges);
 
-      if (!serverSnapshot.exists || ['paid', 'cancelled'].contains(serverStatus)) {
+      if (!serverSnapshot.exists ||
+          ['paid', 'cancelled'].contains(serverStatus)) {
         final result = groupAndCalculate(mergedForSaving);
         if (result.items.isEmpty) return true;
 
@@ -423,7 +438,6 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         };
         await orderRef.set(newOrderData);
         _currentOrder = OrderModel.fromMap(newOrderData);
-
       } else {
         final currentVersion = (serverData!['version'] as num?)?.toInt() ?? 0;
 
@@ -435,18 +449,23 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
         bool hasUnprintedChanges = false;
 
-        final Map<String, OrderItem> finalMergedItems = Map.from(mergedForSaving);
+        final Map<String, OrderItem> finalMergedItems =
+            Map.from(mergedForSaving);
 
         for (final entry in localChanges.entries) {
           final key = entry.key;
           final localItem = entry.value;
-          final oldSentQty = _pendingChanges[key]?.sentQuantity ?? serverItemsMap[key]?.sentQuantity ?? 0;
+          final oldSentQty = _pendingChanges[key]?.sentQuantity ??
+              serverItemsMap[key]?.sentQuantity ??
+              0;
 
           if (localItem.quantity > oldSentQty) {
             hasUnprintedChanges = true;
-            finalMergedItems[key] = localItem.copyWith(sentQuantity: localItem.quantity);
+            finalMergedItems[key] =
+                localItem.copyWith(sentQuantity: localItem.quantity);
           } else {
-            finalMergedItems[key] = localItem.copyWith(sentQuantity: localItem.quantity);
+            finalMergedItems[key] =
+                localItem.copyWith(sentQuantity: localItem.quantity);
           }
         }
 
@@ -455,7 +474,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         if (result.items.isEmpty) {
           await orderRef.update({
             'status': 'cancelled',
-            'items': [], 'totalAmount': 0.0,
+            'items': [],
+            'totalAmount': 0.0,
             'updatedAt': FieldValue.serverTimestamp(),
             'version': currentVersion + 1,
           });
@@ -486,10 +506,10 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         });
       }
       return true;
-
     } catch (e) {
       debugPrint("==== GUEST SAVE ORDER FAILED ====\n$e");
-      ToastService().show(message: "Lỗi lưu đơn hàng: $e", type: ToastType.error);
+      ToastService()
+          .show(message: "Lỗi lưu đơn hàng: $e", type: ToastType.error);
       return false;
     }
   }
@@ -509,7 +529,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         allProducts: currentProducts,
       );
       final existingEntry = mergedCart.entries.firstWhereOrNull(
-            (entry) => entry.value.groupKey == newItem.groupKey,
+        (entry) => entry.value.groupKey == newItem.groupKey,
       );
       if (existingEntry != null) {
         final existingItem = existingEntry.value;
@@ -534,12 +554,14 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         // --- SỬA LỖI 2: Xóa local và pending nếu server đã cập nhật ---
         _localChanges.removeWhere((localKey, localItem) {
           final cartItem = _cart[localKey];
-          return cartItem != null && cartItem.sentQuantity >= localItem.quantity;
+          return cartItem != null &&
+              cartItem.sentQuantity >= localItem.quantity;
         });
 
         _pendingChanges.removeWhere((pendingKey, pendingItem) {
           final cartItem = _cart[pendingKey];
-          return cartItem != null && cartItem.sentQuantity >= pendingItem.quantity;
+          return cartItem != null &&
+              cartItem.sentQuantity >= pendingItem.quantity;
         });
       });
     }
@@ -551,25 +573,29 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       stream: _productsStream,
       builder: (context, productSnapshot) {
         if (!productSnapshot.hasData) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
         }
         _menuProducts = productSnapshot.data!
             .where((p) =>
-        p.productType != 'Nguyên liệu' &&
-            p.productType != 'Vật liệu' &&
-            p.isVisibleInMenu == true)
+                p.productType != 'Nguyên liệu' &&
+                p.productType != 'Vật liệu' &&
+                p.isVisibleInMenu == true)
             .toList();
 
         return FutureBuilder<List<ProductGroupModel>>(
-          future: _firestoreService.getProductGroups(widget.currentUser.storeId),
+          future:
+              _firestoreService.getProductGroups(widget.currentUser.storeId),
           builder: (context, groupSnapshot) {
             if (groupSnapshot.hasData) {
               _menuGroups = groupSnapshot.data!
-                  .where((g) => _menuProducts.any((p) => p.productGroup == g.name))
+                  .where(
+                      (g) => _menuProducts.any((p) => p.productGroup == g.name))
                   .toList();
               final bool hasOrphanProducts = _menuProducts.any(
-                      (p) => p.productGroup == null || p.productGroup!.isEmpty);
-              if (hasOrphanProducts && !_menuGroups.any((g) => g.name == 'Khác')) {
+                  (p) => p.productGroup == null || p.productGroup!.isEmpty);
+              if (hasOrphanProducts &&
+                  !_menuGroups.any((g) => g.name == 'Khác')) {
                 _menuGroups.add(ProductGroupModel(
                     id: 'khac_group_id', name: 'Khác', stt: 9999));
               }
@@ -580,7 +606,6 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
               builder: (context, orderSnapshot) {
                 if (orderSnapshot.connectionState == ConnectionState.active &&
                     orderSnapshot.hasData) {
-
                   List<Map<String, dynamic>> newItemsFromFirestore = [];
 
                   if (orderSnapshot.data!.docs.isNotEmpty) {
@@ -601,7 +626,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   if (hasChanges) {
                     _lastFirestoreItems = newItemsFromFirestore;
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _rebuildCartFromFirestore(newItemsFromFirestore);
+                      if (mounted) {
+                        _rebuildCartFromFirestore(newItemsFromFirestore);
+                      }
                     });
                   }
                 }
@@ -615,80 +642,142 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   }
 
   Widget _buildMobileLayout() {
-    final groupNames = ['Tất cả', ..._menuGroups.map((g) => g.name)];
+    final bool isShip = widget.table.id == 'web_ship_order';
+    final bool isBooking = widget.table.id == 'web_schedule_order';
 
-    return DefaultTabController(
-      length: groupNames.length,
-      child: _isMenuView
-          ? Scaffold(
-        appBar: AppBar(
-          title: Text('Sản phẩm - ${widget.table.tableName}'),
-          automaticallyImplyLeading: false,
-          actions: [
-            _buildMobileCartIcon(),
-          ],
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(100.0),
+    bool isServiceDisabled = false;
+    String disabledMessage = "";
+
+    if (isShip && (widget.settings.enableShip == false)) {
+      isServiceDisabled = true;
+      disabledMessage = "Cửa hàng hiện đang tạm ngưng nhận đặt hàng giao đi.";
+    }
+
+    if (isBooking && (widget.settings.enableBooking == false)) {
+      isServiceDisabled = true;
+      disabledMessage = "Cửa hàng hiện đang tạm ngưng nhận đặt lịch hẹn.";
+    }
+
+    // Nếu bị tắt, hiển thị màn hình cảnh báo và chặn thao tác
+    if (isServiceDisabled) {
+      return Scaffold(
+        appBar: AppBar(title: const Text("Thông báo")),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildMobileSearchBar(),
-                TabBar(
-                  isScrollable: true,
-                  tabs: groupNames.map((name) => Tab(text: name)).toList(),
+                const Icon(Icons.store_mall_directory_outlined,
+                    size: 80, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text(
+                  "Rất tiếc!",
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  disabledMessage,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                    "Vui lòng quay lại sau hoặc liên hệ trực tiếp với cửa hàng.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey)),
               ],
             ),
           ),
         ),
-        body: TabBarView(
-          children: groupNames.map((groupName) {
-            final products = _menuProducts.where((p) {
-              bool groupMatch;
-              if (groupName == 'Tất cả') {
-                groupMatch = true;
-              } else if (groupName == 'Khác') {
-                groupMatch = (p.productGroup == null || p.productGroup!.isEmpty);
-              } else {
-                groupMatch = (p.productGroup == groupName);
-              }
-              final searchMatch = _searchQuery.isEmpty ||
-                  p.productName.toLowerCase().contains(_searchQuery) ||
-                  (p.productCode?.toLowerCase().contains(_searchQuery) ?? false);
-              return groupMatch && searchMatch;
-            }).toList();
-            return GridView.builder(
-              padding: const EdgeInsets.all(8.0),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 200,
-                childAspectRatio: 0.85,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
+      );
+    }
+
+    final groupNames = ['Tất cả', ..._menuGroups.map((g) => g.name)];
+    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+    return DefaultTabController(
+      length: groupNames.length,
+      child: _isMenuView
+          ? Scaffold(
+              resizeToAvoidBottomInset: false,
+              backgroundColor: Colors.white,
+              appBar: AppBar(
+                title: Text('Sản phẩm - ${widget.table.tableName}'),
+                automaticallyImplyLeading: false,
+                actions: [
+                  _buildMobileCartIcon(),
+                ],
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(100.0),
+                  child: Column(
+                    children: [
+                      _buildMobileSearchBar(),
+                      TabBar(
+                        isScrollable: true,
+                        tabs:
+                            groupNames.map((name) => Tab(text: name)).toList(),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              itemCount: products.length,
-              itemBuilder: (context, index) =>
-                  _buildProductCard(products[index]),
-            );
-          }).toList(),
-        ),
-      )
-          : Scaffold(
-        appBar: AppBar(
-          title: Text('Giỏ hàng - ${widget.table.tableName}'),
-          automaticallyImplyLeading: false,
-          actions: [
-            IconButton(
-              icon: const Icon(
-                Icons.add_shopping_cart,
-                color: AppTheme.primaryColor,
-                size: 30,
+              body: TabBarView(
+                children: groupNames.map((groupName) {
+                  final products = _menuProducts.where((p) {
+                    bool groupMatch;
+                    if (groupName == 'Tất cả') {
+                      groupMatch = true;
+                    } else if (groupName == 'Khác') {
+                      groupMatch =
+                          (p.productGroup == null || p.productGroup!.isEmpty);
+                    } else {
+                      groupMatch = (p.productGroup == groupName);
+                    }
+                    final searchMatch = _searchQuery.isEmpty ||
+                        p.productName.toLowerCase().contains(_searchQuery) ||
+                        (p.productCode?.toLowerCase().contains(_searchQuery) ??
+                            false);
+                    return groupMatch && searchMatch;
+                  }).toList();
+                  return GridView.builder(
+                    padding: EdgeInsets.fromLTRB(
+                        8.0, 8.0, 8.0, 80.0 + bottomPadding),
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 200,
+                      childAspectRatio: 0.85,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                    ),
+                    itemCount: products.length,
+                    itemBuilder: (context, index) =>
+                        _buildProductCard(products[index]),
+                  );
+                }).toList(),
               ),
-              tooltip: 'Thêm món',
-              onPressed: () => setState(() => _isMenuView = true),
             )
-          ],
-        ),
-        body: _buildCartView(),
-      ),
+          : Scaffold(
+              resizeToAvoidBottomInset: false,
+              appBar: AppBar(
+                title: Text('Giỏ hàng - ${widget.table.tableName}'),
+                automaticallyImplyLeading: false,
+                actions: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.add_shopping_cart,
+                      color: AppTheme.primaryColor,
+                      size: 30,
+                    ),
+                    tooltip: 'Thêm món',
+                    onPressed: () => setState(() => _isMenuView = true),
+                  )
+                ],
+              ),
+              body: _buildCartView(bottomPadding),
+            ),
     );
   }
 
@@ -706,7 +795,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           ),
           filled: true,
           fillColor: Colors.grey[200],
-          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
           isDense: true,
         ),
       ),
@@ -724,7 +814,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           onPressed: () {
             if (_displayCart.isEmpty) {
               setState(() => _isMenuView = true);
-              ToastService().show(message: "Giỏ hàng trống, vui lòng chọn sản phẩm.", type: ToastType.warning);
+              ToastService().show(
+                  message: "Giỏ hàng trống, vui lòng chọn sản phẩm.",
+                  type: ToastType.warning);
             } else {
               setState(() => _isMenuView = false);
             }
@@ -755,7 +847,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     );
   }
 
-  Widget _buildCartView() {
+  Widget _buildCartView(double bottomInset) {
     final textTheme = Theme.of(context).textTheme;
     final cartEntries = _displayCart.entries.toList().reversed.toList();
     final currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
@@ -766,37 +858,39 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         Expanded(
           child: _displayCart.isEmpty
               ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('Giỏ hàng của bạn đang trống.', style: textTheme.bodyMedium),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.add_shopping_cart),
-                    label: const Text('Quay lại chọn món'),
-                    onPressed: () => setState(() => _isMenuView = true),
-                  )
-                ],
-              ))
+                  child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('Giỏ hàng của bạn đang trống.',
+                        style: textTheme.bodyMedium),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.add_shopping_cart),
+                      label: const Text('Quay lại chọn món'),
+                      onPressed: () => setState(() => _isMenuView = true),
+                    )
+                  ],
+                ))
               : ListView.builder(
-            padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 8.0),
-            itemCount: cartEntries.length,
-            itemBuilder: (context, index) {
-              final entry = cartEntries[index];
-              return _buildCartItemCard(entry.key, entry.value, currencyFormat);
-            },
-          ),
+                  padding:
+                      EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 8.0 + bottomInset),
+                  itemCount: cartEntries.length,
+                  itemBuilder: (context, index) {
+                    final entry = cartEntries[index];
+                    return _buildCartItemCard(
+                        entry.key, entry.value, currencyFormat);
+                  },
+                ),
         ),
         Container(
           padding: const EdgeInsets.all(16.0),
-          decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withAlpha(12),
-                    blurRadius: 10,
-                    offset: const Offset(0, -5))
-              ]),
+          decoration:
+              BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
+            BoxShadow(
+                color: Colors.black.withAlpha(12),
+                blurRadius: 10,
+                offset: const Offset(0, -5))
+          ]),
           child: Column(
             children: [
               Row(
@@ -825,7 +919,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         backgroundColor: AppTheme.primaryColor,
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: _displayCart.isNotEmpty ? _handleCheckout : null,
+                      onPressed:
+                          _displayCart.isNotEmpty ? _handleCheckout : null,
                     ),
                   ),
                 ],
@@ -839,36 +934,48 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   Future<void> _addItemToCart(ProductModel product) async {
     // ... (Hàm này giữ nguyên) ...
-    final bool needsOptionDialog = product.additionalUnits.isNotEmpty || product.accompanyingItems.isNotEmpty;
+    final bool needsOptionDialog = product.additionalUnits.isNotEmpty ||
+        product.accompanyingItems.isNotEmpty;
     OrderItem newItem;
 
     if (needsOptionDialog) {
       final result = await showDialog<Map<String, dynamic>>(
         context: context,
-        builder: (context) => _ProductOptionsDialog(product: product, allProducts: _menuProducts),
+        builder: (context) =>
+            _ProductOptionsDialog(product: product, allProducts: _menuProducts),
       );
       if (result == null) return;
       final selectedUnit = result['selectedUnit'] as String;
       final priceForUnit = result['price'] as double;
-      final selectedToppings = result['selectedToppings'] as Map<ProductModel, double>;
+      final selectedToppings =
+          result['selectedToppings'] as Map<ProductModel, double>;
       newItem = OrderItem(
-        product: product, selectedUnit: selectedUnit, price: priceForUnit,
-        toppings: selectedToppings, addedBy: widget.currentUser.name ?? 'Guest', addedAt: Timestamp.now(),
+        product: product,
+        selectedUnit: selectedUnit,
+        price: priceForUnit,
+        toppings: selectedToppings,
+        addedBy: widget.currentUser.name ?? 'Guest',
+        addedAt: Timestamp.now(),
       );
     } else {
       newItem = OrderItem(
-        product: product, price: product.sellPrice, selectedUnit: product.unit ?? '',
-        addedBy: widget.currentUser.name ?? 'Guest', addedAt: Timestamp.now(),
+        product: product,
+        price: product.sellPrice,
+        selectedUnit: product.unit ?? '',
+        addedBy: widget.currentUser.name ?? 'Guest',
+        addedAt: Timestamp.now(),
       );
     }
 
     final gk = newItem.groupKey;
     setState(() {
-      final existingEntry = _displayCart.entries.firstWhereOrNull((entry) => entry.value.groupKey == gk);
+      final existingEntry = _displayCart.entries
+          .firstWhereOrNull((entry) => entry.value.groupKey == gk);
       if (existingEntry != null) {
         final existingItem = existingEntry.value;
         final existingKey = existingEntry.key;
-        _localChanges[existingKey] = existingItem.copyWith(quantity: existingItem.quantity + 1);
+        _localChanges[existingKey] =
+            existingItem.copyWith(quantity: existingItem.quantity + 1);
       } else {
         _localChanges[newItem.lineId] = newItem;
       }
@@ -877,12 +984,16 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   void _handleCheckout() {
     if (_displayCart.isEmpty) {
-      ToastService().show(message: "Giỏ hàng của bạn đang trống.", type: ToastType.warning);
+      ToastService().show(
+          message: "Giỏ hàng của bạn đang trống.", type: ToastType.warning);
       return;
     }
     // Check _localChanges (chỉ những thay đổi MỚI)
-    if (_localChanges.isEmpty && widget.table.id != 'web_ship_order' && widget.table.id != 'web_schedule_order') {
-      ToastService().show(message: "Bạn chưa thay đổi món nào.", type: ToastType.warning);
+    if (_localChanges.isEmpty &&
+        widget.table.id != 'web_ship_order' &&
+        widget.table.id != 'web_schedule_order') {
+      ToastService()
+          .show(message: "Bạn chưa thay đổi món nào.", type: ToastType.warning);
       return;
     }
     if (_isSavingOrder) return;
@@ -901,7 +1012,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   Future<void> _handleShippingOrder(String type) async {
     if (!_formKey.currentState!.validate()) return;
 
-    final int numberOfCustomers = int.tryParse(_numberOfCustomersController.text) ?? 1;
+    final int numberOfCustomers =
+        int.tryParse(_numberOfCustomersController.text) ?? 1;
 
     final customerInfo = {
       'name': (type == 'ship') ? '' : _nameController.text.trim(),
@@ -910,7 +1022,10 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           ? _addressController.text.trim()
           : _scheduleTimeController.text.trim(),
       'note': _noteController.text.trim(),
-      'numberOfCustomers': (type == 'schedule' && widget.currentUser.businessType == "fnb") ? numberOfCustomers : 1,
+      'numberOfCustomers':
+          (type == 'schedule' && widget.currentUser.businessType == "fnb")
+              ? numberOfCustomers
+              : 1,
     };
 
     final itemsToSend = _displayCart.values.toList();
@@ -920,8 +1035,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         type: type,
         customerInfo: customerInfo,
         items: itemsToSend,
-        totalAmount: totalAmount
-    );
+        totalAmount: totalAmount);
   }
 
   Future<void> _handleAtTableOrder() async {
@@ -937,7 +1051,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
       for (final changedItem in _localChanges.values) {
         // Tìm trạng thái gốc (trong _cart + _pending)
-        final originalItem = _pendingChanges[changedItem.lineId] ?? _cart[changedItem.lineId];
+        final originalItem =
+            _pendingChanges[changedItem.lineId] ?? _cart[changedItem.lineId];
         final double originalQty = originalItem?.quantity ?? 0;
         final double newQty = changedItem.quantity;
 
@@ -951,7 +1066,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       }
 
       if (itemsDelta.isEmpty) {
-        ToastService().show(message: "Không có thay đổi nào để gửi.", type: ToastType.warning);
+        ToastService().show(
+            message: "Không có thay đổi nào để gửi.", type: ToastType.warning);
         if (mounted) setState(() => _isSavingOrder = false);
         return;
       }
@@ -960,9 +1076,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           type: 'at_table',
           customerInfo: null,
           items: itemsDelta,
-          totalAmount: totalDelta
-      );
-
+          totalAmount: totalDelta);
     } else {
       // 2. KHÔNG CẦN XÁC NHẬN -> Gửi thẳng vào 'orders' và báo bếp
       await _saveOrderToTableAndPrint();
@@ -984,13 +1098,15 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         'storeId': widget.currentUser.storeId,
         'status': 'pending',
         'type': type,
-        'customerInfo': customerInfo ?? { 'name': 'Khách tại bàn' },
+        'customerInfo': customerInfo ?? {'name': 'Khách tại bàn'},
         'items': items.map((e) => e.toMap()).toList(),
         'totalAmount': totalAmount,
         'createdAt': FieldValue.serverTimestamp(),
         'tableName': widget.table.tableName,
         'tableId': widget.table.id,
-        'note': (type != 'at_table' && customerInfo != null) ? customerInfo['note'] : null,
+        'note': (type != 'at_table' && customerInfo != null)
+            ? customerInfo['note']
+            : null,
       };
 
       await _firestoreService.addWebOrder(webOrderData);
@@ -1005,17 +1121,16 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           type == 'at_table' ? "Đã gửi yêu cầu" : "Đặt hàng thành công!",
           type == 'at_table'
               ? "Yêu cầu của bạn đã được gửi, vui lòng chờ thu ngân xác nhận."
-              : "Cửa hàng sẽ liên hệ với bạn để xác nhận đơn hàng."
-      );
+              : "Cửa hàng sẽ liên hệ với bạn để xác nhận đơn hàng.");
 
       if (type == 'at_table') {
         _moveLocalToPending();
       } else {
         _clearCartCompletelyAndReset();
       }
-
     } catch (e) {
-      ToastService().show(message: "Lỗi gửi yêu cầu: $e", type: ToastType.error);
+      ToastService()
+          .show(message: "Lỗi gửi yêu cầu: $e", type: ToastType.error);
       if (mounted) setState(() => _isSavingOrder = false);
     }
   }
@@ -1023,12 +1138,14 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   Future<void> _saveOrderToTableAndPrint() async {
     final success = await _saveOrderAtTable();
     if (!success) {
-      ToastService().show(message: "Gửi yêu cầu thất bại", type: ToastType.error);
+      ToastService()
+          .show(message: "Gửi yêu cầu thất bại", type: ToastType.error);
       if (mounted) setState(() => _isSavingOrder = false);
       return;
     }
 
-    _showOrderSuccessDialog("Gửi yêu cầu thành công!", "Yêu cầu của bạn đã được gửi thẳng đến bếp.");
+    _showOrderSuccessDialog("Gửi yêu cầu thành công!",
+        "Yêu cầu của bạn đã được gửi thẳng đến bếp.");
     _resetUiFlagsAfterSave();
   }
 
@@ -1046,157 +1163,196 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     _isSavingOrder = false;
 
     final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600; // Ngưỡng cho mobile
+    final isMobile = screenWidth < 600;
     final dialogWidth = isMobile ? screenWidth * 0.9 : 500.0;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            Future<void> pickScheduleTime() async {
-              DateTime? pickedDate = await showOmniDateTimePicker(
-                context: context,
-                initialDate: DateTime.now(),
-                firstDate: DateTime.now().subtract(const Duration(minutes: 10)),
-                lastDate: DateTime.now().add(const Duration(days: 30)),
-                is24HourMode: true,
-                isShowSeconds: false,
-                minutesInterval: 15,
-              );
+        return PopScope(
+          canPop: false, // Chặn hành động thoát mặc định
+          onPopInvokedWithResult: (bool didPop, dynamic result) {
+            if (didPop) return;
 
-              if (pickedDate != null) {
-                final formattedTime = DateFormat('HH:mm - dd/MM/yyyy').format(pickedDate);
-                setStateDialog(() {
-                  _scheduleTimeController.text = formattedTime;
-                });
-              }
+            // Logic xử lý nút Back:
+            // 1. Nếu bàn phím đang mở -> Tắt bàn phím (unfocus)
+            if (MediaQuery.of(context).viewInsets.bottom > 0) {
+              FocusScope.of(context).unfocus();
             }
+            // 2. Nếu bàn phím đã tắt -> Đóng Dialog (Giống nút Hủy)
+            else {
+              Navigator.of(context).pop();
+            }
+          },
+          child: Center(
+            child: StatefulBuilder(
+              builder: (context, setStateDialog) {
+                Future<void> pickScheduleTime() async {
+                  DateTime? pickedDate = await showOmniDateTimePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate:
+                        DateTime.now().subtract(const Duration(minutes: 10)),
+                    lastDate: DateTime.now().add(const Duration(days: 30)),
+                    is24HourMode: true,
+                    isShowSeconds: false,
+                    minutesInterval: 15,
+                  );
 
-            return AlertDialog(
-              title: Text(title),
-              content: SizedBox(
-                width: dialogWidth,
-                child: Form(
-                  key: _formKey,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (!isShipping) ...[
-                          CustomTextFormField(
-                            controller: _nameController,
-                            decoration: const InputDecoration(
-                              labelText: 'Tên của bạn (*)',
-                              prefixIcon: Icon(Icons.person_outline),
-                            ),
-                            validator: (value) => (value == null || value.isEmpty) ? 'Vui lòng nhập tên' : null,
-                          ),
-                          const SizedBox(height: 16),
-                        ],
+                  if (pickedDate != null) {
+                    final formattedTime =
+                        DateFormat('HH:mm - dd/MM/yyyy').format(pickedDate);
+                    setStateDialog(() {
+                      _scheduleTimeController.text = formattedTime;
+                    });
+                  }
+                }
 
-                        CustomTextFormField(
-                          controller: _phoneController,
-                          decoration: const InputDecoration(
-                            labelText: 'Số điện thoại (*)',
-                            prefixIcon: Icon(Icons.phone_outlined),
-                          ),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(10),
-                          ],
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Vui lòng nhập SĐT';
-                            }
-                            if (value.length != 10) {
-                              return 'SĐT phải đủ 10 số';
-                            }
-                            if (!value.startsWith('0')) {
-                              return 'SĐT phải bắt đầu bằng số 0';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-
-                        if (isShipping) ...[
-                          CustomTextFormField(
-                            controller: _addressController,
-                            decoration: const InputDecoration(
-                              labelText: 'Địa chỉ giao hàng (*)',
-                              prefixIcon: Icon(Icons.location_on_outlined),
-                            ),
-                            validator: (value) => (value == null || value.isEmpty) ? 'Vui lòng nhập địa chỉ' : null,
-                          ),
-                        ],
-
-                        if (!isShipping) ...[
-                          CustomTextFormField(
-                            controller: _scheduleTimeController,
-                            readOnly: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Thời gian đặt lịch (*)',
-                              prefixIcon: Icon(Icons.calendar_month_outlined),
-                            ),
-                            onTap: pickScheduleTime,
-                            validator: (value) => (value == null || value.isEmpty) ? 'Vui lòng chọn thời gian' : null,
-                          ),
-                          if (widget.currentUser.businessType == "fnb") ...[
-                            const SizedBox(height: 16),
+                return AlertDialog(
+                  title: Text(title),
+                  contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  buttonPadding: EdgeInsets.zero,
+                  actionsPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  content: SizedBox(
+                    width: dialogWidth,
+                    child: Form(
+                      key: _formKey,
+                      // SingleChildScrollView sẽ giúp cuộn nội dung khi bàn phím hiện lên
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!isShipping) ...[
+                              CustomTextFormField(
+                                controller: _nameController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Tên của bạn (*)',
+                                  prefixIcon: Icon(Icons.person_outline),
+                                ),
+                                validator: (value) =>
+                                    (value == null || value.isEmpty)
+                                        ? 'Vui lòng nhập tên'
+                                        : null,
+                              ),
+                              const SizedBox(height: 16),
+                            ],
                             CustomTextFormField(
-                              controller: _numberOfCustomersController,
+                              controller: _phoneController,
                               decoration: const InputDecoration(
-                                labelText: 'Số lượng khách',
-                                prefixIcon: Icon(Icons.people_alt_outlined),
+                                labelText: 'Số điện thoại (*)',
+                                prefixIcon: Icon(Icons.phone_outlined),
                               ),
                               keyboardType: TextInputType.number,
                               inputFormatters: [
                                 FilteringTextInputFormatter.digitsOnly,
-                                LengthLimitingTextInputFormatter(3),
+                                LengthLimitingTextInputFormatter(10),
                               ],
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Vui lòng nhập SĐT';
+                                }
+                                if (value.length != 10) {
+                                  return 'SĐT phải đủ 10 số';
+                                }
+                                if (!value.startsWith('0')) {
+                                  return 'SĐT phải bắt đầu bằng số 0';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            if (isShipping) ...[
+                              CustomTextFormField(
+                                controller: _addressController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Địa chỉ giao hàng (*)',
+                                  prefixIcon: Icon(Icons.location_on_outlined),
+                                ),
+                                validator: (value) =>
+                                    (value == null || value.isEmpty)
+                                        ? 'Vui lòng nhập địa chỉ'
+                                        : null,
+                              ),
+                            ],
+                            if (!isShipping) ...[
+                              CustomTextFormField(
+                                controller: _scheduleTimeController,
+                                readOnly: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Thời gian đặt lịch (*)',
+                                  prefixIcon:
+                                      Icon(Icons.calendar_month_outlined),
+                                ),
+                                onTap: pickScheduleTime,
+                                validator: (value) =>
+                                    (value == null || value.isEmpty)
+                                        ? 'Vui lòng chọn thời gian'
+                                        : null,
+                              ),
+                              if (widget.currentUser.businessType == "fnb") ...[
+                                const SizedBox(height: 16),
+                                CustomTextFormField(
+                                  controller: _numberOfCustomersController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Số lượng khách',
+                                    prefixIcon: Icon(Icons.people_alt_outlined),
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                    LengthLimitingTextInputFormatter(3),
+                                  ],
+                                ),
+                              ],
+                            ],
+                            const SizedBox(height: 16),
+                            CustomTextFormField(
+                              controller: _noteController,
+                              decoration: const InputDecoration(
+                                labelText: 'Ghi chú',
+                                prefixIcon: Icon(Icons.note_alt_outlined),
+                              ),
+                              maxLines: 1,
                             ),
                           ],
-                        ],
-
-                        const SizedBox(height: 16),
-                        CustomTextFormField(
-                          controller: _noteController,
-                          decoration: const InputDecoration(
-                            labelText: 'Ghi chú',
-                            prefixIcon: Icon(Icons.note_alt_outlined),
-                          ),
-                          maxLines: 1,
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: _isSavingOrder ? null : () => Navigator.of(context).pop(),
-                  child: const Text('Hủy'),
-                ),
-                ElevatedButton(
-                  onPressed: _isSavingOrder ? null : () async {
-                    if (_formKey.currentState!.validate()) {
-                      setStateDialog(() => _isSavingOrder = true);
-                      await _handleShippingOrder(type);
-                      if (mounted) {
-                        setStateDialog(() => _isSavingOrder = false);
-                      }
-                    }
-                  },
-                  child: _isSavingOrder
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Xác nhận'),
-                ),
-              ],
-            );
-          },
+                  actions: [
+                    TextButton(
+                      onPressed: _isSavingOrder
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: const Text('Hủy'),
+                    ),
+                    ElevatedButton(
+                      onPressed: _isSavingOrder
+                          ? null
+                          : () async {
+                              if (_formKey.currentState!.validate()) {
+                                setStateDialog(() => _isSavingOrder = true);
+                                await _handleShippingOrder(type);
+                                if (mounted) {
+                                  setStateDialog(() => _isSavingOrder = false);
+                                }
+                              }
+                            },
+                      child: _isSavingOrder
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Text('Xác nhận'),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
         );
       },
     );
@@ -1251,7 +1407,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         .where((item) => item.product.id == product.id)
         .fold<double>(0.0, (total, item) => total + item.quantity);
 
-    final bool hasLocalChanges = _localChanges.values.any((item) => item.product.id == product.id);
+    final bool hasLocalChanges =
+        _localChanges.values.any((item) => item.product.id == product.id);
 
     return GestureDetector(
       onTap: () => _addItemToCart(product),
@@ -1260,7 +1417,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         children: [
           Card(
             clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1271,23 +1429,28 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
                 Expanded(
-                  child: (product.imageUrl != null && product.imageUrl!.isNotEmpty)
+                  child: (product.imageUrl != null &&
+                          product.imageUrl!.isNotEmpty)
                       ? Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                    child: CachedNetworkImage(
-                      imageUrl: product.imageUrl!,
-                      fit: BoxFit.contain,
-                      placeholder: (context, url) => const Center(
-                          child: CircularProgressIndicator(strokeWidth: 2.0)),
-                      errorWidget: (context, url, error) =>
-                      const Icon(Icons.image_not_supported, color: Colors.grey),
-                    ),
-                  )
-                      : const Icon(Icons.fastfood, size: 50, color: Colors.grey),
+                          padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                          child: CachedNetworkImage(
+                            imageUrl: product.imageUrl!,
+                            fit: BoxFit.contain,
+                            placeholder: (context, url) => const Center(
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.0)),
+                            errorWidget: (context, url, error) => const Icon(
+                                Icons.image_not_supported,
+                                color: Colors.grey),
+                          ),
+                        )
+                      : const Icon(Icons.fastfood,
+                          size: 50, color: Colors.grey),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
@@ -1320,7 +1483,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                 child: Text(
                   formatNumber(quantityInCart),
                   style: const TextStyle(
-                      color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -1365,13 +1530,13 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   Widget _buildCartItemCard(
       String cartId, OrderItem item, NumberFormat currencyFormat) {
-
     final textTheme = Theme.of(context).textTheme;
     final originalItem = _cart[cartId];
     final sentQuantity = originalItem?.sentQuantity ?? 0;
     final bool isPending = _pendingChanges.containsKey(cartId);
     final bool isLocal = _localChanges.containsKey(cartId);
-    final double baseQuantity = _pendingChanges[cartId]?.quantity ?? sentQuantity;
+    final double baseQuantity =
+        _pendingChanges[cartId]?.quantity ?? sentQuantity;
     final change = item.quantity - baseQuantity;
     final bool isCancelled = item.quantity == 0;
 
@@ -1415,8 +1580,11 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   if (isLocal && change != 0 && !isCancelled) ...[
                     const SizedBox(width: 4),
                     Text(
-                      change > 0 ? "+${formatNumber(change)}" : formatNumber(change),
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                      change > 0
+                          ? "+${formatNumber(change)}"
+                          : formatNumber(change),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.red),
                     ),
                   ],
                   const SizedBox(width: 8),
@@ -1427,16 +1595,22 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                           text: '${item.product.productName} ',
                           style: textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: isCancelled ? Colors.grey : AppTheme.textColor,
-                            decoration: isCancelled ? TextDecoration.lineThrough : null,
+                            color:
+                                isCancelled ? Colors.grey : AppTheme.textColor,
+                            decoration:
+                                isCancelled ? TextDecoration.lineThrough : null,
                           ),
                         ),
                         if (item.selectedUnit.isNotEmpty)
                           TextSpan(
                             text: '(${item.selectedUnit})',
                             style: textTheme.bodyMedium?.copyWith(
-                              color: isCancelled ? Colors.grey : Colors.grey.shade700,
-                              decoration: isCancelled ? TextDecoration.lineThrough : null,
+                              color: isCancelled
+                                  ? Colors.grey
+                                  : Colors.grey.shade700,
+                              decoration: isCancelled
+                                  ? TextDecoration.lineThrough
+                                  : null,
                             ),
                           ),
                       ]),
@@ -1446,7 +1620,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   ),
                 ],
               ),
-              if (item.toppings.isNotEmpty || (item.note != null && item.note!.isNotEmpty))
+              if (item.toppings.isNotEmpty ||
+                  (item.note != null && item.note!.isNotEmpty))
                 Padding(
                   padding: const EdgeInsets.only(left: 32, bottom: 4),
                   child: Column(
@@ -1456,7 +1631,9 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         _buildToppingsList(item.toppings, currencyFormat),
                       if (item.note != null && item.note!.isNotEmpty)
                         Text('Ghi chú: ${item.note}',
-                            style: const TextStyle(color: Colors.red, fontStyle: FontStyle.italic)),
+                            style: const TextStyle(
+                                color: Colors.red,
+                                fontStyle: FontStyle.italic)),
                     ],
                   ),
                 ),
@@ -1468,13 +1645,14 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                     width: 100,
                     child: Text(
                       currencyFormat.format(item.price),
-                      style: textTheme.bodyMedium?.copyWith(
-                          color: isCancelled ? Colors.grey : null),
+                      style: textTheme.bodyMedium
+                          ?.copyWith(color: isCancelled ? Colors.grey : null),
                     ),
                   ),
                   Container(
                     decoration: BoxDecoration(
-                      color: isCancelled ? Colors.transparent : Colors.grey[100],
+                      color:
+                          isCancelled ? Colors.transparent : Colors.grey[100],
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -1482,7 +1660,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           splashRadius: 18,
-                          icon: Icon(Icons.remove, size: 18, color: Colors.red.shade400),
+                          icon: Icon(Icons.remove,
+                              size: 18, color: Colors.red.shade400),
                           onPressed: () => _updateQuantity(cartId, -1),
                         ),
                         InkWell(
@@ -1491,20 +1670,23 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                             decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(12.0),
-                                border: Border.all(color: Colors.grey.shade300, width: 0.5)
-                            ),
+                                border: Border.all(
+                                    color: Colors.grey.shade300, width: 0.5)),
                             alignment: Alignment.center,
                             constraints: const BoxConstraints(
                               minWidth: 40,
                               maxWidth: 65,
                             ),
-                            padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4.0, vertical: 1.0),
                             child: Text(
                               formatNumber(item.quantity),
                               style: textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: isCancelled ? Colors.grey : null,
-                                decoration: isCancelled ? TextDecoration.lineThrough : null,
+                                decoration: isCancelled
+                                    ? TextDecoration.lineThrough
+                                    : null,
                               ),
                             ),
                           ),
@@ -1512,7 +1694,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           splashRadius: 18,
-                          icon: const Icon(Icons.add, size: 18, color: AppTheme.primaryColor),
+                          icon: const Icon(Icons.add,
+                              size: 18, color: AppTheme.primaryColor),
                           onPressed: () => _updateQuantity(cartId, 1),
                         ),
                       ],
@@ -1526,7 +1709,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                       style: textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: isCancelled ? Colors.grey : null,
-                        decoration: isCancelled ? TextDecoration.lineThrough : null,
+                        decoration:
+                            isCancelled ? TextDecoration.lineThrough : null,
                       ),
                     ),
                   ),
@@ -1543,7 +1727,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     if (item.quantity <= 0) return;
 
     final relevantNotes = _quickNotes.where((note) {
-      return note.productIds.isEmpty || note.productIds.contains(item.product.id);
+      return note.productIds.isEmpty ||
+          note.productIds.contains(item.product.id);
     }).toList();
 
     final result = await showDialog<Map<String, dynamic>>(
@@ -1572,7 +1757,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     });
   }
 
-  Widget _buildToppingsList(Map<ProductModel, double> toppings, NumberFormat currencyFormat) {
+  Widget _buildToppingsList(
+      Map<ProductModel, double> toppings, NumberFormat currencyFormat) {
     return Padding(
       padding: const EdgeInsets.only(top: 2.0),
       child: Wrap(
@@ -1594,7 +1780,10 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 class _ProductOptionsDialog extends StatefulWidget {
   final ProductModel product;
   final List<ProductModel> allProducts;
-  const _ProductOptionsDialog({required this.product, required this.allProducts});
+
+  const _ProductOptionsDialog(
+      {required this.product, required this.allProducts});
+
   @override
   State<_ProductOptionsDialog> createState() => _ProductOptionsDialogState();
 }
@@ -1609,7 +1798,10 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
   @override
   void initState() {
     super.initState();
-    _baseUnitData = {'unitName': widget.product.unit ?? '', 'sellPrice': widget.product.sellPrice};
+    _baseUnitData = {
+      'unitName': widget.product.unit ?? '',
+      'sellPrice': widget.product.sellPrice
+    };
     _allUnitOptions = [_baseUnitData, ...widget.product.additionalUnits];
     _selectedUnit = _baseUnitData['unitName'] as String;
 
@@ -1622,12 +1814,15 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
   }
 
   void _onConfirm() {
-    final selectedUnitData = _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
-    final priceForSelectedUnit = (selectedUnitData['sellPrice'] as num).toDouble();
+    final selectedUnitData =
+        _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
+    final priceForSelectedUnit =
+        (selectedUnitData['sellPrice'] as num).toDouble();
     final Map<ProductModel, double> toppingsMap = {};
     _selectedToppings.forEach((productId, quantity) {
       if (quantity > 0) {
-        final product = _accompanyingProducts.firstWhere((p) => p.id == productId);
+        final product =
+            _accompanyingProducts.firstWhere((p) => p.id == productId);
         toppingsMap[product] = quantity;
       }
     });
@@ -1649,75 +1844,95 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.product.productName, textAlign: TextAlign.center),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 500),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (widget.product.additionalUnits.isNotEmpty) ...[
-                const Text('Chọn đơn vị tính:', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                SegmentedButton<String>(
-                  segments: _allUnitOptions.map((unitData) {
-                    return ButtonSegment<String>(
-                      value: unitData['unitName'] as String,
-                      label: Text(unitData['unitName'] as String),
-                    );
-                  }).toList(),
-                  selected: {_selectedUnit},
-                  onSelectionChanged: (newSelection) {
-                    setState(() => _selectedUnit = newSelection.first);
-                  },
-                ),
-                const Divider(height: 24),
-              ],
-              if (_accompanyingProducts.isNotEmpty) ...[
-                const Text('Chọn Topping/Bán kèm:', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                ..._accompanyingProducts.map((topping) {
-                  final quantity = _selectedToppings[topping.id] ?? 0;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                              '${topping.productName} (+${formatNumber(topping.sellPrice)}đ)'),
-                        ),
-                        Container(
-                          decoration: BoxDecoration(
-                              color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.remove, size: 18),
-                                onPressed: () => _updateToppingQuantity(topping.id, -1),
-                              ),
-                              Text(formatNumber(quantity)),
-                              IconButton(
-                                icon: const Icon(Icons.add, size: 18),
-                                onPressed: () => _updateToppingQuantity(topping.id, 1),
-                              ),
-                            ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (didPop) return;
+        if (MediaQuery.of(context).viewInsets.bottom > 0) {
+          FocusScope.of(context).unfocus();
+        } else {
+          Navigator.of(context).pop();
+        }
+      },
+      child: AlertDialog(
+        title: Text(widget.product.productName, textAlign: TextAlign.center),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 500),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (widget.product.additionalUnits.isNotEmpty) ...[
+                  const Text('Chọn đơn vị tính:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  SegmentedButton<String>(
+                    segments: _allUnitOptions.map((unitData) {
+                      return ButtonSegment<String>(
+                        value: unitData['unitName'] as String,
+                        label: Text(unitData['unitName'] as String),
+                      );
+                    }).toList(),
+                    selected: {_selectedUnit},
+                    onSelectionChanged: (newSelection) {
+                      setState(() => _selectedUnit = newSelection.first);
+                    },
+                  ),
+                  const Divider(height: 24),
+                ],
+                if (_accompanyingProducts.isNotEmpty) ...[
+                  const Text('Chọn Topping/Bán kèm:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  ..._accompanyingProducts.map((topping) {
+                    final quantity = _selectedToppings[topping.id] ?? 0;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                                '${topping.productName} (+${formatNumber(topping.sellPrice)}đ)'),
                           ),
-                        )
-                      ],
-                    ),
-                  );
-                }),
+                          Container(
+                            decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(8)),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.remove,
+                                      size: 18, color: Colors.red),
+                                  onPressed: () =>
+                                      _updateToppingQuantity(topping.id, -1),
+                                ),
+                                Text(formatNumber(quantity)),
+                                IconButton(
+                                  icon: const Icon(Icons.add,
+                                      size: 18, color: AppTheme.primaryColor),
+                                  onPressed: () =>
+                                      _updateToppingQuantity(topping.id, 1),
+                                ),
+                              ],
+                            ),
+                          )
+                        ],
+                      ),
+                    );
+                  }),
+                ],
               ],
-            ],
+            ),
           ),
         ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Hủy')),
+          ElevatedButton(onPressed: _onConfirm, child: const Text('Xác nhận')),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Hủy')),
-        ElevatedButton(onPressed: _onConfirm, child: const Text('Xác nhận')),
-      ],
     );
   }
 }
@@ -1742,8 +1957,10 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
   @override
   void initState() {
     super.initState();
-    _quantityController = TextEditingController(text: formatNumber(widget.initialItem.quantity));
-    _noteController = TextEditingController(text: widget.initialItem.note ?? '');
+    _quantityController =
+        TextEditingController(text: formatNumber(widget.initialItem.quantity));
+    _noteController =
+        TextEditingController(text: widget.initialItem.note ?? '');
   }
 
   @override
@@ -1755,8 +1972,10 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
 
   void _onConfirm() {
     final double quantity = parseVN(_quantityController.text);
-    if (quantity < 0) { // Cho phép bằng 0 (để hủy)
-      ToastService().show(message: "Số lượng không hợp lệ", type: ToastType.warning);
+    if (quantity < 0) {
+      // Cho phép bằng 0 (để hủy)
+      ToastService()
+          .show(message: "Số lượng không hợp lệ", type: ToastType.warning);
       return;
     }
 
@@ -1777,72 +1996,86 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.initialItem.product.productName, textAlign: TextAlign.center),
-      content: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.9,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CustomTextFormField(
-                controller: _quantityController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Số lượng',
-                  prefixIcon: Icon(Icons.calculate_outlined),
-                ),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [ThousandDecimalInputFormatter()],
-                validator: (value) {
-                  if (value == null || value.isEmpty) return 'Không được trống';
-                  final val = parseVN(value);
-                  if (val < 0) return 'Số lượng không hợp lệ';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        if (didPop) return;
 
-              CustomTextFormField(
-                controller: _noteController,
-                decoration: const InputDecoration(
-                  labelText: 'Ghi chú',
-                  prefixIcon: Icon(Icons.note_alt_outlined),
+        if (MediaQuery.of(context).viewInsets.bottom > 0) {
+          FocusScope.of(context).unfocus();
+        } else {
+          Navigator.of(context).pop();
+        }
+      },
+      child: AlertDialog(
+        title: Text(widget.initialItem.product.productName,
+            textAlign: TextAlign.center),
+        content: SizedBox(
+          width: MediaQuery.of(context).size.width * 0.9,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CustomTextFormField(
+                  controller: _quantityController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Số lượng',
+                    prefixIcon: Icon(Icons.calculate_outlined),
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [ThousandDecimalInputFormatter()],
+                  validator: (value) {
+                    if (value == null || value.isEmpty){
+                      return 'Không được trống';}
+                    final val = parseVN(value);
+                    if (val < 0) return 'Số lượng không hợp lệ';
+                    return null;
+                  },
                 ),
-                maxLines: 1,
-              ),
-              const SizedBox(height: 16),
-
-              if (widget.relevantQuickNotes.isNotEmpty) ...[
-                Text('Ghi chú nhanh:', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8.0,
-                  runSpacing: 4.0,
-                  children: widget.relevantQuickNotes.map((note) {
-                    return ActionChip(
-                      label: Text(note.noteText),
-                      onPressed: () => _addQuickNote(note.noteText),
-                      visualDensity: VisualDensity.compact,
-                    );
-                  }).toList(),
+                const SizedBox(height: 16),
+                CustomTextFormField(
+                  controller: _noteController,
+                  decoration: const InputDecoration(
+                    labelText: 'Ghi chú',
+                    prefixIcon: Icon(Icons.note_alt_outlined),
+                  ),
+                  maxLines: 1,
                 ),
+                const SizedBox(height: 16),
+                if (widget.relevantQuickNotes.isNotEmpty) ...[
+                  Text('Ghi chú nhanh:',
+                      style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8.0,
+                    runSpacing: 4.0,
+                    children: widget.relevantQuickNotes.map((note) {
+                      return ActionChip(
+                        label: Text(note.noteText),
+                        onPressed: () => _addQuickNote(note.noteText),
+                        visualDensity: VisualDensity.compact,
+                      );
+                    }).toList(),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Hủy'),
+          ),
+          ElevatedButton(
+            onPressed: _onConfirm,
+            child: const Text('Xác nhận'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Hủy'),
-        ),
-        ElevatedButton(
-          onPressed: _onConfirm,
-          child: const Text('Xác nhận'),
-        ),
-      ],
     );
   }
 }

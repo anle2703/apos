@@ -38,7 +38,8 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
   bool _isLoadingSettings = true;
   bool _isGeneratingAll = false;
   bool _isQrOrderRequiresConfirmation = true;
-
+  bool _enableShip = true;
+  bool _enableBooking = true;
   final String _qrOrderBaseUrl = "https://cash-bae5d.web.app/order";
 
   @override
@@ -67,16 +68,43 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     _settingsSub =
         _settingsService.watchStoreSettings(settingsId).listen((settings) {
-          if (mounted) {
-            setState(() {
-              _isQrOrderRequiresConfirmation = settings.qrOrderRequiresConfirmation ?? false;
-              _isLoadingSettings = false;
-            });
-          }
-        }, onError: (e) {
-          debugPrint("Lỗi tải cài đặt: $e");
-          if (mounted) setState(() => _isLoadingSettings = false);
+      if (mounted) {
+        setState(() {
+          _isQrOrderRequiresConfirmation =
+              settings.qrOrderRequiresConfirmation ?? false;
+          _enableShip = settings.enableShip ?? true;
+          _enableBooking = settings.enableBooking ?? true;
+          _isLoadingSettings = false;
         });
+      }
+    }, onError: (e) {
+      debugPrint("Lỗi tải cài đặt: $e");
+      if (mounted) setState(() => _isLoadingSettings = false);
+    });
+  }
+
+  Future<void> _updateShipSetting(bool val) async {
+    setState(() => _enableShip = val);
+    try {
+      final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      await _settingsService
+          .updateStoreSettings(settingsId, {'enableShip': val});
+    } catch (e) {
+      ToastService().show(message: "Lỗi cập nhật: $e", type: ToastType.error);
+      setState(() => _enableShip = !val);
+    }
+  }
+
+  Future<void> _updateBookingSetting(bool val) async {
+    setState(() => _enableBooking = val);
+    try {
+      final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      await _settingsService
+          .updateStoreSettings(settingsId, {'enableBooking': val});
+    } catch (e) {
+      ToastService().show(message: "Lỗi cập nhật: $e", type: ToastType.error);
+      setState(() => _enableBooking = !val);
+    }
   }
 
   Future<void> _updateQrConfirmationMode(bool newValue) async {
@@ -90,8 +118,7 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
           message: "Cập nhật chế độ xác nhận thành công.",
           type: ToastType.success);
     } catch (e) {
-      ToastService()
-          .show(message: "Lỗi cập nhật: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi cập nhật: $e", type: ToastType.error);
       setState(() => _isQrOrderRequiresConfirmation = !newValue);
     }
   }
@@ -124,7 +151,10 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
           .first;
 
       final tablesToUpdate = allTables
-          .where((t) => (t.qrToken == null || t.qrToken!.isEmpty) && t.id != 'web_ship_order' && t.id != 'web_schedule_order')
+          .where((t) =>
+              (t.qrToken == null || t.qrToken!.isEmpty) &&
+              t.id != 'web_ship_order' &&
+              t.id != 'web_schedule_order')
           .toList();
 
       if (tablesToUpdate.isEmpty) {
@@ -158,9 +188,12 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
 
     try {
       // 2. Chuyển widget (RepaintBoundary) thành ảnh
-      RenderRepaintBoundary boundary = qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 3.0); // Tăng chất lượng
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      RenderRepaintBoundary boundary =
+          qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image =
+          await boundary.toImage(pixelRatio: 3.0); // Tăng chất lượng
+      ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) throw Exception("Không thể tạo dữ liệu ảnh");
       Uint8List pngBytes = byteData.buffer.asUint8List();
 
@@ -176,11 +209,12 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
       );
 
       if (outputFile != null) {
-        ToastService().show(message: "Đã lưu mã QR thành công!", type: ToastType.success);
+        ToastService()
+            .show(message: "Đã lưu mã QR thành công!", type: ToastType.success);
       } else {
-        ToastService().show(message: "Đã hủy lưu file.", type: ToastType.warning);
+        ToastService()
+            .show(message: "Đã hủy lưu file.", type: ToastType.warning);
       }
-
     } catch (e) {
       ToastService().show(message: "Lỗi khi lưu: $e", type: ToastType.error);
     } finally {
@@ -241,7 +275,8 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
                   activeThumbColor: AppTheme.primaryColor,
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 8.0),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -286,34 +321,32 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
 
         List<TableModel> tables = tableSnapshot.data ?? [];
 
-        if (group == null) {
-          final onlineTables = [
-            TableModel(
-                id: 'web_ship_order',
-                storeId: widget.currentUser.storeId,
-                tableName: 'Đặt Hàng',
-                tableGroup: 'Online',
-                stt: -2,
-                serviceId: '',
-                qrToken: 'ship_token'
-            ),
-            TableModel(
-                id: 'web_schedule_order',
-                storeId: widget.currentUser.storeId,
-                tableName: 'Booking',
-                tableGroup: 'Online',
-                stt: -1,
-                serviceId: '',
-                qrToken: 'schedule_token'
-            ),
-          ];
-          tables.addAll(onlineTables);
-        }
-
+        // Lọc bỏ bàn ảo khỏi danh sách chính
         tables = tables
             .where((t) =>
-        !t.id.startsWith('ship') && !t.id.startsWith('schedule'))
+        !t.id.startsWith('ship_') && !t.id.startsWith('schedule_'))
             .toList();
+
+        // [SỬA TÊN VỀ NHƯ CŨ]
+        if (group == null) {
+          tables.add(TableModel(
+              id: 'web_ship_order',
+              storeId: widget.currentUser.storeId,
+              tableName: 'Đặt Hàng', // Tên gốc
+              tableGroup: 'Online',
+              stt: -2,
+              serviceId: '',
+              qrToken: 'ship_token'));
+
+          tables.add(TableModel(
+              id: 'web_schedule_order',
+              storeId: widget.currentUser.storeId,
+              tableName: 'Booking', // Tên gốc
+              tableGroup: 'Online',
+              stt: -1,
+              serviceId: '',
+              qrToken: 'schedule_token'));
+        }
 
         if (tables.isEmpty) {
           return const Center(
@@ -333,9 +366,54 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
           itemCount: tables.length,
           itemBuilder: (context, index) {
             final table = tables[index];
+
+            // 1. Xác định trạng thái ban đầu
+            bool isEnabled;
+            // 2. Callback trả về Token mới (nếu bật) hoặc null (nếu tắt)
+            Future<String?> Function(bool) onToggle;
+
+            if (table.id == 'web_ship_order') {
+              isEnabled = _enableShip;
+              onToggle = (val) async {
+                await _updateShipSetting(val);
+                return table.qrToken; // Trả về token tĩnh để hiển thị lại QR
+              };
+            } else if (table.id == 'web_schedule_order') {
+              isEnabled = _enableBooking;
+              onToggle = (val) async {
+                await _updateBookingSetting(val);
+                return table.qrToken; // Trả về token tĩnh
+              };
+            } else {
+              // --- BÀN THƯỜNG ---
+              isEnabled = table.qrToken != null && table.qrToken!.isNotEmpty;
+              onToggle = (val) async {
+                if (val) {
+                  // BẬT -> TẠO MÃ MỚI
+                  final newToken = FirebaseFirestore.instance.collection('_').doc().id;
+                  await _firestoreService.updateTable(table.id, {'qrToken': newToken});
+                  ToastService().show(message: "Đã tạo mã QR.", type: ToastType.success);
+                  return newToken;
+                } else {
+                  // TẮT -> XÓA MÃ
+                  await _firestoreService.updateTable(table.id, {'qrToken': FieldValue.delete()});
+                  ToastService().show(message: "Đã xóa mã QR.", type: ToastType.success);
+                  return null;
+                }
+              };
+            }
+
             return _QrTableCard(
               table: table,
-              onTap: () => _showQrDialog(context, table),
+              isEnabled: isEnabled,
+              onTap: () {
+                _showQrDialog(
+                  context,
+                  table,
+                  initialEnabled: isEnabled,
+                  onToggle: onToggle,
+                );
+              },
             );
           },
         );
@@ -359,15 +437,22 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
       return '$_qrOrderBaseUrl?store=$storeId&token=${table.qrToken!}';
     }
 
-    return ''; // Trả về rỗng nếu không có token (để QrImageView hiển thị lỗi)
+    return '';
   }
 
-  Future<void> _showQrDialog(BuildContext context, TableModel table) async {
+  Future<void> _showQrDialog(
+      BuildContext context,
+      TableModel table, {
+        required bool initialEnabled,
+        required Future<String?> Function(bool) onToggle,
+      }) async {
     String? currentToken = table.qrToken;
     bool isProcessing = false;
+    bool localEnabled = initialEnabled;
 
     final GlobalKey qrKey = GlobalKey();
 
+    // Kiểm tra loại bàn để hiển thị text phù hợp
     final bool isOnlineCard = table.id == 'web_ship_order' || table.id == 'web_schedule_order';
 
     await showDialog(
@@ -375,7 +460,7 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setStateInDialog) {
-
+            // Tạo model tạm để build QR
             final tempTableForQr = TableModel(
               id: table.id,
               storeId: table.storeId,
@@ -387,12 +472,15 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
             );
 
             final qrData = _buildQrData(tempTableForQr);
-            final bool hasQr = qrData.isNotEmpty;
+
+            // Logic hiển thị:
+            // 1. Phải có qrData
+            // 2. Phải đang bật (localEnabled)
+            // 3. Với bàn thường, phải có token (currentToken != null)
+            final bool showQrImage = qrData.isNotEmpty && localEnabled && (isOnlineCard ? true : currentToken != null);
 
             return AlertDialog(
-              // Giảm padding của tiêu đề
               titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-              // Giảm padding của nội dung
               contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               content: SizedBox(
                 width: 250,
@@ -404,22 +492,21 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
                         height: 250,
                         child: Center(child: CircularProgressIndicator()),
                       )
-                    // --- SỬA LỖI 3: THÊM TÊN BÀN VÀO ẢNH ---
-                    else if (hasQr)
+                    else if (showQrImage)
                       SizedBox(
                         width: 250,
-                        height: 250, // Giữ kích thước vuông
+                        height: 250,
                         child: RepaintBoundary(
                           key: qrKey,
                           child: Container(
-                            color: Colors.white, // Nền trắng cho ảnh PNG
+                            color: Colors.white,
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 8.0),
                                   child: Text(
-                                    table.tableName, // Tên bàn
+                                    table.tableName,
                                     style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
@@ -430,12 +517,12 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 8),
-                                Expanded( // Mã QR
+                                Expanded(
                                   child: QrImageView(
                                     data: qrData,
                                     version: QrVersions.auto,
                                     backgroundColor: Colors.white,
-                                    padding: const EdgeInsets.all(12), // Thu nhỏ 1 chút
+                                    padding: const EdgeInsets.all(12),
                                   ),
                                 ),
                               ],
@@ -443,18 +530,23 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
                           ),
                         ),
                       )
-                    // --- KẾT THÚC SỬA LỖI 3 ---
                     else
                       SizedBox(
                         height: 250,
                         child: Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Icon(Icons.qr_code,
+                            children: [
+                              const Icon(Icons.highlight_off,
                                   size: 80, color: Colors.grey),
-                              SizedBox(height: 16),
-                              Text('Chưa tạo mã QR cho bàn này.'),
+                              const SizedBox(height: 16),
+                              Text(
+                                isOnlineCard
+                                    ? 'Tính năng đang tắt.'
+                                    : 'Chưa tạo mã QR cho bàn này.',
+                                style: const TextStyle(color: Colors.grey),
+                                textAlign: TextAlign.center,
+                              ),
                             ],
                           ),
                         ),
@@ -462,107 +554,77 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
                   ],
                 ),
               ),
-              // --- SỬA LỖI 4: GOM NÚT VÀO 1 HÀNG NGANG ---
               actionsAlignment: MainAxisAlignment.center,
               actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               actions: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (!isOnlineCard)
-                      TextButton(
-                        onPressed: isProcessing
-                            ? null
-                            : () async {
-                          final confirmed = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Xác nhận xóa'),
-                              content:
-                              const Text('Xóa mã QR sẽ vô hiệu hóa link order. Bạn có chắc?'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Hủy')),
-                                TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Xóa', style: TextStyle(color: Colors.red))),
-                              ],
-                            ),
-                          );
-
-                          if(confirmed != true) return;
-
-                          setStateInDialog(() => isProcessing = true);
-                          try {
-                            await _firestoreService.updateTable(
-                                table.id, {'qrToken': FieldValue.delete()});
-                            ToastService().show(
-                                message: "Đã xóa mã QR.",
-                                type: ToastType.success);
-                            setStateInDialog(() {
-                              currentToken = null;
-                              isProcessing = false;
-                            });
-                          } catch (e) {
-                            ToastService().show(
-                                message: "Lỗi khi xóa: $e",
-                                type: ToastType.error);
-                            setStateInDialog(() => isProcessing = false);
-                          }
-                        },
-                        child: const Text('Xóa', style: TextStyle(color: Colors.red)),
-                      ),
-
-                    const SizedBox(width: 8),
-
+                    // --- Nút LƯU ---
                     ElevatedButton.icon(
                       icon: const Icon(Icons.save_alt_outlined, size: 18),
                       label: const Text('Lưu'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green, // Đổi màu
+                        backgroundColor: Colors.green,
+                        minimumSize: const Size(0, 40), // Cao 40px
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                       ),
-                      onPressed: (isProcessing || !hasQr)
+                      // Chỉ cho lưu khi có ảnh QR
+                      onPressed: (isProcessing || !showQrImage)
                           ? null
                           : () => _saveQrToFile(qrKey, 'QR_${table.tableName}'),
                     ),
 
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
 
-                    if (!isOnlineCard)
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.refresh, size: 18),
-                        label: Text(currentToken != null ? 'Mã mới' : 'Tạo'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        onPressed: isProcessing
-                            ? null
-                            : () async {
-                          setStateInDialog(() => isProcessing = true);
-                          try {
-                            final newToken = FirebaseFirestore.instance
-                                .collection('_')
-                                .doc()
-                                .id;
-                            await _firestoreService
-                                .updateTable(table.id, {'qrToken': newToken});
-                            ToastService().show(
-                                message: "Đã tạo mã QR mới.",
-                                type: ToastType.success);
-                            setStateInDialog(() {
-                              currentToken = newToken;
-                              isProcessing = false;
-                            });
-                          } catch (e) {
-                            ToastService().show(
-                                message: "Lỗi khi tạo mã: $e",
-                                type: ToastType.error);
-                            setStateInDialog(() => isProcessing = false);
-                          }
-                        },
+                    // --- CỤM CÔNG TẮC BẬT TẮT (Cho TẤT CẢ các bàn) ---
+                    Container(
+                      height: 40, // [SỬA]: Chiều cao bằng nút Lưu (40px)
+                      padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+                      decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.grey.shade300)
                       ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(localEnabled ? "Bật" : "Tắt",
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: localEnabled ? AppTheme.primaryColor : Colors.grey)
+                          ),
+                          Switch(
+                            value: localEnabled,
+                            onChanged: isProcessing ? null : (val) async {
+                              setStateInDialog(() => isProcessing = true);
+                              try {
+                                // Gọi callback chung cho cả bàn thường và online
+                                // Nếu bàn thường: val=true -> tạo mới, val=false -> xóa
+                                final newToken = await onToggle(val);
+
+                                setStateInDialog(() {
+                                  localEnabled = val;
+                                  currentToken = newToken; // Cập nhật token mới để vẽ QR
+                                  isProcessing = false;
+                                });
+                              } catch (e) {
+                                setStateInDialog(() => isProcessing = false);
+                              }
+                            },
+                            // [SỬA MÀU]: Giống nút yêu cầu xác nhận (xanh đậm + track nhạt)
+                            activeThumbColor: AppTheme.primaryColor,
+                            activeTrackColor: AppTheme.primaryColor.withAlpha(175),
+                            inactiveThumbColor: Colors.grey.shade50,
+                            inactiveTrackColor: Colors.grey.shade300,
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ],
-              // --- KẾT THÚC SỬA LỖI 4 ---
             );
           },
         );
@@ -574,16 +636,22 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
 class _QrTableCard extends StatelessWidget {
   final TableModel table;
   final VoidCallback onTap;
+  final bool? isEnabled;
 
-  const _QrTableCard({required this.table, required this.onTap});
+  const _QrTableCard({
+    required this.table,
+    required this.onTap,
+    this.isEnabled,
+  });
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
+    // Logic: Nếu bàn Online bị tắt -> Coi như không có QR
     bool hasQr;
     if (table.id == 'web_ship_order' || table.id == 'web_schedule_order') {
-      hasQr = true;
+      hasQr = (isEnabled ?? true);
     } else {
       hasQr = table.qrToken != null && table.qrToken!.isNotEmpty;
     }
@@ -602,19 +670,17 @@ class _QrTableCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          // Giữ padding nhỏ để có không gian
           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
           child: Column(
-            // SỬA 1: Đổi lại thành .center để căn giữa
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Icon(
                 hasQr ? Icons.qr_code_2_rounded : Icons.qr_code_scanner_rounded,
-                size: 40, // Giữ kích thước icon nhỏ
+                size: 40,
+                // Tắt -> Màu xám, Bật -> Màu xanh
                 color: hasQr ? AppTheme.primaryColor : Colors.grey.shade400,
               ),
-              // Giữ khoảng cách nhỏ
               const SizedBox(height: 8),
               Text(
                 table.tableName,
@@ -627,7 +693,7 @@ class _QrTableCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              // SỬA 2: Bỏ widget Expanded() đi
+              // Chỉ hiện tên nhóm, không hiện "Đang bật/tắt"
               Text(
                 table.tableGroup,
                 textAlign: TextAlign.center,

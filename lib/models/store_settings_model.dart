@@ -15,16 +15,15 @@ class StoreSettings {
   final double? redeemRate;
   final String? defaultPaymentMethodId;
   final bool? qrOrderRequiresConfirmation;
+  final bool? enableShip;
+  final bool? enableBooking;
 
-  // --- CÁC TRƯỜNG CHO TEM NHÃN ---
   final bool? printLabelOnKitchen;
   final bool? printLabelOnPayment;
   final double? labelWidth;
   final double? labelHeight;
 
-  // --- TRƯỜNG MỚI: TẮT IN BẾP ---
   final bool? skipKitchenPrint;
-  // ------------------------------
 
   const StoreSettings({
     required this.printBillAfterPayment,
@@ -43,7 +42,8 @@ class StoreSettings {
     this.printLabelOnPayment,
     this.labelWidth,
     this.labelHeight,
-
+    this.enableShip,
+    this.enableBooking,
     // Thêm vào constructor
     this.skipKitchenPrint,
   });
@@ -68,8 +68,8 @@ class StoreSettings {
       printLabelOnPayment       : (d['printLabelOnPayment'] as bool?),
       labelWidth                : (d['labelWidth'] as num?)?.toDouble(),
       labelHeight               : (d['labelHeight'] as num?)?.toDouble(),
-
-      // Đọc từ Map
+      enableShip                : (d['enableShip'] as bool?) ?? true,
+      enableBooking             : (d['enableBooking'] as bool?) ?? true,
       skipKitchenPrint          : (d['skipKitchenPrint'] as bool?),
     );
   }
@@ -88,13 +88,12 @@ class StoreSettings {
     'defaultPaymentMethodId'    : defaultPaymentMethodId,
     'qrOrderRequiresConfirmation': qrOrderRequiresConfirmation,
     'updatedAt'                 : FieldValue.serverTimestamp(),
-
     'printLabelOnKitchen'       : printLabelOnKitchen,
     'printLabelOnPayment'       : printLabelOnPayment,
     'labelWidth'                : labelWidth,
     'labelHeight'               : labelHeight,
-
-    // Ghi vào Map
+    'enableShip'                : enableShip,
+    'enableBooking'             : enableBooking,
     'skipKitchenPrint'          : skipKitchenPrint,
   };
 
@@ -115,8 +114,8 @@ class StoreSettings {
     bool? printLabelOnPayment,
     double? labelWidth,
     double? labelHeight,
-
-    // Thêm tham số
+    bool? enableShip,
+    bool? enableBooking,
     bool? skipKitchenPrint,
   }) {
     return StoreSettings(
@@ -136,8 +135,8 @@ class StoreSettings {
       printLabelOnPayment: printLabelOnPayment ?? this.printLabelOnPayment,
       labelWidth: labelWidth ?? this.labelWidth,
       labelHeight: labelHeight ?? this.labelHeight,
-
-      // Logic copy
+      enableShip: enableShip ?? this.enableShip,
+      enableBooking: enableBooking ?? this.enableBooking,
       skipKitchenPrint: skipKitchenPrint ?? this.skipKitchenPrint,
     );
   }

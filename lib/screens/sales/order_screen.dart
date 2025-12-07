@@ -2308,6 +2308,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final textTheme = Theme.of(context).textTheme;
     final cartEntries = _displayCart.entries.toList().reversed.toList();
     final currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
+    final bool isVirtualTable = widget.table.id.startsWith('ship_') || widget.table.id.startsWith('schedule_');
 
     return Column(
       children: [
@@ -2331,18 +2332,31 @@ class _OrderScreenState extends State<OrderScreen> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.grey.shade300),
+                        color: isVirtualTable ? Colors.grey.shade200 : null,
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Flexible(
-                            child: CustomerSelector(
-                              currentCustomer: _selectedCustomer,
-                              firestoreService: _firestoreService,
-                              storeId: widget.currentUser.storeId,
-                              onCustomerSelected: _handleCustomerSelection,
+                            // [SỬA] Bọc AbsorbPointer để chặn click nếu là bàn ảo
+                            child: AbsorbPointer(
+                              absorbing: isVirtualTable,
+                              child: Opacity(
+                                // Làm mờ nhẹ nếu bị khóa
+                                opacity: isVirtualTable ? 0.6 : 1.0,
+                                child: CustomerSelector(
+                                  currentCustomer: _selectedCustomer,
+                                  firestoreService: _firestoreService,
+                                  storeId: widget.currentUser.storeId,
+                                  onCustomerSelected: _handleCustomerSelection,
+                                ),
+                              ),
                             ),
                           ),
+
+                          // [SỬA] Logic khóa luôn nút tăng giảm số lượng khách nếu muốn (Optional)
+                          // Nếu chỉ muốn khóa đổi tên khách thì giữ nguyên Row dưới,
+                          // còn nếu muốn khóa cả số lượng khách thì bọc cả Row này vào AbsorbPointer tương tự.
                           Row(
                             children: [
                               IconButton(
