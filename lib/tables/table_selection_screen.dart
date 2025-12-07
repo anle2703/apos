@@ -206,22 +206,42 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
             itemFinalTotal = itemFinalTotal.roundToDouble();
 
           } else {
-            // B. LOGIC HÀNG HÓA THƯỜNG
+            // B. LOGIC HÀNG HÓA THƯỜNG (Đã sửa: Lấy đúng giá trong object Product)
             final double price = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
             final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-            double baseTotal = price * quantity;
-            double discountAmount = 0;
 
-            if (discountVal > 0) {
-              if (isPercent) {
-                discountAmount = baseTotal * (discountVal / 100);
-              } else {
-                // Với hàng thường: Giảm giá VNĐ trừ thẳng vào tổng (hoặc nhân số lượng tùy logic Store)
-                // Logic phổ biến: Discount Val * Số lượng (để khớp với đơn giá giảm)
-                discountAmount = discountVal * quantity;
+            // 1. Tính tổng tiền Topping (trên 1 đơn vị sản phẩm)
+            double toppingsTotalPerUnit = 0.0;
+            final toppings = itemMap['toppings'];
+            if (toppings is List) {
+              for (final t in toppings) {
+                if (t is Map) {
+                  // Lấy số lượng topping
+                  final tq = (t['quantity'] as num?)?.toDouble() ?? 0.0;
+
+                  // [SỬA LỖI TẠI ĐÂY]: Lấy giá tiền từ bên trong object 'product'
+                  final productMap = t['product'] as Map<String, dynamic>?;
+                  final tp = (productMap?['sellPrice'] as num?)?.toDouble() ??
+                      (productMap?['price'] as num?)?.toDouble() ?? 0.0;
+
+                  toppingsTotalPerUnit += tp * tq;
+                }
               }
             }
-            itemFinalTotal = (baseTotal - discountAmount).clamp(0, double.infinity);
+
+            // 2. Tính giá trị món chính sau giảm giá (trên 1 đơn vị)
+            double discountedUnitPrice = price;
+            if (discountVal > 0) {
+              if (isPercent) {
+                discountedUnitPrice = price * (1 - discountVal / 100);
+              } else {
+                discountedUnitPrice = price - discountVal;
+              }
+            }
+            if (discountedUnitPrice < 0) discountedUnitPrice = 0;
+
+            // 3. Công thức chuẩn: Số lượng * (Giá đã giảm + Giá Topping)
+            itemFinalTotal = quantity * (discountedUnitPrice + toppingsTotalPerUnit);
           }
 
           recalculatedTotal += itemFinalTotal;
