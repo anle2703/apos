@@ -12,10 +12,11 @@ class ReceiptWidget extends StatelessWidget {
   final Map<String, dynamic> summary;
   final String userName;
   final String tableName;
-  final bool showPrices;
+  final bool showPrices; // Biến này quyết định tất cả việc hiện tiền
   final bool isSimplifiedMode;
   final ReceiptTemplateModel? templateSettings;
   final String? qrData;
+  final bool isRetailMode;
 
   const ReceiptWidget({
     super.key,
@@ -25,10 +26,11 @@ class ReceiptWidget extends StatelessWidget {
     required this.summary,
     required this.userName,
     required this.tableName,
-    this.showPrices = true,
+    this.showPrices = false,
     this.isSimplifiedMode = false,
     this.templateSettings,
     this.qrData,
+    this.isRetailMode = false,
   });
 
   @override
@@ -36,8 +38,16 @@ class ReceiptWidget extends StatelessWidget {
     final settings = templateSettings ?? ReceiptTemplateModel();
     const double fontScale = 1.8;
 
-    final bool isPaymentBill = title.toUpperCase().contains('HÓA ĐƠN');
     final bool isCheckDish = !showPrices;
+
+    final bool isFinancialBill = showPrices;
+
+    String displayTitle = title;
+    if (isFinancialBill) {
+      if (displayTitle.toLowerCase().contains('kiểm món') || displayTitle.isEmpty) {
+        displayTitle = 'TẠM TÍNH';
+      }
+    }
 
     // Styles
     final baseTextStyle = TextStyle(color: Colors.black, fontFamily: 'Roboto', height: 1.1);
@@ -59,8 +69,6 @@ class ReceiptWidget extends StatelessWidget {
     final quantityFormat = NumberFormat('#,##0.##', 'vi_VN');
     final timeFormat = DateFormat('HH:mm dd/MM/yyyy');
     final percentFormat = NumberFormat('#,##0.##', 'vi_VN');
-
-    // Format ngắn cho chi tiết giờ (VD: 10:30 03/12)
     final shortDateTimeFormat = DateFormat('HH:mm dd/MM');
 
     // Extract Data
@@ -82,9 +90,7 @@ class ReceiptWidget extends StatelessWidget {
     if (rawStart is Timestamp) {
       startTime = rawStart.toDate();
     } else if (rawStart is String && rawStart.isNotEmpty) {
-      try {
-        startTime = DateTime.parse(rawStart);
-      } catch (_) {}
+      try { startTime = DateTime.parse(rawStart); } catch (_) {}
     }
 
     final Map<String, dynamic> customer = (summary['customer'] is Map) ? Map<String, dynamic>.from(summary['customer']) : {};
@@ -116,14 +122,19 @@ class ReceiptWidget extends StatelessWidget {
           const SizedBox(height: 16),
 
           // 2. TITLE
-          Text(tableName.isNotEmpty ? '$title - $tableName' : title, textAlign: TextAlign.center, style: boldTextStyle.copyWith(fontSize: fsTitle)),
-          if (isPaymentBill && billCode != null && billCode.isNotEmpty) Text(billCode, textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsInfo)),
+          Text(
+              tableName.isNotEmpty ? '$displayTitle - $tableName' : displayTitle,
+              textAlign: TextAlign.center,
+              style: boldTextStyle.copyWith(fontSize: fsTitle)
+          ),
+          // Hiện mã bill nếu có (bất kể là loại bill nào)
+          if (billCode != null && billCode.isNotEmpty) Text(billCode, textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsInfo)),
 
           const SizedBox(height: 12),
 
           // 3. INFO SECTION
           if (settings.billShowCustomerName) _buildInfoRow('Khách hàng:', khName, baseTextStyle.copyWith(fontSize: fsInfo)),
-          if (startTime != null) _buildInfoRow('Giờ vào:', timeFormat.format(startTime), baseTextStyle.copyWith(fontSize: fsInfo)),
+          if (startTime != null && !isRetailMode) _buildInfoRow('Giờ vào:', timeFormat.format(startTime), baseTextStyle.copyWith(fontSize: fsInfo)),
           _buildInfoRow('Giờ in:', timeFormat.format(DateTime.now()), baseTextStyle.copyWith(fontSize: fsInfo)),
           if (settings.billShowCashierName) _buildInfoRow('Thu ngân:', userName, baseTextStyle.copyWith(fontSize: fsInfo)),
 
@@ -143,6 +154,7 @@ class ReceiptWidget extends StatelessWidget {
                 Expanded(flex: 6, child: Text('Tên món / DV', style: boldTextStyle.copyWith(fontSize: fsItemName), textAlign: TextAlign.center)),
                 Expanded(
                     flex: 4,
+                    // Nếu là kiểm món thì hiện SL, nếu là bill tài chính thì hiện Thành tiền
                     child: Text(isCheckDish ? 'SL' : 'Thành tiền', textAlign: TextAlign.right, style: boldTextStyle.copyWith(fontSize: fsItemName))),
               ],
             ),
@@ -164,7 +176,7 @@ class ReceiptWidget extends StatelessWidget {
             double effectiveUnitPrice;
 
             if (isTimeBased) {
-              effectiveUnitPrice = 0;
+              effectiveUnitPrice = 0; // Giá dịch vụ tính theo block
             } else {
               if (item.discountValue != null && item.discountValue! > 0) {
                 if (item.discountUnit == '%') {
@@ -191,7 +203,6 @@ class ReceiptWidget extends StatelessWidget {
                   discountBadge = "-${currencyFormat.format(item.discountValue)}";
                 }
               }
-              // Có giảm giá thì hiện giá gốc (để gạch ngang)
               showOriginalPrice = true;
             } else if (!isTimeBased && item.price != originalPrice) {
               showOriginalPrice = true;
@@ -217,18 +228,16 @@ class ReceiptWidget extends StatelessWidget {
                 const SizedBox(height: 6),
 
                 // ============================================
-                // TRƯỜNG HỢP 1: DỊCH VỤ TÍNH GIỜ (LAYOUT MỚI)
+                // TRƯỜNG HỢP 1: DỊCH VỤ TÍNH GIỜ (VÀ CÓ HIỆN TIỀN)
                 // ============================================
-                if (isTimeBased && !isCheckDish)
+                if (isTimeBased && isFinancialBill)
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // HÀNG 1: Tên + Thuế + Chiết khấu ..... Tổng tiền
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           SizedBox(width: 30, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
-
                           Expanded(
                             child: RichText(
                               text: TextSpan(
@@ -245,22 +254,18 @@ class ReceiptWidget extends StatelessWidget {
                               ),
                             ),
                           ),
-
-                          // Tổng tiền nằm luôn ở Hàng 1
                           Text(
                             currencyFormat.format(item.subtotal),
                             style: boldTextStyle.copyWith(fontSize: fsItemDetail),
                           ),
                         ],
                       ),
-
-                      // HÀNG 2, 3, 4...: Chi tiết giờ (Thụt lề vào)
                       _buildTimeBasedDetails(item, fsItemDetail, shortDateTimeFormat, currencyFormat, baseTextStyle, boldTextStyle),
                     ],
                   )
 
                 // ============================================
-                // TRƯỜNG HỢP 2: KIỂM MÓN (CHECK DISH)
+                // TRƯỜNG HỢP 2: KIỂM MÓN HOẶC DỊCH VỤ (NHƯNG ẨN TIỀN)
                 // ============================================
                 else if (isCheckDish)
                   Row(
@@ -291,13 +296,12 @@ class ReceiptWidget extends StatelessWidget {
                   )
 
                 // ============================================
-                // TRƯỜNG HỢP 3: MÓN THƯỜNG (PAYMENT BILL)
+                // TRƯỜNG HỢP 3: MÓN THƯỜNG (CÓ HIỆN TIỀN)
                 // ============================================
                 else
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // LINE 1: Name ... [OriginalPrice Crossed] [Discount]
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -330,7 +334,6 @@ class ReceiptWidget extends StatelessWidget {
                         ],
                       ),
 
-                      // LINE 2: Phép tính tiền
                       Padding(
                         padding: const EdgeInsets.only(left: 30, top: 2),
                         child: Row(
@@ -382,8 +385,8 @@ class ReceiptWidget extends StatelessWidget {
             );
           }),
 
-          // 6. SUMMARY
-          if (!isCheckDish) ...[
+          // 6. SUMMARY (Chỉ hiện nếu CÓ GIÁ TIỀN - isFinancialBill)
+          if (isFinancialBill) ...[
             if (!isSimplifiedMode) ...[
               _buildRow('Tổng cộng:', currencyFormat.format(subtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
               if (settings.billShowTax && taxAmount > 0) _buildRow('Thuế:', '+ ${currencyFormat.format(taxAmount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
@@ -396,15 +399,18 @@ class ReceiptWidget extends StatelessWidget {
             ],
             if (isSimplifiedMode) _buildRow('Tổng cộng:', currencyFormat.format(subtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
             const SizedBox(height: 12),
-            if (!isSimplifiedMode && isPaymentBill)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('THÀNH TIỀN:', style: boldTextStyle.copyWith(fontSize: fsTotal)),
-                  Text(currencyFormat.format(totalPayable), style: boldTextStyle.copyWith(fontSize: fsTotal + 4)),
-                ],
-              ),
-            if (!isSimplifiedMode && isPaymentBill) ...[
+
+            // Hiện Thành Tiền cho cả Hóa Đơn và Tạm Tính (miễn là có giá)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('THÀNH TIỀN:', style: boldTextStyle.copyWith(fontSize: fsTotal)),
+                Text(currencyFormat.format(totalPayable), style: boldTextStyle.copyWith(fontSize: fsTotal + 4)),
+              ],
+            ),
+
+            // Phần thanh toán chi tiết chỉ hiện nếu là Hóa Đơn (Đã thanh toán) hoặc Tạm Tính (nếu muốn)
+            if (!isSimplifiedMode) ...[
               if (settings.billShowPaymentMethod && payments.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text('Phương thức thanh toán:', style: baseTextStyle.copyWith(fontSize: fsInfo)),
@@ -416,7 +422,7 @@ class ReceiptWidget extends StatelessWidget {
           ],
 
           // 7. QR CODE
-          if (qrData != null && !isSimplifiedMode && !isCheckDish) ...[
+          if (qrData != null && !isSimplifiedMode && isFinancialBill) ...[
             const SizedBox(height: 16),
             Center(child: Text('Quét mã chuyển khoản', style: baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 4),
@@ -436,26 +442,21 @@ class ReceiptWidget extends StatelessWidget {
             ),
           ],
 
-          if (eInvoiceUrl != null && eInvoiceUrl.isNotEmpty && !isCheckDish) ...[
+          if (eInvoiceUrl != null && eInvoiceUrl.isNotEmpty && isFinancialBill) ...[
             const SizedBox(height: 24),
             Center(child: Text('QUÉT MÃ TRA CỨU HĐĐT', style: boldTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 8),
-
-            // Hiển thị MST bên bán
             if (eInvoiceMst != null)
               Center(child: Text('MST bên bán: $eInvoiceMst', style: baseTextStyle.copyWith(fontSize: fsInfo))),
-
-            // Hiển thị Mã tra cứu (Reservation Code)
             if (eInvoiceCode != null)
               Center(child: Text('Mã tra cứu: $eInvoiceCode', style: baseTextStyle.copyWith(fontSize: fsInfo))),
-
             const SizedBox(height: 8),
             Center(
               child: SizedBox(
-                width: 140, // Kích thước QR Code
+                width: 140,
                 height: 140,
                 child: QrImageView(
-                  data: eInvoiceUrl, // Link tra cứu đầy đủ
+                  data: eInvoiceUrl,
                   version: QrVersions.auto,
                   size: 140.0,
                   backgroundColor: Colors.white,
@@ -467,7 +468,7 @@ class ReceiptWidget extends StatelessWidget {
           ],
 
           // 8. FOOTER
-          if (settings.billShowFooter && !isCheckDish) ...[
+          if (settings.billShowFooter && isFinancialBill) ...[
             const SizedBox(height: 24),
             if (settings.footerText1.isNotEmpty) Center(child: Text(settings.footerText1, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
             if (settings.footerText2.isNotEmpty) Center(child: Text(settings.footerText2, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
@@ -477,7 +478,7 @@ class ReceiptWidget extends StatelessWidget {
     );
   }
 
-  // --- HELPER: TIME BASED DETAILS ---
+  // --- HELPER METHODS GIỮ NGUYÊN NHƯ CŨ ---
   Widget _buildTimeBasedDetails(
       OrderItem item,
       double fontSize,
@@ -505,7 +506,6 @@ class ReceiptWidget extends StatelessWidget {
 
     final endTime = startTime.add(Duration(minutes: totalMinutes));
 
-    // Tính toán giảm giá
     double reductionPerHour = 0;
     double percentDiscount = 0;
     if (item.discountValue != null && item.discountValue! > 0) {
@@ -521,13 +521,10 @@ class ReceiptWidget extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // HÀNG 2: Tổng thời gian
           Text(
             "${timeFormat.format(startTime)} - ${timeFormat.format(endTime)} (${_formatMinutes(totalMinutes)})",
             style: baseStyle.copyWith(fontSize: fontSize, fontStyle: FontStyle.italic),
           ),
-
-          // HÀNG 3+: Chi tiết Blocks (Định dạng: 10:30 - 11:00 (30' x 60.000/h))
           ...blocks.map((rawBlock) {
             final dynamic block = rawBlock;
             int bMinutes = 0;
@@ -538,9 +535,6 @@ class ReceiptWidget extends StatelessWidget {
             try {
               bMinutes = (block.minutes as num).toInt();
               bRate = (block.ratePerHour as num).toDouble();
-
-              // Nếu block là Object thì có thể lấy được startTime, endTime
-              // Nếu là Map từ Firestore thì phải parse String hoặc Timestamp
               if (block is! Map) {
                 bStart = block.startTime;
                 bEnd = block.endTime;
@@ -550,17 +544,13 @@ class ReceiptWidget extends StatelessWidget {
                 if (rawStart is Timestamp) bStart = rawStart.toDate();
                 if (rawEnd is Timestamp) bEnd = rawEnd.toDate();
               }
-            } catch (_) {
-              // Fallback nếu không lấy được
-            }
+            } catch (_) {}
 
-            // Fallback thời gian hiển thị nếu không lấy được chi tiết block
             String timeRange = "";
             if (bStart != null && bEnd != null) {
               timeRange = "${timeFormat.format(bStart)} - ${timeFormat.format(bEnd)}";
             }
 
-            // Tính lại Rate sau giảm giá
             if (percentDiscount > 0) {
               bRate = bRate * (1 - percentDiscount);
             } else if (reductionPerHour > 0) {
@@ -568,7 +558,6 @@ class ReceiptWidget extends StatelessWidget {
             }
             if (bRate < 0) bRate = 0;
 
-            // Tính lại chuỗi hiển thị
             String details = "+ $timeRange (${_formatMinutes(bMinutes)} x ${currencyFormat.format(bRate)}/h)";
 
             return Padding(

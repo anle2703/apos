@@ -323,7 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                   },
                 ),
-                if (_currentUser?.businessType == 'fnb') ...[
+                if (_currentUser?.businessType == 'fnb')
                   ListTile(
                     leading: const Icon(Icons.chair_outlined),
                     title: const Text('Quản lý phòng bàn'),
@@ -362,7 +362,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       }
                     },
                   ),
-                ],
                 ListTile(
                   leading: const Icon(Icons.people_alt_outlined),
                   title: const Text('Quản lý nhân viên'),

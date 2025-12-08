@@ -109,7 +109,6 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _allowProvisionalBill = true;
   bool _printBillAfterPayment = true;
   bool _showPricesOnProvisional = true;
-  bool _showPricesOnReceipt = true;
   bool _skipKitchenPrint = false;
   String? _lastCustomerIdFromOrder;
   String _searchQuery = '';
@@ -185,7 +184,6 @@ class _OrderScreenState extends State<OrderScreen> {
         _allowProvisionalBill = s.allowProvisionalBill;
         _printBillAfterPayment = s.printBillAfterPayment;
         _showPricesOnProvisional = s.showPricesOnProvisional;
-        _showPricesOnReceipt = s.showPricesOnReceipt;
         _promptForCash = s.promptForCash ?? true;
         _skipKitchenPrint = s.skipKitchenPrint ?? false;
         _printLabelOnKitchen = s.printLabelOnKitchen ?? false;
@@ -1266,81 +1264,102 @@ class _OrderScreenState extends State<OrderScreen> {
       return false;
     }
 
-    final bool isBookingTable = widget.table.id.startsWith('schedule_');
-    final bool hasItemsInCartWithZeroSent =
-    _cart.values.any((item) => item.sentQuantity == 0 && item.quantity > 0);
+    // 1. QUÉT TOÀN BỘ GIỎ HÀNG ĐỂ TÌM MÓN CHƯA BÁO BẾP (ADD)
+    // Logic cũ chỉ quét _localChanges, Logic mới quét _displayCart
+    final allItems = _displayCart.values.toList();
+    final itemsNeedCooking = allItems.where((item) {
+      // Chỉ lấy món chưa hủy và số lượng thực tế > số lượng đã gửi
+      return item.status != 'cancelled' && item.quantity > item.sentQuantity;
+    }).toList();
 
-    if (_localChanges.isEmpty &&
-        (!isBookingTable || !hasItemsInCartWithZeroSent)) {
+    // 2. QUÉT CÁC MÓN CẦN HỦY (CANCEL)
+    // Với món hủy, ta vẫn dựa vào _localChanges vì hành động hủy là hành động tức thời
+    final itemsNeedCancelling = _localChanges.values.where((item) {
+      // Logic hủy: status là cancelled HOẶC số lượng giảm đi so với bản đã lưu (trong _cart gốc)
+      if (item.status == 'cancelled') return true;
+
+      final originalItem = _cart[item.lineId];
+      if (originalItem != null && item.quantity < originalItem.sentQuantity) {
+        return true;
+      }
+      return false;
+    }).toList();
+
+    if (itemsNeedCooking.isEmpty && itemsNeedCancelling.isEmpty) {
+      // Nếu localChanges vẫn còn rác (ví dụ update note nhưng ko đổi số lượng), vẫn cho lưu nhưng ko in
+      if (_localChanges.isNotEmpty) {
+        await _saveOrder();
+        if (popOnFinish && mounted) Navigator.of(context).pop();
+        return true;
+      }
+
       ToastService().show(
-          message: "Chưa có món mới để gởi báo bếp.", type: ToastType.warning);
+          message: "Tất cả món đã được gửi bếp.", type: ToastType.warning);
       return true;
     }
 
-    final oldCart = Map<String, OrderItem>.from(_cart);
+    // 3. CHUẨN BỊ PAYLOAD ĐỂ IN & CẬP NHẬT FIRESTORE
+    final List<Map<String, dynamic>> addItemsPayload = [];
+    final List<Map<String, dynamic>> cancelItemsPayload = [];
 
-    if (isBookingTable && hasItemsInCartWithZeroSent && _localChanges.isEmpty) {
-      _cart.forEach((key, item) {
-        if (item.sentQuantity == 0 && item.quantity > 0) {
-          _localChanges[key] = item;
-        }
-      });
-    }
+    // 3a. Xử lý món THÊM (In toàn bộ phần chênh lệch)
+    for (final item in itemsNeedCooking) {
+      final double diff = item.quantity - item.sentQuantity;
+      if (diff > 0) {
+        // Cập nhật vào _localChanges: Đánh dấu là đã gửi (sentQuantity = quantity)
+        // Để khi _saveOrder chạy, nó sẽ lưu trạng thái này lên Server
+        _localChanges[item.lineId] = item.copyWith(sentQuantity: item.quantity);
 
-    final changedEntries = _localChanges.entries.map((e) {
-      if (e.value.status != 'cancelled') {
-        final updated = e.value.copyWith(sentQuantity: e.value.quantity);
-        return MapEntry(e.key, updated);
+        // Tạo payload in
+        final payload = item.toMap();
+        payload['quantity'] = diff; // Chỉ in phần chênh lệch
+        addItemsPayload.add({'isCancel': false, ...payload});
       }
-      return e;
-    }).toList();
-
-    for (final e in changedEntries) {
-      _localChanges[e.key] = e.value;
     }
 
+    // 3b. Xử lý món HỦY
+    for (final item in itemsNeedCancelling) {
+      double diff = 0;
+      if (item.status == 'cancelled') {
+        // Nếu hủy cả dòng -> In số lượng đã gửi trước đó (nếu có)
+        final originalItem = _cart[item.lineId];
+        diff = originalItem?.sentQuantity ?? item.quantity; // Fallback
+      } else {
+        // Nếu giảm số lượng -> In phần chênh lệch giảm
+        final originalItem = _cart[item.lineId];
+        if (originalItem != null) {
+          diff = originalItem.sentQuantity - item.quantity;
+        }
+      }
+
+      if (diff > 0) {
+        final payload = item.toMap();
+        payload['quantity'] = diff;
+        cancelItemsPayload.add({'isCancel': true, ...payload});
+      }
+    }
+
+    // 4. LƯU ĐƠN LÊN SERVER
+    // Lúc này _localChanges đã được cập nhật sentQuantity mới ở bước 3a
     final success = await _saveOrder();
     if (!success || _currentOrder == null) return false;
 
-    final List<Map<String, dynamic>> addItems = [];
-    final List<Map<String, dynamic>> cancelItems = [];
-
-    for (final e in changedEntries) {
-      if (e.value.status == 'cancelled') continue;
-      final item = e.value;
-      final oldSentQty = oldCart[item.lineId]?.sentQuantity ?? 0;
-      final newQty = item.quantity;
-      final change = newQty - oldSentQty;
-
-      if (change == 0) continue;
-      if (change > 0) {
-        final payload = item.toMap();
-        payload['quantity'] = change;
-        addItems.add({'isCancel': false, ...payload});
-      } else {
-        final delta = -change;
-        final payload = item.toMap();
-        payload['quantity'] = delta;
-        cancelItems.add({'isCancel': true, ...payload});
-      }
-    }
-
+    // 5. GỬI LỆNH IN
     if (performPrint) {
       final bool isOnlineOrder = widget.table.id.startsWith('ship_') ||
           widget.table.id.startsWith('schedule_');
 
-      // 1. CHUẨN BỊ DỮ LIỆU (Payload)
       Map<String, dynamic>? kitchenPayload;
       Map<String, dynamic>? cancelPayload;
       Map<String, dynamic>? labelPayload;
 
       // Payload Bếp (Thêm món)
-      if (!_skipKitchenPrint && addItems.isNotEmpty) {
+      if (!_skipKitchenPrint && addItemsPayload.isNotEmpty) {
         kitchenPayload = {
           'storeId': widget.currentUser.storeId,
           'tableName': _currentOrder!.tableName,
           'userName': widget.currentUser.name ?? 'Unknown',
-          'items': addItems,
+          'items': addItemsPayload,
           'printType': 'add'
         };
         if (isOnlineOrder && _customerNameFromOrder != null) {
@@ -1349,60 +1368,48 @@ class _OrderScreenState extends State<OrderScreen> {
       }
 
       // Payload Bếp (Hủy món)
-      if (!_skipKitchenPrint && cancelItems.isNotEmpty) {
+      if (!_skipKitchenPrint && cancelItemsPayload.isNotEmpty) {
         cancelPayload = {
           'storeId': widget.currentUser.storeId,
           'tableName': _currentOrder!.tableName,
           'userName': widget.currentUser.name ?? 'Unknown',
-          'items': cancelItems,
+          'items': cancelItemsPayload,
           'printType': 'cancel'
         };
       }
 
       // Payload Tem (Label)
-      if (_printLabelOnKitchen && addItems.isNotEmpty) {
+      if (_printLabelOnKitchen && addItemsPayload.isNotEmpty) {
         labelPayload = {
           'storeId': widget.currentUser.storeId,
           'tableName': _currentOrder!.tableName,
-          'items': addItems,
+          'items': addItemsPayload,
           'labelWidth': _labelWidth,
           'labelHeight': _labelHeight,
         };
       }
 
-      // 2. BẮN LỆNH IN (CÓ DELAY)
-
-      // ƯU TIÊN 1: IN TEM (Nhẹ, Nhanh)
+      // THỰC HIỆN IN
       if (labelPayload != null) {
-        debugPrint(">>> [ORDER] Bắn lệnh Tem trước");
         PrintQueueService().addJob(PrintJobType.label, labelPayload);
-
-        // --- QUAN TRỌNG: Nghỉ 100ms để lệnh Tem chui lọt xuống Android trước ---
         await Future.delayed(const Duration(milliseconds: 100));
       }
 
-      // ƯU TIÊN 2: IN BẾP (Nặng do render PDF)
       if (kitchenPayload != null) {
-        debugPrint(">>> [ORDER] Bắn lệnh Bếp");
         PrintQueueService().addJob(PrintJobType.kitchen, kitchenPayload);
       }
 
-      // ƯU TIÊN 3: IN HỦY
       if (cancelPayload != null) {
-        // Nếu có cả lệnh Bếp và Hủy, cũng nên delay xíu cho chắc
         if (kitchenPayload != null) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
         PrintQueueService().addJob(PrintJobType.cancel, cancelPayload);
       }
 
-      // Thông báo UI
-      if (addItems.isEmpty && cancelItems.isEmpty) {
-        ToastService().show(
-            message: "Không có thay đổi để báo bếp.", type: ToastType.warning);
-      } else {
+      // Thông báo
+      if (addItemsPayload.isNotEmpty || cancelItemsPayload.isNotEmpty) {
         String msg = "Đã gửi báo chế biến.";
-        if (_skipKitchenPrint) msg += " (Không in phiếu báo chế biến)";
+        if (_skipKitchenPrint) msg = "Đã tắt in báo chế biến.";
         ToastService().show(message: msg, type: ToastType.success);
       }
     }
@@ -1610,7 +1617,6 @@ class _OrderScreenState extends State<OrderScreen> {
               customer: _selectedCustomer,
               customerAddress: _customerAddressFromOrder,
               printBillAfterPayment: _printBillAfterPayment,
-              showPricesOnReceipt: _showPricesOnReceipt,
               initialState: savedState,
               promptForCash: _promptForCash,
             ),
@@ -1983,7 +1989,6 @@ class _OrderScreenState extends State<OrderScreen> {
                     customer: _selectedCustomer,
                     customerAddress: _customerAddressFromOrder,
                     printBillAfterPayment: _printBillAfterPayment,
-                    showPricesOnReceipt: _showPricesOnReceipt,
                     initialState: _currentOrder != null
                         ? _paymentStateCache[_currentOrder!.id]
                         : null,
@@ -2598,7 +2603,7 @@ class _OrderScreenState extends State<OrderScreen> {
                             onPressed: _displayCart.isNotEmpty
                                 ? _handlePrintProvisionalBill
                                 : null,
-                            child: const Text('TẠM TÍNH'),
+                            child: const Text('KIỂM MÓN'),
                           ),
                         ),
                         const SizedBox(width: 8),

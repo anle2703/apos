@@ -438,7 +438,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     });
   }
 
-  // 1. Hàm điều phối chính (Đã tối ưu)
   Future<void> _loadAllInitialDataOptimized() async {
     // 1. LUÔN LUÔN Tải cấu hình E-Invoice (Dù có Cache hay không)
     // Đưa đoạn này lên đầu hàm để đảm bảo nó luôn được chạy
@@ -482,7 +481,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     }
   }
 
-  // 2. Hàm Apply dữ liệu từ Cache vào biến State (Thay thế logic của các hàm cũ)
   void _applyCachedData() {
     if (!mounted) return;
     setState(() {
@@ -565,7 +563,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     });
   }
 
-  // 3. Hàm tải Settings tổng hợp (Thuế + Điểm + Cấu hình chung)
   Future<void> _loadSettings({bool forceRefresh = false}) async {
     try {
       final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -1231,11 +1228,24 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         }
       }
 
-      // --- [MỚI] TẠO BILL DATA SỚM ĐỂ DÙNG CHO HĐĐT ---
+      String finalTableNameForBill = widget.order.tableName;
+
+      if (widget.isRetailMode) {
+        final lowerName = finalTableNameForBill.toLowerCase();
+
+        if (lowerName.contains("giao hàng") || lowerName.contains("ship")) {
+          finalTableNameForBill = "Giao hàng";
+        } else if (lowerName.contains("đặt lịch") || lowerName.contains("booking")) {
+          finalTableNameForBill = "Đặt lịch";
+        } else {
+          finalTableNameForBill = "Tại quầy";
+        }
+      }
+
       final billData = {
         'orderId': widget.order.id,
         'storeId': widget.order.storeId,
-        'tableName': widget.order.tableName,
+        'tableName': finalTableNameForBill,
         'items': billItems,
         'subtotal': widget.subtotal,
         'totalPayable': _totalPayable,
@@ -1331,6 +1341,125 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       if (mounted) {
         setState(() => _isProcessingPayment = false);
         ToastService().show(message: 'Lỗi: $e', type: ToastType.error);
+      }
+    }
+  }
+
+  Future<void> _printShipBillOnly() async {
+    if (_isProcessingPayment) return;
+
+    // 1. Tính toán lại số liệu
+    _calculateTotal();
+
+    setState(() {
+      _isProcessingPayment = true;
+    });
+
+    try {
+      // 2. Tạo mã Bill tạm thời
+      final now = DateTime.now();
+      final String billCodeTimestamp = DateFormat('ddMMyyHHmm').format(now);
+      final String randomSuffix = Random().nextInt(1000).toString().padLeft(3, '0');
+      final String shortBillCode = 'SHIP$billCodeTimestamp$randomSuffix';
+      final String newBillId = '${widget.currentUser.storeId}_$shortBillCode';
+
+      // 3. Chuẩn bị dữ liệu in
+      final validPayments =
+      Map.fromEntries(_paymentAmounts.entries.where((e) => e.value > 0));
+
+      String? firstBankMethodId;
+      try {
+        firstBankMethodId =
+            validPayments.keys.firstWhere((id) => id != _cashMethod!.id);
+      } catch (e) {
+        firstBankMethodId = null;
+      }
+      final firstBankMethod = firstBankMethodId != null
+          ? _availableMethods.firstWhere((m) => m.id == firstBankMethodId)
+          : null;
+
+      Map<String, dynamic>? bankDetails;
+      if (firstBankMethod != null && firstBankMethod.qrDisplayOnBill) {
+        bankDetails = {
+          'bankBin': firstBankMethod.bankBin,
+          'bankAccount': firstBankMethod.bankAccount,
+          'bankAccountName': firstBankMethod.bankAccountName,
+        };
+      }
+
+      final paymentMapWithNames = validPayments.map((id, amount) {
+        final name = _availableMethods.firstWhere((m) => m.id == id).name;
+        return MapEntry(name, amount);
+      });
+
+      // Tạo object kết quả
+      final result = PaymentResult(
+        totalPayable: _totalPayable,
+        discountAmount: _calculateDiscount(),
+        discountType: _isDiscountPercent ? '%' : 'VND',
+        surcharges: _surcharges,
+        taxPercent: 0.0,
+        totalTaxAmount: _calculatedVatAmount,
+        totalTncnAmount: _calculatedTncnAmount,
+        payments: paymentMapWithNames,
+        customerPointsUsed: parseVN(_pointsController.text),
+        changeAmount: _changeAmount,
+        printReceipt: true,
+        bankDetailsForPrinting: bankDetails,
+      );
+
+      // Chuẩn bị Items
+      final bool isDeduction = _calcMethod == 'deduction';
+      final rateMap = isDeduction ? kDeductionRates : kDirectRates;
+      final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
+
+      final List<Map<String, dynamic>> billItems =
+      widget.order.items.map((item) {
+        final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
+        final productData = item['product'] as Map<String, dynamic>? ?? {};
+
+        final productId = productData['id'] as String?;
+        String taxKey = _productTaxRateMap[productId] ?? defaultTaxKey;
+        if (!rateMap.containsKey(taxKey)) taxKey = defaultTaxKey;
+        final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
+
+        newItem['taxAmount'] =
+            ((item['subtotal'] as num?)?.toDouble() ?? 0.0) * rate;
+        newItem['taxRate'] = rate;
+        newItem['taxKey'] = taxKey;
+
+        return newItem;
+      }).toList();
+
+      // [QUAN TRỌNG] Logic ẩn Dư nợ nếu chọn Tiền mặt
+      // Nếu phương thức thanh toán đang chọn là TIỀN MẶT -> hideDebt = true
+      final bool isCashPayment = _selectedMethodIds.contains(_cashMethod!.id);
+
+      // Dữ liệu Bill (Bổ sung SĐT, Địa chỉ và cờ hideDebt)
+      final billData = {
+        'customerName': widget.customer?.name ?? widget.order.customerName,
+        'customerPhone': widget.customer?.phone ?? widget.order.customerPhone, // Thêm SĐT
+        'guestAddress': widget.customerAddress ?? widget.order.guestAddress,   // Thêm Địa chỉ
+        'hideDebt': isCashPayment, // Cờ để ẩn dư nợ
+      };
+
+      // 4. Gửi lệnh in
+      await _sendReceiptToPrintQueue(
+        firestore: FirestoreService(),
+        billItems: billItems,
+        result: result,
+        billData: billData,
+        eInvoiceResult: null,
+        newBillId: newBillId,
+      );
+
+      ToastService().show(message: "Đã gửi lệnh in Bill Giao hàng.", type: ToastType.success);
+
+    } catch (e) {
+      ToastService().show(message: 'Lỗi in: $e', type: ToastType.error);
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingPayment = false);
       }
     }
   }
@@ -1570,14 +1699,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     } else {
       debugPrint(">>> [PAYLOAD] Không có thông tin HĐĐT để in.");
     }
-
+    final double debtToPrint = (billData['hideDebt'] == true) ? 0.0 : _debtAmount;
     return {
       'storeId': widget.currentUser.storeId,
       'tableName': widget.isRetailMode ? '' : widget.order.tableName,
       'userName': widget.currentUser.name ?? 'Unknown',
       'items': billItems,
       'storeInfo': storeInfo,
-      'showPrices': widget.showPricesOnReceipt,
+      'showPrices': true,
+      'title': 'HÓA ĐƠN',
       'summary': {
         'subtotal': widget.subtotal,
         'discount': result.discountAmount,
@@ -1591,6 +1721,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'payments': result.payments,
         'customerPointsUsed': result.customerPointsUsed,
         'changeAmount': result.changeAmount,
+        'debtAmount': debtToPrint,
         'totalPayable': _totalPayable,
         'startTime': widget.order.startTime,
         'voucherCode': _appliedVoucher?.code,
@@ -1601,16 +1732,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           'guestAddress': billData['guestAddress'] ?? '',
         },
         'bankDetails': result.bankDetailsForPrinting,
-
-        // --- CÁC TRƯỜNG MỚI CHO HĐĐT (Khớp với ReceiptWidget) ---
         'eInvoiceCode': eInvoiceResult?.reservationCode,
         'eInvoiceFullUrl': eInvoiceResult?.lookupUrl,
         'eInvoiceMst': eInvoiceResult?.mst,
-        // --------------------------------------------------------
-
         'billCode': newBillId.split('_').last,
         'items': billItems,
+        'isRetailMode': widget.isRetailMode,
       },
+      'isRetailMode': widget.isRetailMode,
       'billCode': newBillId.split('_').last,
     };
   }
@@ -1890,9 +2019,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'tableName': widget.order.tableName,
         'userName': widget.currentUser.name ?? 'Unknown',
         'items': detailedItems,
-        // Sử dụng detailedItems thay vì widget.order.items gốc
-        'storeInfo': storeInfo,
         'showPrices': true,
+        'storeInfo': storeInfo,
+        'title': 'TẠM TÍNH',
         'summary': summaryData,
       };
 
@@ -2666,9 +2795,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   Widget _buildRetailButtons(bool isMobile) {
+    // Kiểm tra xem đây có phải là đơn Giao hàng không
+    final bool isShipOrder = widget.order.tableName.toLowerCase().contains('giao hàng');
+
     return Row(
       children: [
-        // [SỬA ĐỔI] Chỉ hiện nút Hủy nếu KHÔNG PHẢI là Mobile
         if (!isMobile) ...[
           Expanded(
             child: OutlinedButton(
@@ -2681,10 +2812,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           const SizedBox(width: 8),
         ],
 
-        // Nút Thanh toán (KHÔNG IN)
+        // Nút Thanh toán (Giữ nguyên: Luôn thanh toán nhưng KHÔNG in)
         Expanded(
           child: ElevatedButton(
-            // forcePrint: false -> Chặn in
             onPressed: _isProcessingPayment
                 ? null
                 : () => _confirmPayment(forcePrint: false),
@@ -2695,14 +2825,21 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         ),
         const SizedBox(width: 8),
 
-        // Nút Thanh toán & IN
+        // Nút Bên Phải (Thay đổi logic tùy theo là Ship hay Tại quầy)
         Expanded(
           flex: 2,
           child: ElevatedButton.icon(
-            // forcePrint: true -> Ép in
             onPressed: _isProcessingPayment
                 ? null
-                : () => _confirmPayment(forcePrint: true),
+                : () {
+              if (isShipOrder) {
+                // Nếu là Ship -> Chỉ In Bill (Gọi hàm mới)
+                _printShipBillOnly();
+              } else {
+                // Nếu là Tại quầy -> Thanh toán & In (Logic cũ)
+                _confirmPayment(forcePrint: true);
+              }
+            },
             icon: const Icon(Icons.print),
             label: _isProcessingPayment
                 ? const SizedBox(
@@ -2710,8 +2847,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                 height: 24,
                 child: CircularProgressIndicator(
                     color: Colors.white, strokeWidth: 3))
-                : const Text('Thanh toán & In'),
+                : Text(isShipOrder ? 'In Bill (Ship)' : 'Thanh toán & In'), // Đổi tên nút
             style: ElevatedButton.styleFrom(
+                backgroundColor: isShipOrder ? Colors.orange : AppTheme.primaryColor, // Đổi màu cam cho dễ phân biệt nếu muốn
                 padding: const EdgeInsets.symmetric(vertical: 16)),
           ),
         ),
@@ -2904,14 +3042,25 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width >= 600;
+    final size = MediaQuery.of(context).size;
+    final isDesktop = size.width >= 600;
+
+    // Tính toán width mong muốn
+    final double dialogWidth = isDesktop ? 350 : (size.width * 0.9);
+
     final double change = _totalCash - widget.totalPayable;
     final double changeToDisplay = change > 0 ? change : 0;
 
     return AlertDialog(
       title: const Text('Tiền mặt khách đưa'),
-      content: SizedBox(
-        width: isDesktop ? 300 : 260,
+
+      // Giữ nguyên setting padding này để popup bung rộng
+      insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 24),
+      contentPadding: const EdgeInsets.fromLTRB(0, 20, 0, 24),
+
+      content: Container(
+        width: dialogWidth,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2928,7 +3077,7 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
               style: Theme.of(context)
                   .textTheme
                   .titleMedium
-                  ?.copyWith(color: AppTheme.primaryColor, fontSize: 18),
+                  ?.copyWith(color: AppTheme.primaryColor, fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
@@ -2939,35 +3088,21 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
                   fontSize: 18),
             ),
             const SizedBox(height: 16),
+
+            // --- PHẦN GRIDVIEW ĐÃ SỬA ---
             SizedBox(
-              // Chiều cao an toàn: 300px cho Desktop (3 cột), 250px cho Mobile (2 cột)
-              height: isDesktop ? 300 : 250,
-              child: isDesktop
-                  ? GridView.builder(
-                // Xóa shrinkWrap: true (vì chiều cao đã được cố định)
+              // Giảm chiều cao xuống một chút cho gọn (vì nút đã nhỏ lại)
+              height: isDesktop ? 250 : 200,
+              child: GridView.builder(
+                // Xóa logic if/else vì giờ cả Desktop và Mobile đều dùng 3 cột
                 itemCount: denominations.length,
-                gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3, // <--- SỬA THÀNH 3 CỘT
                   mainAxisSpacing: 8,
                   crossAxisSpacing: 8,
-                  childAspectRatio: 2,
-                ),
-                itemBuilder: (context, index) {
-                  final den = denominations[index];
-                  final qty = _quantities[den] ?? 0;
-                  return _denominationCell(den, qty);
-                },
-              )
-                  : GridView.builder(
-                // Xóa shrinkWrap: true
-                itemCount: denominations.length,
-                gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                  childAspectRatio: 2.2,
+                  // Tăng tỷ lệ này lên để nút thấp xuống (nhỏ lại về chiều cao)
+                  // 2.4 nghĩa là Chiều rộng = 2.4 lần Chiều cao
+                  childAspectRatio: 2.4,
                 ),
                 itemBuilder: (context, index) {
                   final den = denominations[index];
@@ -2976,30 +3111,30 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
                 },
               ),
             ),
+            // -----------------------------
           ],
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: _reset,
-          child: const Text('Reset'),
-        ),
         if (widget.hasCustomer)
           TextButton(
-            // [SỬA LỖI] Dùng _safePop thay vì Navigator.pop
-            onPressed: () => _safePop({'value': _totalCash, 'isDebtConfirmed': true}),
+            onPressed: () =>
+                _safePop({'value': _totalCash, 'isDebtConfirmed': true}),
             child: const Text('Ghi nợ',
                 style:
                 TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         TextButton(
-          // [SỬA LỖI] Dùng _safePop
+          onPressed: _reset,
+          child: const Text('Reset'),
+        ),
+        TextButton(
             onPressed: () => _safePop(null),
             child: const Text('Hủy')),
         ElevatedButton(
-          // [SỬA LỖI] Dùng _safePop
-            onPressed: () => _safePop({'value': _totalCash, 'isDebtConfirmed': false}),
-            child: const Text('Xác nhận')),
+            onPressed: () =>
+                _safePop({'value': _totalCash, 'isDebtConfirmed': false}),
+            child: const Text('Xong')),
       ],
     );
   }

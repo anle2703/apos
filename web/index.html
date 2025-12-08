@@ -2,25 +2,73 @@
 <html>
 <head>
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="Phần mềm bán hàng APOS">
 
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0,
+                 user-scalable=no, viewport-fit=cover">
+
+  <meta name="description" content="Phần mềm bán hàng APOS">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="APOS App">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content">
-
-  <title>APOS App</title>
+  <title>Phần mềm bán hàng APOS</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overscroll-behavior: none;
+      background: #ffffff;
+    }
+
+    #flt-glass-pane {
+      height: 100% !important;
+    }
+  </style>
 </head>
 
-<body style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: #FFFFFF; overflow: hidden; touch-action: manipulation;">
+<body style="background-color: #ffffff; margin: 0; padding: 0;">
+
   <script src="flutter_bootstrap.js" async></script>
+
+  <!-- Fix Android Chrome keyboard hide white/black area -->
+  <script>
+(function () {
+  if (!window.visualViewport) return;
+
+  const viewport = window.visualViewport;
+
+  function fixHeight() {
+    const newHeight = viewport.height;
+
+    // Ép height HTML / BODY theo visual viewport thật sự
+    document.documentElement.style.height = newHeight + "px";
+    document.body.style.height = newHeight + "px";
+
+    // Bắt Flutter layout redraw
+    window.dispatchEvent(new Event("flutter-resize"));
+  }
+
+  // Khi bàn phím mở / đóng
+  viewport.addEventListener("resize", fixHeight);
+
+  // Khi scale / scroll
+  viewport.addEventListener("scroll", fixHeight);
+
+  // Ngăn nhảy trắng / đen khi bàn phím đóng
+  document.documentElement.style.setProperty(
+    "overscroll-behavior-y",
+    "contain"
+  );
+})();
+</script>
+
 </body>
 </html>

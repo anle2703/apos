@@ -50,6 +50,7 @@ class BillService {
     String? customerName,
     String? status,
     String? debtStatus,
+    String? orderType,
   }) {
     Query query = _db
         .collection('bills')
@@ -83,36 +84,36 @@ class BillService {
       }
     }
 
-    return query.snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => BillModel.fromFirestore(doc)).toList());
-  }
+    return query.snapshots().map((snapshot) {
+      var bills = snapshot.docs.map((doc) => BillModel.fromFirestore(doc)).toList();
 
-  Future<Map<String, List<String>>> getDistinctFilterValues(String storeId) async {
-    try {
-      final snapshot = await _db.collection('bills')
-          .where('storeId', isEqualTo: storeId)
-          .orderBy('createdAt', descending: true)
-          .limit(500)
-          .get();
+      if (orderType != null && orderType != 'Tất cả') {
+        bills = bills.where((bill) {
+          // Lấy tableName từ dữ liệu bill và viết hoa để so sánh
+          final name = (bill.tableName).toUpperCase();
 
-      if (snapshot.docs.isEmpty) {
-        return {'tables': [], 'users': [], 'customers': []};
+          if (orderType == 'Giao hàng') {
+            return name.contains('GIAO HÀNG');
+          }
+          else if (orderType == 'Đặt lịch') {
+            return name.contains('ĐẶT LỊCH') || name.contains('BOOKING');
+          }
+          else if (orderType == 'Tại quầy') {
+            bool isSpecialType = name.contains('GIAO HÀNG') ||
+                name.contains('ĐẶT LỊCH') ||
+                name.contains('BOOKING');
+
+            if (isSpecialType) return false;
+            return name.startsWith('TẠI QUẦY') ||
+                name.isEmpty;
+          }
+
+          return true;
+        }).toList();
       }
 
-      final tables = snapshot.docs.map((doc) => doc.data()['tableName'] as String?).nonNulls.toSet();
-      final users = snapshot.docs.map((doc) => doc.data()['createdByName'] as String?).nonNulls.toSet();
-      final customers = snapshot.docs.map((doc) => doc.data()['customerName'] as String?).nonNulls
-          .where((name) => name.isNotEmpty).toSet();
-
-      return {
-        'tables': tables.toList()..sort(),
-        'users': users.toList()..sort(),
-        'customers': customers.toList()..sort(),
-      };
-    } catch (e) {
-      debugPrint('Lỗi khi lấy dữ liệu bộ lọc hóa đơn: $e');
-      return {'tables': [], 'users': [], 'customers': []};
-    }
+      return bills;
+    });
   }
 
   Future<void> cancelBillAndReverseTransactions(BillModel bill, String storeId) async {
@@ -373,10 +374,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
   late Future<Map<String, String>?> _storeInfoFuture;
   final BillService _billService = BillService();
 
-  // --- THÊM BIẾN NÀY ---
   String? _businessType;
-  // --------------------
-
   TimeRange _selectedRange = TimeRange.today;
   TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
   DateTime? _selectedStartDate;
@@ -394,6 +392,8 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
   final List<String> _statusOptions = ['Tất cả', 'Hoàn thành', 'Đã hủy'];
   final List<String> _debtOptions = ['Tất cả', 'Có', 'Không'];
   StreamSubscription<StoreSettings>? _settingsSub;
+  String? _selectedOrderType;
+  final List<String> _orderTypeOptions = ['Tất cả', 'Tại quầy', 'Giao hàng', 'Đặt lịch'];
 
   @override
   void initState() {
@@ -560,6 +560,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
       customerName: _selectedCustomer,
       status: _selectedStatus,
       debtStatus: _selectedDebtStatus,
+      orderType: _selectedOrderType,
     );
   }
 
@@ -590,7 +591,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
 
       // --- XỬ LÝ DANH SÁCH BÀN ---
       final tableNames = results[0].docs
-          .map((doc) => doc.data()['name'] as String?)
+          .map((doc) => doc.data()['tableName'] as String?)
           .nonNulls
           .toSet().toList()
         ..sort((a, b) => a.compareTo(b));
@@ -625,12 +626,6 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     }
   }
 
-  int compareNatural(String a, String b) {
-    // Tách số từ chuỗi để so sánh (Ví dụ đơn giản)
-    // Nếu project của bạn đã có thư viện so sánh (như 'collection') thì dùng nó tốt hơn
-    return a.compareTo(b);
-  }
-
   void _showFilterModal() {
     TimeRange tempSelectedRange = _selectedRange;
     DateTime? tempStartDate = _selectedStartDate;
@@ -641,10 +636,8 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     String? tempCustomer = _selectedCustomer;
     String? tempStatus = _selectedStatus;
     String? tempDebtStatus = _selectedDebtStatus;
-
-    // --- KIỂM TRA DỰA TRÊN BIẾN MỚI ---
+    String? tempOrderType = _selectedOrderType;
     final bool isRetail = _businessType == 'retail';
-    // ----------------------------------
 
     showModalBottomSheet(
       context: context,
@@ -711,22 +704,43 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                       onChanged: (value) => setModalState(() => tempStatus = (value == 'Tất cả') ? null : value),
                     )),
                     const SizedBox(width: 16),
+
                     Expanded(child: AppDropdown<String>(
                       labelText: 'Dư nợ', value: tempDebtStatus,
                       items: _debtOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
                       onChanged: (value) => setModalState(() => tempDebtStatus = (value == 'Tất cả') ? null : value),
                     )),
                   ]),
+                  isRetail
+                      ? AppDropdown<String>(
+                    labelText: 'Loại đơn hàng',
+                    value: tempOrderType,
+                    items: _orderTypeOptions
+                        .map((item) =>
+                        DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (value) {
+                      setModalState(() {
+                        tempOrderType = (value == 'Tất cả') ? null : value;
 
-                  // --- ẨN HIỆN DROPDOWN TÊN BÀN ---
-                  if (!isRetail)
-                    AppDropdown<String>(
-                      labelText: 'Tên bàn', value: tempTable,
-                      items: _tableOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                      onChanged: (value) => setModalState(() => tempTable = (value == 'Tất cả') ? null : value),
-                    ),
-                  // --------------------------------
-
+                        // Reset tên bàn khi thay đổi loại đơn
+                        if (tempOrderType != null) tempTable = null;
+                      });
+                    },
+                  )
+                      : AppDropdown<String>(
+                    labelText: 'Tên bàn',
+                    value: tempTable,
+                    items: _tableOptions
+                        .map((item) =>
+                        DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (value) {
+                      setModalState(() {
+                        tempTable = (value == 'Tất cả') ? null : value;
+                      });
+                    },
+                  ),
                   AppDropdown<String>(
                     labelText: 'Nhân viên', value: tempEmployee,
                     items: _userOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
@@ -750,7 +764,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                             _selectedTable = null;
                             _selectedEmployee = null; _selectedCustomer = null; _selectedStatus = null;
                             _selectedDebtStatus = null;
-
+                            _selectedOrderType = null;
                             _updateBillsStream();
                           });
                           Navigator.of(ctx).pop();
@@ -773,7 +787,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                             _selectedTable = tempTable; _selectedEmployee = tempEmployee;
                             _selectedCustomer = tempCustomer; _selectedStatus = tempStatus;
                             _selectedDebtStatus = tempDebtStatus;
-
+                            _selectedOrderType = tempOrderType;
                             _updateBillsStream();
                           });
                           Navigator.of(ctx).pop();

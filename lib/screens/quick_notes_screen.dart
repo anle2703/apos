@@ -131,7 +131,6 @@ class _QuickNotesScreenState extends State<QuickNotesScreen> {
   }
 }
 
-// --- Dialog dùng để Thêm/Sửa ghi chú ---
 class _QuickNoteEditDialog extends StatefulWidget {
   final UserModel currentUser;
   final FirestoreService firestoreService;
@@ -152,6 +151,16 @@ class _QuickNoteEditDialogState extends State<_QuickNoteEditDialog> {
   List<ProductModel> _selectedProducts = [];
   bool _isLoadingProducts = false;
 
+  // 1. ĐỊNH NGHĨA DANH SÁCH CÁC LOẠI ĐƯỢC PHÉP HIỂN THỊ (Loại bỏ Nguyên liệu/Vật liệu)
+  final List<String> _allowedSalesTypes = [
+    'Hàng hóa',
+    'Topping/Bán kèm',
+    'Dịch vụ',
+    'Dịch vụ/Tính giờ',
+    'Combo',
+    'Thành phẩm/Combo' // Thêm các loại hình kinh doanh của bạn vào đây
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -166,14 +175,14 @@ class _QuickNoteEditDialogState extends State<_QuickNoteEditDialog> {
   Future<void> _loadInitialProducts(List<String> productIds) async {
     setState(() => _isLoadingProducts = true);
     try {
-      // Tải tất cả sản phẩm 1 lần (từ stream trong service)
       final allProducts = await widget.firestoreService
           .getAllProductsStream(widget.currentUser.storeId)
           .first;
 
-      // Lọc ra những sản phẩm đã chọn
       final loadedProducts = allProducts
           .where((p) => productIds.contains(p.id))
+      // 2. LỌC DANH SÁCH ĐÃ GÁN (Chỉ lấy những loại nằm trong danh sách cho phép)
+          .where((p) => _allowedSalesTypes.contains(p.productType))
           .toList();
 
       if (mounted) {
@@ -196,6 +205,10 @@ class _QuickNoteEditDialogState extends State<_QuickNoteEditDialog> {
       currentUser: widget.currentUser,
       previouslySelected: _selectedProducts,
       groupByCategory: true,
+
+      // 3. TRUYỀN THAM SỐ LỌC VÀO ĐÂY (Giống bên màn hình Nhập hàng)
+      allowedProductTypes: _allowedSalesTypes,
+      // -----------------------------------------------------------
     );
 
     if (result != null) {

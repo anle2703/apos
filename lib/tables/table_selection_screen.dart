@@ -612,7 +612,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
         ),
         isLabelVisible: _pendingOrderCount > 0,
         child: IconButton(
-          icon: const Icon(Icons.phonelink_outlined,
+          icon: const Icon(Icons.public_outlined,
               color: AppTheme.primaryColor, size: 30),
           tooltip: 'Đơn hàng Online',
           onPressed: () {

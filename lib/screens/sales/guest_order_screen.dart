@@ -702,82 +702,81 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       length: groupNames.length,
       child: _isMenuView
           ? Scaffold(
-              resizeToAvoidBottomInset: false,
-              backgroundColor: Colors.white,
-              appBar: AppBar(
-                title: Text('Sản phẩm - ${widget.table.tableName}'),
-                automaticallyImplyLeading: false,
-                actions: [
-                  _buildMobileCartIcon(),
-                ],
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(100.0),
-                  child: Column(
-                    children: [
-                      _buildMobileSearchBar(),
-                      TabBar(
-                        isScrollable: true,
-                        tabs:
-                            groupNames.map((name) => Tab(text: name)).toList(),
-                      ),
-                    ],
-                  ),
+        resizeToAvoidBottomInset: true,
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          title: Text('Sản phẩm - ${widget.table.tableName}'),
+          automaticallyImplyLeading: false,
+          actions: [
+            _buildMobileCartIcon(),
+          ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(100.0),
+            child: Column(
+              children: [
+                _buildMobileSearchBar(),
+                TabBar(
+                  isScrollable: true,
+                  tabs: groupNames.map((name) => Tab(text: name)).toList(),
                 ),
-              ),
-              body: TabBarView(
-                children: groupNames.map((groupName) {
-                  final products = _menuProducts.where((p) {
-                    bool groupMatch;
-                    if (groupName == 'Tất cả') {
-                      groupMatch = true;
-                    } else if (groupName == 'Khác') {
-                      groupMatch =
-                          (p.productGroup == null || p.productGroup!.isEmpty);
-                    } else {
-                      groupMatch = (p.productGroup == groupName);
-                    }
-                    final searchMatch = _searchQuery.isEmpty ||
-                        p.productName.toLowerCase().contains(_searchQuery) ||
-                        (p.productCode?.toLowerCase().contains(_searchQuery) ??
-                            false);
-                    return groupMatch && searchMatch;
-                  }).toList();
-                  return GridView.builder(
-                    padding: EdgeInsets.fromLTRB(
-                        8.0, 8.0, 8.0, 80.0 + bottomPadding),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 200,
-                      childAspectRatio: 0.85,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemCount: products.length,
-                    itemBuilder: (context, index) =>
-                        _buildProductCard(products[index]),
-                  );
-                }).toList(),
-              ),
-            )
-          : Scaffold(
-              resizeToAvoidBottomInset: false,
-              appBar: AppBar(
-                title: Text('Giỏ hàng - ${widget.table.tableName}'),
-                automaticallyImplyLeading: false,
-                actions: [
-                  IconButton(
-                    icon: const Icon(
-                      Icons.add_shopping_cart,
-                      color: AppTheme.primaryColor,
-                      size: 30,
-                    ),
-                    tooltip: 'Thêm món',
-                    onPressed: () => setState(() => _isMenuView = true),
-                  )
-                ],
-              ),
-              body: _buildCartView(bottomPadding),
+              ],
             ),
+          ),
+        ),
+        body: TabBarView(
+          children: groupNames.map((groupName) {
+            final products = _menuProducts.where((p) {
+              bool groupMatch;
+              if (groupName == 'Tất cả') {
+                groupMatch = true;
+              } else if (groupName == 'Khác') {
+                groupMatch = (p.productGroup == null || p.productGroup!.isEmpty);
+              } else {
+                groupMatch = (p.productGroup == groupName);
+              }
+
+              final searchMatch = _searchQuery.isEmpty ||
+                  p.productName.toLowerCase().contains(_searchQuery) ||
+                  (p.productCode?.toLowerCase().contains(_searchQuery) ?? false);
+
+              return groupMatch && searchMatch;
+            }).toList();
+
+            return GridView.builder(
+              padding: EdgeInsets.fromLTRB(
+                  8.0, 8.0, 8.0, 80.0 + bottomPadding),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 200,
+                childAspectRatio: 0.85,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: products.length,
+              itemBuilder: (context, index) =>
+                  _buildProductCard(products[index]),
+            );
+          }).toList(),
+        ),
+      )
+          : Scaffold(
+        resizeToAvoidBottomInset: true,
+        appBar: AppBar(
+          title: Text('Giỏ hàng - ${widget.table.tableName}'),
+          automaticallyImplyLeading: false,
+          actions: [
+            IconButton(
+              icon: const Icon(
+                Icons.add_shopping_cart,
+                color: AppTheme.primaryColor,
+                size: 30,
+              ),
+              tooltip: 'Thêm món',
+              onPressed: () => setState(() => _isMenuView = true),
+            )
+          ],
+        ),
+        body: _buildCartView(bottomPadding),
+      ),
     );
   }
 
@@ -1211,15 +1210,13 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
                 return AlertDialog(
                   title: Text(title),
-                  contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  contentPadding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   buttonPadding: EdgeInsets.zero,
-                  actionsPadding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  actionsPadding: EdgeInsets.zero,
                   content: SizedBox(
                     width: dialogWidth,
                     child: Form(
                       key: _formKey,
-                      // SingleChildScrollView sẽ giúp cuộn nội dung khi bàn phím hiện lên
                       child: SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -1322,16 +1319,22 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                     ),
                   ),
                   actions: [
-                    TextButton(
-                      onPressed: _isSavingOrder
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      child: const Text('Hủy'),
-                    ),
-                    ElevatedButton(
-                      onPressed: _isSavingOrder
-                          ? null
-                          : () async {
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: _isSavingOrder
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            child: const Text('Hủy'),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            onPressed: _isSavingOrder
+                                ? null
+                                : () async {
                               if (_formKey.currentState!.validate()) {
                                 setStateDialog(() => _isSavingOrder = true);
                                 await _handleShippingOrder(type);
@@ -1340,13 +1343,16 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                                 }
                               }
                             },
-                      child: _isSavingOrder
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white))
-                          : const Text('Xác nhận'),
+                            child: _isSavingOrder
+                                ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                                : const Text('Xác nhận'),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 );
@@ -1848,7 +1854,8 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
       canPop: false,
       onPopInvokedWithResult: (bool didPop, dynamic result) {
         if (didPop) return;
-        if (MediaQuery.of(context).viewInsets.bottom > 0) {
+        final rootInsets = MediaQuery.of(this.context).viewInsets.bottom;
+        if (rootInsets > 0) {
           FocusScope.of(context).unfocus();
         } else {
           Navigator.of(context).pop();

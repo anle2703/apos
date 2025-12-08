@@ -6,7 +6,6 @@ class StoreSettings {
   final bool printBillAfterPayment;
   final bool allowProvisionalBill;
   final bool notifyKitchenAfterPayment;
-  final bool showPricesOnReceipt;
   final bool showPricesOnProvisional;
   final int? reportCutoffHour;
   final int? reportCutoffMinute;
@@ -29,7 +28,6 @@ class StoreSettings {
     required this.printBillAfterPayment,
     required this.allowProvisionalBill,
     required this.notifyKitchenAfterPayment,
-    required this.showPricesOnReceipt,
     required this.showPricesOnProvisional,
     this.reportCutoffHour,
     this.reportCutoffMinute,
@@ -54,8 +52,7 @@ class StoreSettings {
       printBillAfterPayment     : (d['printBillAfterPayment']     as bool?) ?? true,
       allowProvisionalBill      : (d['allowProvisionalBill']      as bool?) ?? true,
       notifyKitchenAfterPayment : (d['notifyKitchenAfterPayment'] as bool?) ?? false,
-      showPricesOnReceipt       : (d['showPricesOnReceipt']       as bool?) ?? true,
-      showPricesOnProvisional   : (d['showPricesOnProvisional']   as bool?) ?? true,
+      showPricesOnProvisional   : (d['showPricesOnProvisional']   as bool?) ?? false,
       reportCutoffHour          : (d['reportCutoffHour'] as int?),
       reportCutoffMinute        : (d['reportCutoffMinute'] as int?),
       promptForCash             : (d['promptForCash'] as bool?) ?? true,
@@ -63,7 +60,6 @@ class StoreSettings {
       redeemRate                : (d['redeemRate'] as num?)?.toDouble(),
       defaultPaymentMethodId    : (d['defaultPaymentMethodId'] as String?),
       qrOrderRequiresConfirmation: (d['qrOrderRequiresConfirmation'] as bool?) ?? false,
-
       printLabelOnKitchen       : (d['printLabelOnKitchen'] as bool?),
       printLabelOnPayment       : (d['printLabelOnPayment'] as bool?),
       labelWidth                : (d['labelWidth'] as num?)?.toDouble(),
@@ -78,7 +74,6 @@ class StoreSettings {
     'printBillAfterPayment'     : printBillAfterPayment,
     'allowProvisionalBill'      : allowProvisionalBill,
     'notifyKitchenAfterPayment' : notifyKitchenAfterPayment,
-    'showPricesOnReceipt'       : showPricesOnReceipt,
     'showPricesOnProvisional'   : showPricesOnProvisional,
     'reportCutoffHour'          : reportCutoffHour,
     'reportCutoffMinute'        : reportCutoffMinute,
@@ -101,7 +96,6 @@ class StoreSettings {
     bool? printBillAfterPayment,
     bool? allowProvisionalBill,
     bool? notifyKitchenAfterPayment,
-    bool? showPricesOnReceipt,
     bool? showPricesOnProvisional,
     int? reportCutoffHour,
     int? reportCutoffMinute,
@@ -122,7 +116,6 @@ class StoreSettings {
       printBillAfterPayment: printBillAfterPayment ?? this.printBillAfterPayment,
       allowProvisionalBill: allowProvisionalBill ?? this.allowProvisionalBill,
       notifyKitchenAfterPayment: notifyKitchenAfterPayment ?? this.notifyKitchenAfterPayment,
-      showPricesOnReceipt: showPricesOnReceipt ?? this.showPricesOnReceipt,
       showPricesOnProvisional: showPricesOnProvisional ?? this.showPricesOnProvisional,
       reportCutoffHour: reportCutoffHour ?? this.reportCutoffHour,
       reportCutoffMinute: reportCutoffMinute ?? this.reportCutoffMinute,

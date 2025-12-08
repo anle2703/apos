@@ -577,18 +577,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             secondary: const Icon(Icons.print_disabled_outlined),
           ),
           SwitchListTile(
-            title: const Text('Hiện nút in tạm tính nhanh hoặc kiểm món'),
+            title: const Text('Hiển thị nút in kiểm món'),
             value: _allowProvisionalBill,
             onChanged: (bool value) =>
                 setState(() => _allowProvisionalBill = value),
             secondary: const Icon(Icons.receipt_outlined),
-          ),
-          SwitchListTile(
-            title: const Text('Hiển thị giá tiền trên phiếu tạm tính nhanh'),
-            subtitle: const Text('Tắt để chuyển sang in phiếu kiểm món.'),
-            value: _showPricesOnBill,
-            onChanged: (bool value) => setState(() => _showPricesOnBill = value),
-            secondary: const Icon(Icons.price_change_outlined),
           ),
         ],
       ],

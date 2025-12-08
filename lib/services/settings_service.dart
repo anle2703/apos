@@ -27,8 +27,7 @@ class SettingsService {
         printBillAfterPayment: true,
         allowProvisionalBill: true,
         notifyKitchenAfterPayment: false,
-        showPricesOnReceipt: true,
-        showPricesOnProvisional: true,
+        showPricesOnProvisional: false,
       ).toMap());
     }
   }

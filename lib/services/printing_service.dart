@@ -163,6 +163,7 @@ class PrintingService {
     required List<OrderItem> items,
     required Map<String, dynamic> summary,
     required List<ConfiguredPrinter> configuredPrinters,
+    bool isRetailMode = false,
   }) async {
     try {
       final cashierPrinter = configuredPrinters.firstWhere(
@@ -209,15 +210,14 @@ class PrintingService {
       } catch (e) {
         debugPrint("Lỗi tạo mã QR: $e");
       }
-      // --------------------------
-
+      final bool finalRetailMode = isRetailMode || (summary['isRetailMode'] == true);
       final widget = ReceiptWidget(
         title: 'HÓA ĐƠN',
         storeInfo: storeInfo,
         items: items.where((i) => i.quantity > 0).toList(),
         summary: summary,
         userName: userName,
-        // Truyền biến local mới vào Widget
+        isRetailMode: finalRetailMode,
         tableName: displayTableName,
         showPrices: true,
         isSimplifiedMode: false,
@@ -247,7 +247,7 @@ class PrintingService {
         orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
       );
       final settings = await _loadReceiptSettings();
-      final String title = showPrices ? 'TẠM TÍNH' : 'KIỂM MÓN';
+      final String title = 'KIỂM MÓN';
 
       final widget = ReceiptWidget(
         title: title,

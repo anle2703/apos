@@ -36,6 +36,8 @@ import '../../theme/number_utils.dart';
 import '../../models/quick_note_model.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+// Thêm dòng này vào phần import
+import 'web_order_list_screen.dart';
 
 class RetailTab {
   String id;
@@ -255,11 +257,10 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   List<ProductGroupModel> _menuGroups = [];
   List<ProductModel> _menuProducts = [];
   List<DiscountModel> _activeDiscounts = [];
-
+  bool _isSaving = false;
   bool get isDesktop => MediaQuery.of(context).size.width >= 1100;
 
   bool _printBillAfterPayment = true;
-  bool _showPricesOnReceipt = true;
   bool _promptForCash = true;
   List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
   StreamSubscription? _buyXGetYSub;
@@ -282,7 +283,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       if (!mounted) return;
       setState(() {
         _printBillAfterPayment = s.printBillAfterPayment;
-        _showPricesOnReceipt = s.showPricesOnReceipt;
         _promptForCash = s.promptForCash ?? true;
       });
     });
@@ -409,6 +409,18 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                     }),
               ),
             )));
+  }
+
+  String _getStandardizedTableName(RetailTab tab) {
+    if (tab.cloudOrderId != null && tab.cloudOrderId!.startsWith('booking_')) {
+      return "Đặt lịch";
+    } else if (tab.cloudOrderId != null &&
+        !tab.cloudOrderId!.startsWith('retail_') && // [SỬA]: Chặn tất cả ID bắt đầu bằng retail_
+        !tab.cloudOrderId!.startsWith('tab_')) {
+      return "Giao hàng";
+    } else {
+      return "Tại quầy";
+    }
   }
 
   Future<void> _loadTaxSettings() async {
@@ -757,6 +769,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
   Future<void> _saveOrderToCloud() async {
     if (_currentTab == null) return;
+    // Chặn nếu đang lưu để tránh bấm nhiều lần
+    if (_isSaving) return;
+
     final tab = _currentTab!;
 
     if (tab.items.isEmpty) {
@@ -765,62 +780,93 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       return;
     }
 
-    // Nếu đã có cloudOrderId (đơn restore), dùng lại ID đó để cập nhật.
-    // Nếu chưa có, tạo ID mới.
-    final orderId = tab.cloudOrderId ??
-        'retail_saved_${DateTime.now().millisecondsSinceEpoch}';
-
-    final itemsList = tab.items.values.map((e) => e.toMap()).toList();
-    final total = tab.totalAmount;
-
-    final savedOrder = OrderModel(
-      id: orderId,
-      tableId: orderId,
-      tableName: tab.name,
-      status: 'saved',
-      // Trạng thái 'saved'
-      startTime: Timestamp.fromDate(tab.createdAt),
-      items: itemsList,
-      totalAmount: total,
-      storeId: widget.currentUser.storeId,
-      createdAt: Timestamp.now(),
-      createdByUid: widget.currentUser.uid,
-      createdByName: widget.currentUser.name ?? 'Staff',
-      version: 1,
-      numberOfCustomers: 1,
-      customerId: tab.customer?.id,
-      customerName: tab.customer?.name,
-      customerPhone: tab.customer?.phone,
-    );
+    // Bắt đầu loading
+    setState(() => _isSaving = true);
 
     try {
-      // 2. Đẩy lên Firestore (Ghi đè hoặc tạo mới)
+      final orderId = tab.cloudOrderId ??
+          'retail_saved_${DateTime.now().millisecondsSinceEpoch}';
+
+      // Xác định loại đơn
+      bool isWebOrder = false;
+      if (orderId.isNotEmpty &&
+          !orderId.startsWith('retail_saved_') &&
+          !orderId.startsWith('tab_')) {
+        isWebOrder = true;
+      }
+
+      final itemsList = tab.items.values.map((e) => e.toMap()).toList();
+      final total = tab.totalAmount;
+
+      // Logic xác định tên hiển thị khi lưu
+      // Nếu có khách -> Lấy tên khách. Nếu không -> Để null (Sẽ xử lý hiển thị là Khách lẻ ở UI danh sách)
+      String? finalCustomerName = tab.customer?.name;
+      String? finalCustomerId = tab.customer?.id;
+      String? finalCustomerPhone = tab.customer?.phone;
+
+      final orderData = OrderModel(
+        id: orderId,
+        tableId: orderId,
+        tableName: _getStandardizedTableName(tab),
+        status: 'saved',
+        startTime: Timestamp.fromDate(tab.createdAt),
+        items: itemsList,
+        totalAmount: total,
+        storeId: widget.currentUser.storeId,
+        createdAt: Timestamp.now(),
+        createdByUid: widget.currentUser.uid,
+        createdByName: widget.currentUser.name ?? 'Staff',
+        version: 1,
+        numberOfCustomers: 1,
+        customerId: finalCustomerId,
+        customerName: finalCustomerName,
+        customerPhone: finalCustomerPhone,
+      ).toMap();
+
+      if (isWebOrder) {
+        orderData['isWebOrder'] = true;
+      }
+
       await _firestoreService
           .getOrderReference(orderId)
-          .set(savedOrder.toMap());
+          .set(orderData);
 
-      // 3. Đóng tab hiện tại
-      _closeTab(tab.id);
+      if (!isWebOrder) {
+        _closeTab(tab.id);
+      }
 
       if (!isDesktop && mounted) {
         Navigator.of(context).pop();
       }
 
       ToastService().show(
-          message: "Đã đồng bộ đơn hàng lên hệ thống.",
-          type: ToastType.success);
+          message: "Đã lưu đơn hàng thành công.", type: ToastType.success);
     } catch (e) {
       ToastService().show(message: "Lỗi khi lưu: $e", type: ToastType.error);
+    } finally {
+      // Kết thúc loading dù thành công hay thất bại
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
-  Future<void> _deleteSavedOrder(String orderId) async {
+  // Tìm và thay thế toàn bộ hàm này
+  Future<void> _deleteSavedOrder(OrderModel order) async {
+    // 1. Kiểm tra an toàn ngay từ đầu
+    if (order.id.isEmpty) {
+      ToastService().show(
+          message: "Lỗi: ID đơn hàng bị rỗng, không thể xóa.",
+          type: ToastType.error);
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Xác nhận xóa"),
         content: const Text(
-            "Bạn có chắc muốn xóa vĩnh viễn đơn hàng đã lưu này không?"),
+            "Bạn có chắc muốn xóa vĩnh viễn đơn hàng này không?\n(Nếu là đơn Online, đơn bên đó sẽ chuyển sang trạng thái Hủy)"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -836,14 +882,55 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
     if (confirm == true) {
       try {
-        await FirebaseFirestore.instance
-            .collection('orders')
-            .doc(orderId)
-            .delete();
+        // 2. Xóa đơn hàng đã lưu (Thêm try-catch riêng để đảm bảo code chạy tiếp)
+        try {
+          await FirebaseFirestore.instance
+              .collection('orders')
+              .doc(order.id)
+              .delete();
+        } catch (e) {
+          debugPrint("Lỗi xóa trong collection orders: $e");
+        }
+
+        // 3. Cập nhật trạng thái bên web_orders (nếu có)
+        String? webOrderId;
+        if (order.id.startsWith('booking_')) {
+          webOrderId = order.id.replaceFirst('booking_', '');
+        } else {
+          final data = order.toMap();
+          if (data['isWebOrder'] == true ||
+              order.tableName.toUpperCase().contains('GIAO HÀNG')) {
+            webOrderId = order.id;
+          }
+        }
+
+        // [QUAN TRỌNG] Kiểm tra webOrderId phải khác null VÀ không rỗng
+        if (webOrderId != null && webOrderId.isNotEmpty) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('web_orders')
+                .doc(webOrderId)
+                .update({
+              'status': 'cancelled',
+              'confirmedBy': '${widget.currentUser.name}',
+              'confirmedAt': FieldValue.serverTimestamp(),
+            });
+          } catch (e) {
+            debugPrint("Lỗi cập nhật web_orders (có thể ID sai hoặc không tồn tại): $e");
+          }
+        }
+
+        // 4. Tìm và đóng Tab đang mở đơn này (nếu có)
+        final activeTab = _session.tabs
+            .firstWhereOrNull((t) => t.cloudOrderId == order.id);
+        if (activeTab != null) {
+          _closeTab(activeTab.id);
+        }
+
         ToastService()
             .show(message: "Đã xóa đơn hàng.", type: ToastType.success);
       } catch (e) {
-        ToastService().show(message: "Lỗi khi xóa: $e", type: ToastType.error);
+        ToastService().show(message: "Lỗi hệ thống: $e", type: ToastType.error);
       }
     }
   }
@@ -854,30 +941,39 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
         builder: (_, controller) {
           return Container(
             decoration: const BoxDecoration(
-              color: Colors.white,
+              color: Color(0xFFF5F7FA), // Màu nền nhẹ hiện đại
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Column(
               children: [
-                AppBar(
-                  title: const Text("Đơn hàng đã lưu"),
-                  centerTitle: true,
-                  automaticallyImplyLeading: false,
-                  shape: const RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(20))),
-                  actions: [
-                    IconButton(
+                // Header
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 1))],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("Đơn hàng đã lưu",
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      IconButton(
                         icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(ctx))
-                  ],
+                        onPressed: () => Navigator.pop(ctx),
+                      )
+                    ],
+                  ),
                 ),
+
+                // List
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
@@ -891,15 +987,14 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                         return const Center(child: CircularProgressIndicator());
                       }
                       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                        return const Center(
+                        return Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.cloud_off,
-                                  size: 60, color: Colors.grey),
-                              SizedBox(height: 16),
+                              Icon(Icons.cloud_off, size: 60, color: Colors.grey.shade300),
+                              const SizedBox(height: 16),
                               Text("Không có đơn hàng nào được lưu.",
-                                  style: TextStyle(color: Colors.grey)),
+                                  style: TextStyle(color: Colors.grey.shade500)),
                             ],
                           ),
                         );
@@ -913,76 +1008,168 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
                           final data = docs[index].data() as Map<String, dynamic>;
+                          data['id'] = docs[index].id;
                           final order = OrderModel.fromMap(data);
 
-                          final String displayName =
-                          (order.customerName != null && order.customerName!.isNotEmpty)
-                              ? order.customerName!
-                              : order.tableName;
+                          // --- LOGIC HIỂN THỊ TÊN KHÁCH LẺ ---
+                          String displayName;
+                          if (order.customerName != null && order.customerName!.isNotEmpty) {
+                            displayName = order.customerName!;
+                          } else {
+                            displayName = "Khách lẻ"; // Mặc định nếu không có tên
+                          }
+                          // ------------------------------------
 
-                          return Card(
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            child: InkWell(
+                          // Phân loại icon và màu sắc
+                          IconData typeIcon;
+                          Color typeColor;
+                          String typeLabel;
+                          bool isWeb = false;
+
+                          if (order.id.startsWith('booking_')) {
+                            typeIcon = Icons.calendar_month;
+                            typeColor = Colors.blue;
+                            typeLabel = 'Đặt lịch';
+                            isWeb = true;
+                          } else if (data['isWebOrder'] == true ||
+                              order.tableName.toUpperCase().contains('GIAO HÀNG')) {
+                            typeIcon = Icons.local_shipping;
+                            typeColor = Colors.orange;
+                            typeLabel = 'Giao hàng';
+                            isWeb = true;
+                          } else {
+                            typeIcon = Icons.storefront;
+                            typeColor = Colors.green;
+                            typeLabel = 'Tại quầy';
+                          }
+
+                          final timeStr = DateFormat('HH:mm dd/MM/yyyy').format(
+                              order.createdAt?.toDate() ?? DateTime.now());
+
+                          return Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
                               borderRadius: BorderRadius.circular(12),
-                              onTap: () {
-                                Navigator.pop(ctx); // Đóng danh sách cloud
-                                _restoreOrderFromCloud(order, docs[index].reference);
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // HÀNG 1: Tên khách/đơn + Nút xóa
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            displayName,
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withAlpha(12),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                )
+                              ],
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _restoreOrderFromCloud(order, docs[index].reference);
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    children: [
+                                      // Dòng 1: Icon - Tên khách - Tiền
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: typeColor.withAlpha(25),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Icon(typeIcon, color: typeColor, size: 20),
                                           ),
-                                        ),
-                                        InkWell(
-                                          onTap: () => _deleteSavedOrder(docs[index].id),
-                                          child: const Padding(
-                                            padding: EdgeInsets.all(4.0),
-                                            child: Icon(Icons.delete_outline, color: Colors.red, size: 22),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  displayName,
+                                                  style: const TextStyle(
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 16,
+                                                      color: Colors.black87
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  "${order.items.length} Sản phẩm",
+                                                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                                )
+                                              ],
+                                            ),
                                           ),
-                                        )
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
+                                          Column(
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                formatNumber(order.totalAmount),
+                                                style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    color: AppTheme.primaryColor,
+                                                    fontSize: 16
+                                                ),
+                                              ),
+                                            ],
+                                          )
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Container(height: 1, color: Colors.grey.shade100),
+                                      const SizedBox(height: 4),
 
-                                    // HÀNG 2: Số lượng sản phẩm + Tổng tiền
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(
-                                          "${order.items.length} sản phẩm",
-                                          style: TextStyle(color: Colors.grey[800], fontSize: 14),
-                                        ),
-                                        Text(
-                                          formatNumber(order.totalAmount),
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              color: AppTheme.primaryColor,
-                                              fontSize: 16
+                                      // Dòng 2: Loại đơn - Thời gian - Người tạo - Nút Xóa
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(color: typeColor.withAlpha(125)),
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              typeLabel,
+                                              style: TextStyle(
+                                                  color: typeColor,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-
-                                    // HÀNG 3: Thời gian + Nhân viên
-                                    Text(
-                                      "${DateFormat('HH:mm dd/MM').format(order.createdAt?.toDate() ?? DateTime.now())} - NV: ${order.createdByName}",
-                                      style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                                    ),
-                                  ],
+                                          const SizedBox(width: 8),
+                                          Icon(Icons.access_time, size: 14, color: Colors.grey.shade500),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            timeStr,
+                                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                          ),
+                                          const Spacer(),
+                                          // Nút xóa gọn gàng
+                                          InkWell(
+                                            onTap: () => _deleteSavedOrder(order),
+                                            borderRadius: BorderRadius.circular(4),
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              child: Row(
+                                                children: const [
+                                                  Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                                                  SizedBox(width: 4),
+                                                  Text("Xóa", style: TextStyle(color: Colors.red, fontSize: 12)),
+                                                ],
+                                              ),
+                                            ),
+                                          )
+                                        ],
+                                      )
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -1001,22 +1188,22 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   }
 
   void _restoreOrderFromCloud(OrderModel order, DocumentReference ref) {
-    // 1. Tạo Map items
+    if (_session.tabs.any((t) => t.cloudOrderId == ref.id)) {
+      ToastService().show(
+          message: "Đơn hàng này đang được mở rồi!", type: ToastType.warning);
+      return;
+    }
+
     final Map<String, OrderItem> items = {};
     for (var itemMap in order.items) {
       final item = OrderItem.fromMap(itemMap as Map<String, dynamic>, allProducts: _menuProducts);
       items[item.lineId] = item;
     }
 
-    // 2. [LOGIC MỚI] Đặt tên Tab
     String newTabName;
-
     if (order.customerName != null && order.customerName!.isNotEmpty) {
-      // Nếu có tên khách -> Dùng tên khách
       newTabName = order.customerName!;
     } else {
-      // Nếu là khách lẻ -> Tự động tìm tên "Đơn hàng X" còn trống
-      // (Tránh trường hợp đang có Đơn hàng 1, restore về lại đè lên hoặc trùng tên)
       newTabName = _generateUniqueDefaultName();
     }
 
@@ -1252,7 +1439,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     return OrderModel(
       id: orderId,
       tableId: orderId,
-      tableName: tab.name,
+      tableName: _getStandardizedTableName(tab),
       status: 'active',
       startTime: Timestamp.fromDate(tab.createdAt),
       items: itemsList,
@@ -1273,15 +1460,12 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     if (_currentTab == null) return;
     final tab = _currentTab!;
 
-    // 1. Kiểm tra giỏ hàng
     if (tab.items.isEmpty) {
       ToastService().show(
-          message: "Giỏ hàng trống, vui lòng chọn món.",
-          type: ToastType.warning);
+          message: "Giỏ hàng trống, vui lòng chọn món.", type: ToastType.warning);
       return;
     }
 
-    // 2. CHUẨN BỊ DỮ LIỆU
     final String orderId =
         tab.cloudOrderId ?? 'retail_${DateTime.now().millisecondsSinceEpoch}';
     tab.cloudOrderId ??= orderId;
@@ -1292,7 +1476,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     final newOrder = OrderModel(
       id: orderId,
       tableId: orderId,
-      tableName: tab.name,
+      tableName: _getStandardizedTableName(tab),
       status: 'active',
       startTime: Timestamp.fromDate(tab.createdAt),
       items: itemsList,
@@ -1308,10 +1492,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       customerPhone: tab.customer?.phone,
     );
 
-    // 3. CHUYỂN MÀN HÌNH THANH TOÁN
     if (isDesktop) {
       setState(() {
-        // SỬA: Chỉ cần bật cờ hiển thị, không gán biến _currentOrder (vì không tồn tại)
         _isPaymentView = true;
       });
     } else {
@@ -1327,30 +1509,65 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               subtotal: order.totalAmount,
               customer: tab.customer,
               printBillAfterPayment: _printBillAfterPayment,
-              showPricesOnReceipt: _showPricesOnReceipt,
               promptForCash: _promptForCash,
               isRetailMode: true,
-              // [SỬA: XÓA DÒNG initialPaymentMethodId]
             )));
 
     _checkPaymentResult(result, tab);
   }
 
-  void _checkPaymentResult(dynamic result, RetailTab tab) {
+  void _checkPaymentResult(dynamic result, RetailTab tab) async { // Thêm từ khóa async
+
     // TRƯỜNG HỢP 1: THANH TOÁN THÀNH CÔNG
     if (result == true || result is PaymentResult) {
+
+      // --- [BẮT ĐẦU LOGIC CẬP NHẬT TRẠNG THÁI WEB ORDER] ---
+      String? webOrderIdToUpdate;
+
+      // 1. Kiểm tra nếu là đơn Ship Retail (ID đơn saved trùng với ID web_order)
+      // Điều kiện: Có cloudOrderId và không phải là đơn Booking (vì Booking có tiền tố riêng)
+      if (tab.cloudOrderId != null && !tab.cloudOrderId!.startsWith('booking_')) {
+        webOrderIdToUpdate = tab.cloudOrderId;
+      }
+
+      // 2. Kiểm tra nếu là đơn Đặt lịch Retail (ID đơn saved = booking_WEB_ORDER_ID)
+      else if (tab.cloudOrderId != null && tab.cloudOrderId!.startsWith('booking_')) {
+        webOrderIdToUpdate = tab.cloudOrderId!.replaceFirst('booking_', '');
+      }
+
+      // 3. Thực hiện cập nhật lên Firebase
+      if (webOrderIdToUpdate != null) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('web_orders')
+              .doc(webOrderIdToUpdate)
+              .update({
+            'status': 'completed', // Đổi trạng thái sang hoàn tất (Màu xám)
+            'completedAt': FieldValue.serverTimestamp(),
+          });
+
+          debugPrint(">>> Đã đồng bộ trạng thái Web Order: $webOrderIdToUpdate -> completed");
+        } catch (e) {
+          // Lỗi này có thể xảy ra nếu đơn này là đơn thường (không phải web order), cứ bỏ qua
+          debugPrint(">>> Không phải Web Order hoặc lỗi cập nhật: $e");
+        }
+      }
+      // --- [KẾT THÚC LOGIC] ---
+
+      // Các xử lý giao diện cũ giữ nguyên
       _closeTab(tab.id);
       if (mounted) setState(() => _isPaymentView = false);
-      ToastService()
-          .show(message: "Thanh toán thành công!", type: ToastType.success);
+      ToastService().show(message: "Thanh toán thành công!", type: ToastType.success);
     }
 
-    // TRƯỜNG HỢP 2: HỦY THANH TOÁN (result == null hoặc false)
+    // TRƯỜNG HỢP 2: HỦY THANH TOÁN
     else if (result == null || result == false) {
+      // Không làm gì
     }
-
-    // TRƯỜNG HỢP 3: PaymentState -> Giữ nguyên
-    else if (result is PaymentState) {}
+    // TRƯỜNG HỢP 3: PaymentState
+    else if (result is PaymentState) {
+      // Không làm gì
+    }
   }
 
   @override
@@ -1424,6 +1641,57 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   }
 
   PreferredSizeWidget _buildAppBar() {
+    final webOrdersWidget = StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('web_orders')
+          .where('storeId', isEqualTo: widget.currentUser.storeId)
+          .where('status', isEqualTo: 'pending') // Chỉ đếm đơn đang chờ
+          .snapshots(),
+      builder: (context, snapshot) {
+        final int count = snapshot.hasData ? snapshot.data!.docs.length : 0;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              // Dùng icon Public hoặc Language tượng trưng cho Web
+              icon: const Icon(Icons.public, color: AppTheme.primaryColor, size: 28),
+              tooltip: "Đơn hàng Online",
+              onPressed: () {
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (ctx) => WebOrderListScreen(
+                      currentUser: widget.currentUser,
+                    )));
+              },
+            ),
+            if (count > 0)
+              Positioned(
+                top: -2,
+                left: 2, // Đặt badge bên phải trên
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black26, blurRadius: 2)
+                      ]),
+                  constraints:
+                  const BoxConstraints(minWidth: 18, minHeight: 18),
+                  child: Center(
+                    child: Text('$count',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+
     // 1. Widget Icon Đám mây (Đơn đã lưu)
     final savedOrdersWidget = StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -1524,7 +1792,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       elevation: 1,
       title: Container(
         height: kToolbarHeight,
-        // Padding 8 ngang để khớp với padding 8 của ô tìm kiếm bên dưới
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           children: [
@@ -1533,16 +1800,21 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
             // 1. NẾU LÀ MOBILE -> Hiện Ô Đơn Hàng TRƯỚC (Bên trái)
             if (!isDesktop) ...[
               mobileOrderSelectorWidget,
-              const SizedBox(width: 8), // Khoảng cách giữa ô đơn và icon cloud
+              const SizedBox(width: 8),
             ],
 
-            // 2. NẾU LÀ DESKTOP -> Hiện Icon Cloud TRƯỚC (Bên trái)
+            // 2. NẾU LÀ DESKTOP -> Hiện Icon Web & Cloud TRƯỚC (Bên trái)
             if (isDesktop) ...[
+              // [THÊM] Icon Web Order
+              webOrdersWidget,
+              const SizedBox(width: 4),
+
+              // Icon Saved Order
               savedOrdersWidget,
               const SizedBox(width: 4),
             ],
 
-            // 3. HIỂN THỊ TAB NGANG (Chỉ Desktop)
+            // 3. HIỂN THỊ TAB NGANG (Chỉ Desktop - Giữ nguyên)
             if (isDesktop)
               Expanded(
                 child: ListView.separated(
@@ -1574,12 +1846,12 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                                   width: 1.5),
                               boxShadow: isSelected
                                   ? [
-                                      BoxShadow(
-                                          color: AppTheme.primaryColor
-                                              .withAlpha(30),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 2))
-                                    ]
+                                BoxShadow(
+                                    color: AppTheme.primaryColor
+                                        .withAlpha(30),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2))
+                              ]
                                   : null),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1632,10 +1904,15 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                 ),
               ),
 
-            // 4. NẾU LÀ MOBILE -> Hiện Icon Cloud SAU CÙNG (Bên phải)
-            if (!isDesktop) savedOrdersWidget,
+            // 4. NẾU LÀ MOBILE -> Hiện Icon Web & Cloud SAU CÙNG (Bên phải)
+            if (!isDesktop) ...[
+              // [THÊM] Icon Web Order bên trái Icon Saved
+              webOrdersWidget,
+              // Icon Saved
+              savedOrdersWidget,
+            ],
 
-            // 5. CÁC NÚT CHỨC NĂNG (Chỉ Desktop)
+            // 5. CÁC NÚT CHỨC NĂNG (Chỉ Desktop - Giữ nguyên)
             if (isDesktop) ...[
               const SizedBox(width: 8),
               SizedBox(
@@ -1645,7 +1922,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   icon: const Icon(Icons.add, size: 20),
                   label: const Text("Tạo đơn",
                       style:
-                          TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryColor,
                       foregroundColor: Colors.white,
@@ -1723,11 +2000,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       subtotal: order.totalAmount,
       customer: _currentTab!.customer,
       printBillAfterPayment: _printBillAfterPayment,
-      showPricesOnReceipt: _showPricesOnReceipt,
       promptForCash: _promptForCash,
       initialState: null,
       isRetailMode: true,
-      // [SỬA: XÓA DÒNG initialPaymentMethodId]
       onCancel: () {
         setState(() {
           _isPaymentView = false;
@@ -2172,7 +2447,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
               if (item.note != null && item.note!.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: 1),
                   child: Text(
                     item.note!,
                     style: textTheme.bodyMedium?.copyWith(
@@ -2180,8 +2455,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                     ),
                   ),
                 ),
-              const SizedBox(height: 4),
-
               // === DÒNG 2: GIÁ ĐÃ GIẢM - SỐ LƯỢNG - THÀNH TIỀN ===
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2283,7 +2556,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     if (_isPaymentView) return const SizedBox.shrink();
 
     final double totalQuantity =
-        tab.items.values.fold(0.0, (tong, item) => tong + item.quantity);
+    tab.items.values.fold(0.0, (tong, item) => tong + item.quantity);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2312,10 +2585,11 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
           Row(
             children: [
               if (isDesktop) ...[
+                // [SỬA] Đổi action thành xóa giỏ hàng
                 IconButton(
-                  onPressed: tab.items.isEmpty ? null : () => _closeTab(tab.id),
+                  onPressed: tab.items.isEmpty ? null : _confirmClearCart,
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  tooltip: "Hủy đơn hàng này",
+                  tooltip: "Xóa giỏ hàng",
                 ),
                 const SizedBox(width: 8),
               ],
@@ -2323,9 +2597,15 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               // [NÚT LƯU ĐƠN]
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: tab.items.isNotEmpty ? _saveOrderToCloud : null,
-                  icon: const Icon(Icons.cloud_upload_outlined, size: 20),
-                  label: const Text("LƯU ĐƠN"),
+                  onPressed: (tab.items.isNotEmpty && !_isSaving) ? _saveOrderToCloud : null,
+                  icon: _isSaving
+                      ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryColor)
+                  )
+                      : const Icon(Icons.cloud_upload_outlined, size: 20),
+                  label: Text(_isSaving ? "ĐANG LƯU..." : "LƯU ĐƠN"),
                   style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       side: const BorderSide(color: AppTheme.primaryColor),
