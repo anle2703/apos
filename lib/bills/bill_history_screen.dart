@@ -83,7 +83,7 @@ class BillService {
       }
     }
 
-    return query.limit(100).snapshots().map((snapshot) =>
+    return query.snapshots().map((snapshot) =>
         snapshot.docs.map((doc) => BillModel.fromFirestore(doc)).toList());
   }
 
@@ -372,6 +372,11 @@ class BillHistoryScreen extends StatefulWidget {
 class _BillHistoryScreenState extends State<BillHistoryScreen> {
   late Future<Map<String, String>?> _storeInfoFuture;
   final BillService _billService = BillService();
+
+  // --- THÊM BIẾN NÀY ---
+  String? _businessType;
+  // --------------------
+
   TimeRange _selectedRange = TimeRange.today;
   TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
   DateTime? _selectedStartDate;
@@ -390,11 +395,11 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
   final List<String> _debtOptions = ['Tất cả', 'Có', 'Không'];
   StreamSubscription<StoreSettings>? _settingsSub;
 
-
   @override
   void initState() {
     super.initState();
     _storeInfoFuture = FirestoreService().getStoreDetails(widget.currentUser.storeId);
+    _fetchBusinessType();
 
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
@@ -418,6 +423,31 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     _updateDateRange();
     _updateBillsStream();
     _loadFilterData();
+  }
+
+  // --- THÊM HÀM NÀY ---
+  Future<void> _fetchBusinessType() async {
+    try {
+      // Xác định UID của chủ cửa hàng
+      final String? ownerId = (widget.currentUser.role == 'owner')
+          ? widget.currentUser.uid
+          : widget.currentUser.ownerUid;
+
+      if (ownerId != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(ownerId)
+            .get();
+
+        if (mounted && userDoc.exists) {
+          setState(() {
+            _businessType = userDoc.data()?['businessType'];
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi lấy businessType: $e");
+    }
   }
 
   @override
@@ -535,12 +565,55 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
 
   Future<void> _loadFilterData() async {
     try {
-      final filterData = await _billService.getDistinctFilterValues(widget.currentUser.storeId);
+      final storeId = widget.currentUser.storeId;
+
+      // Chạy song song 3 truy vấn để lấy dữ liệu gốc
+      final results = await Future.wait([
+        // 0. Lấy danh sách Bàn (tables)
+        FirebaseFirestore.instance
+            .collection('tables')
+            .where('storeId', isEqualTo: storeId)
+            .get(),
+
+        // 1. Lấy danh sách Nhân viên (users)
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('storeId', isEqualTo: storeId)
+            .get(),
+
+        // 2. Lấy danh sách Khách hàng (customers)
+        FirebaseFirestore.instance
+            .collection('customers')
+            .where('storeId', isEqualTo: storeId)
+            .get(),
+      ]);
+
+      // --- XỬ LÝ DANH SÁCH BÀN ---
+      final tableNames = results[0].docs
+          .map((doc) => doc.data()['name'] as String?)
+          .nonNulls
+          .toSet().toList()
+        ..sort((a, b) => a.compareTo(b));
+
+      // --- XỬ LÝ DANH SÁCH NHÂN VIÊN (Dùng trường 'name') ---
+      final userNames = results[1].docs
+          .map((doc) => doc.data()['name'] as String?) // Đã sửa thành 'name'
+          .nonNulls
+          .toSet().toList()
+        ..sort();
+
+      // --- XỬ LÝ DANH SÁCH KHÁCH HÀNG ---
+      final customerNames = results[2].docs
+          .map((doc) => doc.data()['name'] as String?)
+          .nonNulls
+          .toSet().toList()
+        ..sort();
+
       if (mounted) {
         setState(() {
-          _tableOptions = ['Tất cả', ...filterData['tables']!];
-          _userOptions = ['Tất cả', ...filterData['users']!];
-          _customerOptions = ['Tất cả', ...filterData['customers']!];
+          _tableOptions = ['Tất cả', ...tableNames];
+          _userOptions = ['Tất cả', ...userNames];
+          _customerOptions = ['Tất cả', ...customerNames];
           _isLoadingFilters = false;
         });
       }
@@ -548,23 +621,30 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
       debugPrint("Lỗi khi tải dữ liệu bộ lọc: $e");
       if (mounted) {
         setState(() => _isLoadingFilters = false);
-        ToastService().show(message: 'Không thể tải các tùy chọn bộ lọc.', type: ToastType.error);
       }
     }
   }
 
+  int compareNatural(String a, String b) {
+    // Tách số từ chuỗi để so sánh (Ví dụ đơn giản)
+    // Nếu project của bạn đã có thư viện so sánh (như 'collection') thì dùng nó tốt hơn
+    return a.compareTo(b);
+  }
+
   void _showFilterModal() {
-    // Lưu trạng thái tạm thời
-    TimeRange tempSelectedRange = _selectedRange; // <--- Dùng biến này
+    TimeRange tempSelectedRange = _selectedRange;
     DateTime? tempStartDate = _selectedStartDate;
     DateTime? tempEndDate = _selectedEndDate;
 
-    // Các biến khác giữ nguyên
     String? tempTable = _selectedTable;
     String? tempEmployee = _selectedEmployee;
     String? tempCustomer = _selectedCustomer;
     String? tempStatus = _selectedStatus;
     String? tempDebtStatus = _selectedDebtStatus;
+
+    // --- KIỂM TRA DỰA TRÊN BIẾN MỚI ---
+    final bool isRetail = _businessType == 'retail';
+    // ----------------------------------
 
     showModalBottomSheet(
       context: context,
@@ -582,7 +662,6 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                 children: [
                   Text('Lọc Hóa Đơn', style: Theme.of(context).textTheme.headlineMedium),
 
-                  // === THAY THẾ LISTTILE CŨ BẰNG DROPDOWN MỚI ===
                   AppDropdown<TimeRange>(
                     labelText: 'Khoảng thời gian',
                     prefixIcon: Icons.calendar_today,
@@ -624,9 +703,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                       }).toList();
                     },
                   ),
-                  // ===============================================
 
-                  // Các dropdown khác giữ nguyên
                   Row(children: [
                     Expanded(child: AppDropdown<String>(
                       labelText: 'Trạng thái', value: tempStatus,
@@ -640,12 +717,16 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                       onChanged: (value) => setModalState(() => tempDebtStatus = (value == 'Tất cả') ? null : value),
                     )),
                   ]),
-                  // ... (Giữ nguyên các AppDropdown Table, Employee, Customer) ...
-                  AppDropdown<String>(
-                    labelText: 'Tên bàn', value: tempTable,
-                    items: _tableOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                    onChanged: (value) => setModalState(() => tempTable = (value == 'Tất cả') ? null : value),
-                  ),
+
+                  // --- ẨN HIỆN DROPDOWN TÊN BÀN ---
+                  if (!isRetail)
+                    AppDropdown<String>(
+                      labelText: 'Tên bàn', value: tempTable,
+                      items: _tableOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+                      onChanged: (value) => setModalState(() => tempTable = (value == 'Tất cả') ? null : value),
+                    ),
+                  // --------------------------------
+
                   AppDropdown<String>(
                     labelText: 'Nhân viên', value: tempEmployee,
                     items: _userOptions.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
@@ -657,16 +738,14 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                     onChanged: (value) => setModalState(() => tempCustomer = (value == 'Tất cả') ? null : value),
                   ),
 
-                  // Nút hành động
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
                         onPressed: () {
                           setState(() {
-                            // --- SỬA NÚT XÓA: Reset về Hôm nay ---
                             _selectedRange = TimeRange.today;
-                            _updateDateRange(); // Tính lại ngày
+                            _updateDateRange();
 
                             _selectedTable = null;
                             _selectedEmployee = null; _selectedCustomer = null; _selectedStatus = null;
@@ -682,15 +761,12 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
                       ElevatedButton(
                         onPressed: () {
                           setState(() {
-                            // --- SỬA NÚT ÁP DỤNG: Cập nhật Range ---
                             _selectedRange = tempSelectedRange;
 
-                            // Nếu là custom thì lấy ngày từ modal, ngược lại thì tính toán tự động
                             if (_selectedRange == TimeRange.custom) {
                               _selectedStartDate = tempStartDate;
                               _selectedEndDate = tempEndDate;
                             } else {
-                              // Tính toán lại ngày dựa trên Range vừa chọn (Hôm qua, Tuần này...)
                               _updateDateRange();
                             }
 
