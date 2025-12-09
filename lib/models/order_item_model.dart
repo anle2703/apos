@@ -54,33 +54,29 @@ class OrderItem {
   double get subtotal {
     final isTimeBased = product.serviceSetup?['isTimeBased'] == true;
 
-    double basePrice = price; // price là tổng tiền (time-based) hoặc đơn giá (normal)
+    double basePrice = price;
     double discount = discountValue ?? 0;
     double discountedPrice = basePrice;
 
-    if (discount > 0) {
+    if (discount != 0) {
       if ((discountUnit ?? '%') == '%') {
         discountedPrice = basePrice * (1 - discount / 100);
-      } else { // 'VND'
+      } else {
         discountedPrice = (basePrice - discount);
       }
     }
+
     if (discountedPrice < 0) discountedPrice = 0;
 
-    // Dịch vụ tính giờ không có topping và số lượng luôn là 1
     if (isTimeBased) {
       return discountedPrice;
     }
 
-    // Tính toán cho món ăn/dịch vụ thông thường
     double toppingsTotalPerUnit = 0.0;
-    // Lưu ý: Đổi tên biến quantity trong vòng lặp thành toppingQty để tránh nhầm lẫn với quantity của OrderItem
     toppings.forEach((toppingProduct, toppingQty) {
       toppingsTotalPerUnit += toppingProduct.sellPrice * toppingQty;
     });
 
-    // [ĐÃ SỬA]: Nhân số lượng với tổng (Giá đã giảm + Giá Topping)
-    // Công thức cũ sai: (discountedPrice * quantity) + toppingsTotal
     return quantity * (discountedPrice + toppingsTotalPerUnit);
   }
 

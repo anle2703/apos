@@ -387,11 +387,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
         _manageStockSeparately =
             result['manageStockSeparately'] ?? false;
       });
-
-      ToastService().show(
-        message: 'Đã cập nhật ${_additionalUnits.length} đơn vị tính phụ.',
-        type: ToastType.success,
-      );
     }
   }
 
@@ -466,7 +461,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
       setState(() {
         _serviceSetup = result;
       });
-      ToastService().show(message: 'Đã cập nhật thiết lập dịch vụ.', type: ToastType.success);
     }
   }
 
@@ -1190,8 +1184,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                 final cumulativeCost = _calculateCumulativeCost();
                 _costPriceController.text = numberFormat.format(cumulativeCost);
               }
-
-              ToastService().show(message: 'Đã cập nhật thiết lập Topping.', type: ToastType.success);
             }
           }
           else {
@@ -1215,7 +1207,6 @@ class _AddEditProductScreenState extends State<AddEditProductScreen> {
                   _costPriceController.text = numberFormat.format(cumulativeCost);
                 }
               });
-              ToastService().show(message: 'Đã cập nhật thành phần.', type: ToastType.success);
             }
           }
         },

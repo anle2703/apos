@@ -36,7 +36,7 @@ class PromotionsScreen extends StatelessWidget {
             isScrollable: true,
             tabs: [
               _buildTab(icon: Icons.star_outline, text: "Tích Điểm"),
-              _buildTab(icon: Icons.local_offer_outlined, text: "Giảm Giá"),
+              _buildTab(icon: Icons.local_offer_outlined, text: "Bảng giá"),
               _buildTab(icon: Icons.receipt_long_outlined, text: "Voucher"),
               _buildTab(
                   icon: Icons.card_giftcard_outlined, text: "Mua X Tặng Y"),

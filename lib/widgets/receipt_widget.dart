@@ -44,16 +44,19 @@ class ReceiptWidget extends StatelessWidget {
 
     String displayTitle = title;
     if (isFinancialBill) {
-      if (displayTitle.toLowerCase().contains('kiểm món') || displayTitle.isEmpty) {
+      if (displayTitle.toLowerCase().contains('kiểm món') ||
+          displayTitle.isEmpty) {
         displayTitle = 'TẠM TÍNH';
       }
     }
 
     // Styles
-    final baseTextStyle = TextStyle(color: Colors.black, fontFamily: 'Roboto', height: 1.1);
+    final baseTextStyle =
+        TextStyle(color: Colors.black, fontFamily: 'Roboto', height: 1.1);
     final boldTextStyle = baseTextStyle.copyWith(fontWeight: FontWeight.w900);
     final italicTextStyle = baseTextStyle.copyWith(fontStyle: FontStyle.italic);
-    final strikeThroughStyle = baseTextStyle.copyWith(decoration: TextDecoration.lineThrough, decorationThickness: 2);
+    final strikeThroughStyle = baseTextStyle.copyWith(
+        decoration: TextDecoration.lineThrough, decorationThickness: 2);
 
     // Font Sizes
     final double fsHeader = settings.billHeaderSize * fontScale;
@@ -73,30 +76,48 @@ class ReceiptWidget extends StatelessWidget {
 
     // Extract Data
     final double subtotal = (summary['subtotal'] as num?)?.toDouble() ?? 0.0;
-    final double totalPayable = (summary['totalPayable'] as num?)?.toDouble() ?? 0.0;
+    final double totalPayable =
+        (summary['totalPayable'] as num?)?.toDouble() ?? 0.0;
     final double discount = (summary['discount'] as num?)?.toDouble() ?? 0.0;
     final double taxAmount = (summary['taxAmount'] as num?)?.toDouble() ?? 0.0;
-    final double changeAmount = (summary['changeAmount'] as num?)?.toDouble() ?? 0.0;
-    final double pointsValue = ((summary['customerPointsUsed'] as num?)?.toDouble() ?? 0.0) * 1000.0;
+    final double changeAmount =
+        (summary['changeAmount'] as num?)?.toDouble() ?? 0.0;
+    final double pointsValue =
+        ((summary['customerPointsUsed'] as num?)?.toDouble() ?? 0.0) * 1000.0;
     final String? voucherCode = summary['voucherCode'] as String?;
-    final double voucherDiscount = (summary['voucherDiscount'] as num?)?.toDouble() ?? 0.0;
-    final List surcharges = (summary['surcharges'] is List) ? summary['surcharges'] : const [];
-    final Map<String, dynamic> payments = (summary['payments'] is Map) ? Map<String, dynamic>.from(summary['payments']) : {};
-    final double totalPaidFromDB = payments.values.fold(0.0, (a, b) => a + (b as num).toDouble());
-    final double debtAmount = totalPayable - totalPaidFromDB;
+    final double voucherDiscount =
+        (summary['voucherDiscount'] as num?)?.toDouble() ?? 0.0;
+    final List surcharges =
+        (summary['surcharges'] is List) ? summary['surcharges'] : const [];
+    final Map<String, dynamic> payments = (summary['payments'] is Map)
+        ? Map<String, dynamic>.from(summary['payments'])
+        : {};
+    final double totalPaidFromDB =
+        payments.values.fold(0.0, (a, b) => a + (b as num).toDouble());
+    double debtAmount;
+    if (summary.containsKey('debtAmount')) {
+      debtAmount = (summary['debtAmount'] as num).toDouble();
+    } else {
+      debtAmount = totalPayable - totalPaidFromDB;
+    }
 
     final dynamic rawStart = summary['startTime'] ?? summary['startTimeIso'];
     DateTime? startTime;
     if (rawStart is Timestamp) {
       startTime = rawStart.toDate();
     } else if (rawStart is String && rawStart.isNotEmpty) {
-      try { startTime = DateTime.parse(rawStart); } catch (_) {}
+      try {
+        startTime = DateTime.parse(rawStart);
+      } catch (_) {}
     }
 
-    final Map<String, dynamic> customer = (summary['customer'] is Map) ? Map<String, dynamic>.from(summary['customer']) : {};
+    final Map<String, dynamic> customer = (summary['customer'] is Map)
+        ? Map<String, dynamic>.from(summary['customer'])
+        : {};
     final String khName = customer['name'] ?? 'Khách lẻ';
     final String? billCode = summary['billCode'] as String?;
-
+    final String khPhone = customer['phone'] ?? '';
+    final String khAddress = customer['guestAddress'] ?? '';
     final String? eInvoiceUrl = summary['eInvoiceFullUrl'] as String?;
     final String? eInvoiceCode = summary['eInvoiceCode'] as String?;
     final String? eInvoiceMst = summary['eInvoiceMst'] as String?;
@@ -110,33 +131,69 @@ class ReceiptWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // 1. HEADER
-          if (settings.billShowStoreName && (storeInfo['name'] ?? '').isNotEmpty)
-            Text(storeInfo['name']!.toUpperCase(), textAlign: TextAlign.center, style: boldTextStyle.copyWith(fontSize: fsHeader)),
+          if (settings.billShowStoreName &&
+              (storeInfo['name'] ?? '').isNotEmpty)
+            Text(storeInfo['name']!.toUpperCase(),
+                textAlign: TextAlign.center,
+                style: boldTextStyle.copyWith(fontSize: fsHeader)),
 
-          if (settings.billShowStoreAddress && (storeInfo['address'] ?? '').isNotEmpty)
-            Padding(padding: const EdgeInsets.only(top: 4), child: Text(storeInfo['address']!, textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsAddress))),
+          if (settings.billShowStoreAddress &&
+              (storeInfo['address'] ?? '').isNotEmpty)
+            Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(storeInfo['address']!,
+                    textAlign: TextAlign.center,
+                    style: baseTextStyle.copyWith(fontSize: fsAddress))),
 
-          if (settings.billShowStorePhone && (storeInfo['phone'] ?? '').isNotEmpty)
-            Padding(padding: const EdgeInsets.only(top: 2), child: Text('ĐT: ${storeInfo['phone']}', textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsPhone))),
+          if (settings.billShowStorePhone &&
+              (storeInfo['phone'] ?? '').isNotEmpty)
+            Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('ĐT: ${storeInfo['phone']}',
+                    textAlign: TextAlign.center,
+                    style: baseTextStyle.copyWith(fontSize: fsPhone))),
 
           const SizedBox(height: 16),
 
           // 2. TITLE
           Text(
-              tableName.isNotEmpty ? '$displayTitle - $tableName' : displayTitle,
+              tableName.isNotEmpty
+                  ? '$displayTitle - $tableName'
+                  : displayTitle,
               textAlign: TextAlign.center,
-              style: boldTextStyle.copyWith(fontSize: fsTitle)
-          ),
+              style: boldTextStyle.copyWith(fontSize: fsTitle)),
           // Hiện mã bill nếu có (bất kể là loại bill nào)
-          if (billCode != null && billCode.isNotEmpty) Text(billCode, textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsInfo)),
+          if (billCode != null && billCode.isNotEmpty)
+            Text(billCode,
+                textAlign: TextAlign.center,
+                style: baseTextStyle.copyWith(fontSize: fsInfo)),
 
           const SizedBox(height: 12),
 
           // 3. INFO SECTION
-          if (settings.billShowCustomerName) _buildInfoRow('Khách hàng:', khName, baseTextStyle.copyWith(fontSize: fsInfo)),
-          if (startTime != null && !isRetailMode) _buildInfoRow('Giờ vào:', timeFormat.format(startTime), baseTextStyle.copyWith(fontSize: fsInfo)),
-          _buildInfoRow('Giờ in:', timeFormat.format(DateTime.now()), baseTextStyle.copyWith(fontSize: fsInfo)),
-          if (settings.billShowCashierName) _buildInfoRow('Thu ngân:', userName, baseTextStyle.copyWith(fontSize: fsInfo)),
+          if (settings.billShowCustomerName) ...[
+            _buildInfoRow('Khách hàng:', khName,
+                baseTextStyle.copyWith(fontSize: fsInfo)),
+
+            // Logic hiển thị SĐT
+            if (khPhone.isNotEmpty)
+              _buildInfoRow(
+                  'SĐT:', khPhone, baseTextStyle.copyWith(fontSize: fsInfo)),
+
+            // Logic hiển thị Địa chỉ
+            if (khAddress.isNotEmpty)
+              // Nếu địa chỉ dài, dùng hàm _buildInfoRowMultilines hoặc để _buildInfoRow tự xuống dòng (nếu đã sửa Expanded)
+              _buildInfoRow(
+                  'ĐC:', khAddress, baseTextStyle.copyWith(fontSize: fsInfo)),
+          ],
+          if (startTime != null && !isRetailMode)
+            _buildInfoRow('Giờ vào:', timeFormat.format(startTime),
+                baseTextStyle.copyWith(fontSize: fsInfo)),
+          _buildInfoRow('Giờ in:', timeFormat.format(DateTime.now()),
+              baseTextStyle.copyWith(fontSize: fsInfo)),
+          if (settings.billShowCashierName)
+            _buildInfoRow('Thu ngân:', userName,
+                baseTextStyle.copyWith(fontSize: fsInfo)),
 
           const SizedBox(height: 16),
 
@@ -144,18 +201,27 @@ class ReceiptWidget extends StatelessWidget {
           Container(
             decoration: const BoxDecoration(
                 border: Border(
-                  top: BorderSide(width: 2, color: Colors.black),
-                  bottom: BorderSide(width: 2, color: Colors.black),
-                )),
+              top: BorderSide(width: 2, color: Colors.black),
+              bottom: BorderSide(width: 2, color: Colors.black),
+            )),
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
               children: [
-                SizedBox(width: 50, child: Text('STT', style: boldTextStyle.copyWith(fontSize: fsItemName))),
-                Expanded(flex: 6, child: Text('Tên món / DV', style: boldTextStyle.copyWith(fontSize: fsItemName), textAlign: TextAlign.center)),
+                SizedBox(
+                    width: 50,
+                    child: Text('STT',
+                        style: boldTextStyle.copyWith(fontSize: fsItemName))),
+                Expanded(
+                    flex: 6,
+                    child: Text('Tên món / DV',
+                        style: boldTextStyle.copyWith(fontSize: fsItemName),
+                        textAlign: TextAlign.center)),
                 Expanded(
                     flex: 4,
                     // Nếu là kiểm món thì hiện SL, nếu là bill tài chính thì hiện Thành tiền
-                    child: Text(isCheckDish ? 'SL' : 'Thành tiền', textAlign: TextAlign.right, style: boldTextStyle.copyWith(fontSize: fsItemName))),
+                    child: Text(isCheckDish ? 'SL' : 'Thành tiền',
+                        textAlign: TextAlign.right,
+                        style: boldTextStyle.copyWith(fontSize: fsItemName))),
               ],
             ),
           ),
@@ -168,8 +234,10 @@ class ReceiptWidget extends StatelessWidget {
             final bool isLastItem = i == items.length - 1;
 
             final String itemName = item.product.productName;
-            final String unit = item.selectedUnit.isNotEmpty ? item.selectedUnit : '';
-            final bool isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
+            final String unit =
+                item.selectedUnit.isNotEmpty ? item.selectedUnit : '';
+            final bool isTimeBased =
+                item.product.serviceSetup?['isTimeBased'] == true;
 
             // --- TÍNH TOÁN GIÁ HIỂN THỊ ---
             double originalPrice = item.product.sellPrice;
@@ -180,9 +248,11 @@ class ReceiptWidget extends StatelessWidget {
             } else {
               if (item.discountValue != null && item.discountValue! > 0) {
                 if (item.discountUnit == '%') {
-                  effectiveUnitPrice = originalPrice * (1 - item.discountValue! / 100);
+                  effectiveUnitPrice =
+                      originalPrice * (1 - item.discountValue! / 100);
                 } else {
-                  effectiveUnitPrice = originalPrice - (item.discountValue! / item.quantity);
+                  effectiveUnitPrice =
+                      originalPrice - (item.discountValue! / item.quantity);
                 }
               } else {
                 effectiveUnitPrice = item.price;
@@ -195,12 +265,15 @@ class ReceiptWidget extends StatelessWidget {
 
             if (item.discountValue != null && item.discountValue! > 0) {
               if (item.discountUnit == '%') {
-                discountBadge = "-${quantityFormat.format(item.discountValue)}%";
+                discountBadge =
+                    "-${quantityFormat.format(item.discountValue)}%";
               } else {
                 if (isTimeBased) {
-                  discountBadge = "-${currencyFormat.format(item.discountValue)}/h";
+                  discountBadge =
+                      "-${currencyFormat.format(item.discountValue)}/h";
                 } else {
-                  discountBadge = "-${currencyFormat.format(item.discountValue)}";
+                  discountBadge =
+                      "-${currencyFormat.format(item.discountValue)}";
                 }
               }
               showOriginalPrice = true;
@@ -212,7 +285,8 @@ class ReceiptWidget extends StatelessWidget {
             // Tax Logic
             double taxRate = 0;
             String taxLabel = 'VAT';
-            if (summary['items'] is List && i < (summary['items'] as List).length) {
+            if (summary['items'] is List &&
+                i < (summary['items'] as List).length) {
               final sItem = (summary['items'] as List)[i];
               if (sItem is Map) {
                 taxRate = (sItem['taxRate'] as num?)?.toDouble() ?? 0.0;
@@ -220,7 +294,9 @@ class ReceiptWidget extends StatelessWidget {
                 if (tKey.toUpperCase().contains('HKD')) taxLabel = 'LST';
               }
             }
-            String taxStr = taxRate > 0 ? "($taxLabel ${percentFormat.format(taxRate * 100)}%)" : "";
+            String taxStr = taxRate > 0
+                ? "($taxLabel ${percentFormat.format(taxRate * 100)}%)"
+                : "";
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -237,18 +313,29 @@ class ReceiptWidget extends StatelessWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(width: 30, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
+                          SizedBox(
+                              width: 30,
+                              child: Text('${i + 1}.',
+                                  style: boldTextStyle.copyWith(
+                                      fontSize: fsItemName))),
                           Expanded(
                             child: RichText(
                               text: TextSpan(
-                                style: boldTextStyle.copyWith(fontSize: fsItemName),
+                                style: boldTextStyle.copyWith(
+                                    fontSize: fsItemName),
                                 children: [
                                   TextSpan(text: itemName),
-                                  if (taxStr.isNotEmpty) TextSpan(text: ' $taxStr', style: baseTextStyle.copyWith(fontSize: fsItemName - 2)),
+                                  if (taxStr.isNotEmpty)
+                                    TextSpan(
+                                        text: ' $taxStr',
+                                        style: baseTextStyle.copyWith(
+                                            fontSize: fsItemName - 2)),
                                   if (discountBadge.isNotEmpty)
                                     TextSpan(
                                       text: ' [$discountBadge]',
-                                      style: boldTextStyle.copyWith(fontSize: fsItemName - 1, color: Colors.black),
+                                      style: boldTextStyle.copyWith(
+                                          fontSize: fsItemName - 1,
+                                          color: Colors.black),
                                     ),
                                 ],
                               ),
@@ -256,11 +343,18 @@ class ReceiptWidget extends StatelessWidget {
                           ),
                           Text(
                             currencyFormat.format(item.subtotal),
-                            style: boldTextStyle.copyWith(fontSize: fsItemDetail),
+                            style:
+                                boldTextStyle.copyWith(fontSize: fsItemDetail),
                           ),
                         ],
                       ),
-                      _buildTimeBasedDetails(item, fsItemDetail, shortDateTimeFormat, currencyFormat, baseTextStyle, boldTextStyle),
+                      _buildTimeBasedDetails(
+                          item,
+                          fsItemDetail,
+                          shortDateTimeFormat,
+                          currencyFormat,
+                          baseTextStyle,
+                          boldTextStyle),
                     ],
                   )
 
@@ -271,7 +365,11 @@ class ReceiptWidget extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      SizedBox(width: 35, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
+                      SizedBox(
+                          width: 35,
+                          child: Text('${i + 1}.',
+                              style: boldTextStyle.copyWith(
+                                  fontSize: fsItemName))),
                       Expanded(
                         flex: 6,
                         child: RichText(
@@ -279,7 +377,11 @@ class ReceiptWidget extends StatelessWidget {
                             style: boldTextStyle.copyWith(fontSize: fsItemName),
                             children: [
                               TextSpan(text: itemName),
-                              if (unit.isNotEmpty) TextSpan(text: ' ($unit)', style: baseTextStyle.copyWith(fontSize: fsItemName)),
+                              if (unit.isNotEmpty)
+                                TextSpan(
+                                    text: ' ($unit)',
+                                    style: baseTextStyle.copyWith(
+                                        fontSize: fsItemName)),
                             ],
                           ),
                         ),
@@ -287,9 +389,12 @@ class ReceiptWidget extends StatelessWidget {
                       Expanded(
                         flex: 4,
                         child: Text(
-                          isTimeBased ? "${quantityFormat.format(item.quantity)}h" : quantityFormat.format(item.quantity),
+                          isTimeBased
+                              ? "${quantityFormat.format(item.quantity)}h"
+                              : quantityFormat.format(item.quantity),
                           textAlign: TextAlign.right,
-                          style: boldTextStyle.copyWith(fontSize: fsItemName + 2),
+                          style:
+                              boldTextStyle.copyWith(fontSize: fsItemName + 2),
                         ),
                       ),
                     ],
@@ -305,27 +410,42 @@ class ReceiptWidget extends StatelessWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(width: 30, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
+                          SizedBox(
+                              width: 30,
+                              child: Text('${i + 1}.',
+                                  style: boldTextStyle.copyWith(
+                                      fontSize: fsItemName))),
                           Expanded(
                             child: RichText(
                               text: TextSpan(
-                                style: boldTextStyle.copyWith(fontSize: fsItemName),
+                                style: boldTextStyle.copyWith(
+                                    fontSize: fsItemName),
                                 children: [
                                   TextSpan(text: itemName),
-                                  if (unit.isNotEmpty) TextSpan(text: ' ($unit)', style: baseTextStyle.copyWith(fontSize: fsItemName)),
-                                  if (taxStr.isNotEmpty) TextSpan(text: ' $taxStr', style: baseTextStyle.copyWith(fontSize: fsItemName - 2)),
-
+                                  if (unit.isNotEmpty)
+                                    TextSpan(
+                                        text: ' ($unit)',
+                                        style: baseTextStyle.copyWith(
+                                            fontSize: fsItemName)),
+                                  if (taxStr.isNotEmpty)
+                                    TextSpan(
+                                        text: ' $taxStr',
+                                        style: baseTextStyle.copyWith(
+                                            fontSize: fsItemName - 2)),
                                   if (showOriginalPrice) ...[
                                     TextSpan(text: '  ', style: baseTextStyle),
                                     TextSpan(
-                                        text: currencyFormat.format(originalPrice),
-                                        style: strikeThroughStyle.copyWith(fontSize: fsItemName - 1)),
+                                        text: currencyFormat
+                                            .format(originalPrice),
+                                        style: strikeThroughStyle.copyWith(
+                                            fontSize: fsItemName - 1)),
                                   ],
-
                                   if (discountBadge.isNotEmpty)
                                     TextSpan(
                                       text: ' [$discountBadge]',
-                                      style: boldTextStyle.copyWith(fontSize: fsItemName - 1, color: Colors.black),
+                                      style: boldTextStyle.copyWith(
+                                          fontSize: fsItemName - 1,
+                                          color: Colors.black),
                                     ),
                                 ],
                               ),
@@ -333,7 +453,6 @@ class ReceiptWidget extends StatelessWidget {
                           ),
                         ],
                       ),
-
                       Padding(
                         padding: const EdgeInsets.only(left: 30, top: 2),
                         child: Row(
@@ -341,12 +460,13 @@ class ReceiptWidget extends StatelessWidget {
                           children: [
                             Text(
                               '${quantityFormat.format(item.quantity)} x ${currencyFormat.format(effectiveUnitPrice)}',
-                              style: baseTextStyle.copyWith(fontSize: fsItemDetail),
+                              style: baseTextStyle.copyWith(
+                                  fontSize: fsItemDetail),
                             ),
-
                             Text(
                               currencyFormat.format(item.subtotal),
-                              style: boldTextStyle.copyWith(fontSize: fsItemDetail),
+                              style: boldTextStyle.copyWith(
+                                  fontSize: fsItemDetail),
                             ),
                           ],
                         ),
@@ -368,14 +488,19 @@ class ReceiptWidget extends StatelessWidget {
                             isCheckDish
                                 ? '+ $tName x${quantityFormat.format(tQty)}'
                                 : '+ $tName (${quantityFormat.format(tQty)} x ${currencyFormat.format(tPrice)})',
-                            style: italicTextStyle.copyWith(fontSize: fsItemDetail - 2));
+                            style: italicTextStyle.copyWith(
+                                fontSize: fsItemDetail - 2));
                       }).toList(),
                     ),
                   ),
 
                 // NOTE
                 if (item.note != null && item.note!.isNotEmpty)
-                  Padding(padding: const EdgeInsets.only(left: 30), child: Text('(${item.note})', style: italicTextStyle.copyWith(fontSize: fsItemDetail))),
+                  Padding(
+                      padding: const EdgeInsets.only(left: 30),
+                      child: Text('(${item.note})',
+                          style: italicTextStyle.copyWith(
+                              fontSize: fsItemDetail))),
 
                 if (!isLastItem)
                   const Divider(thickness: 1, color: Colors.black, height: 12)
@@ -388,24 +513,45 @@ class ReceiptWidget extends StatelessWidget {
           // 6. SUMMARY (Chỉ hiện nếu CÓ GIÁ TIỀN - isFinancialBill)
           if (isFinancialBill) ...[
             if (!isSimplifiedMode) ...[
-              _buildRow('Tổng cộng:', currencyFormat.format(subtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
-              if (settings.billShowTax && taxAmount > 0) _buildRow('Thuế:', '+ ${currencyFormat.format(taxAmount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
+              _buildRow('Tổng cộng:', currencyFormat.format(subtotal),
+                  baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (settings.billShowTax && taxAmount > 0)
+                _buildRow('Thuế:', '+ ${currencyFormat.format(taxAmount)}',
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
               if (settings.billShowDiscount && discount > 0)
-                _buildRow(summary['discountName'] ?? 'Chiết khấu:', '- ${currencyFormat.format(discount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
-              if (voucherDiscount > 0) _buildRow('Voucher ($voucherCode):', '- ${currencyFormat.format(voucherDiscount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
-              if (pointsValue > 0) _buildRow('Điểm thưởng:', '- ${currencyFormat.format(pointsValue)}', baseTextStyle.copyWith(fontSize: fsInfo)),
+                _buildRow(
+                    summary['discountName'] ?? 'Chiết khấu:',
+                    '- ${currencyFormat.format(discount)}',
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (voucherDiscount > 0)
+                _buildRow(
+                    'Voucher ($voucherCode):',
+                    '- ${currencyFormat.format(voucherDiscount)}',
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (pointsValue > 0)
+                _buildRow(
+                    'Điểm thưởng:',
+                    '- ${currencyFormat.format(pointsValue)}',
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
               if (settings.billShowSurcharge && surcharges.isNotEmpty)
-                ...surcharges.map((s) => _buildRow('${s['name']}:', '+ ${currencyFormat.format((s['amount'] as num).toDouble())}', baseTextStyle.copyWith(fontSize: fsInfo))),
+                ...surcharges.map((s) => _buildRow(
+                    '${s['name']}:',
+                    '+ ${currencyFormat.format((s['amount'] as num).toDouble())}',
+                    baseTextStyle.copyWith(fontSize: fsInfo))),
             ],
-            if (isSimplifiedMode) _buildRow('Tổng cộng:', currencyFormat.format(subtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
+            if (isSimplifiedMode)
+              _buildRow('Tổng cộng:', currencyFormat.format(subtotal),
+                  baseTextStyle.copyWith(fontSize: fsInfo)),
             const SizedBox(height: 12),
 
             // Hiện Thành Tiền cho cả Hóa Đơn và Tạm Tính (miễn là có giá)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('THÀNH TIỀN:', style: boldTextStyle.copyWith(fontSize: fsTotal)),
-                Text(currencyFormat.format(totalPayable), style: boldTextStyle.copyWith(fontSize: fsTotal + 4)),
+                Text('THÀNH TIỀN:',
+                    style: boldTextStyle.copyWith(fontSize: fsTotal)),
+                Text(currencyFormat.format(totalPayable),
+                    style: boldTextStyle.copyWith(fontSize: fsTotal + 4)),
               ],
             ),
 
@@ -413,18 +559,28 @@ class ReceiptWidget extends StatelessWidget {
             if (!isSimplifiedMode) ...[
               if (settings.billShowPaymentMethod && payments.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text('Phương thức thanh toán:', style: baseTextStyle.copyWith(fontSize: fsInfo)),
-                ...payments.entries.map((entry) => _buildRow('- ${entry.key}:', currencyFormat.format((entry.value as num).toDouble()), baseTextStyle.copyWith(fontSize: fsInfo))),
+                Text('Phương thức thanh toán:',
+                    style: baseTextStyle.copyWith(fontSize: fsInfo)),
+                ...payments.entries.map((entry) => _buildRow(
+                    '- ${entry.key}:',
+                    currencyFormat.format((entry.value as num).toDouble()),
+                    baseTextStyle.copyWith(fontSize: fsInfo))),
               ],
-              if (changeAmount > 0) _buildRow('Tiền thừa:', currencyFormat.format(changeAmount), baseTextStyle.copyWith(fontSize: fsInfo)),
-              if (debtAmount > 0) _buildRow('Dư nợ:', currencyFormat.format(debtAmount), baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (changeAmount > 0)
+                _buildRow('Tiền thừa:', currencyFormat.format(changeAmount),
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (debtAmount > 0)
+                _buildRow('Dư nợ:', currencyFormat.format(debtAmount),
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
             ],
           ],
 
           // 7. QR CODE
           if (qrData != null && !isSimplifiedMode && isFinancialBill) ...[
             const SizedBox(height: 16),
-            Center(child: Text('Quét mã chuyển khoản', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+            Center(
+                child: Text('Quét mã chuyển khoản',
+                    style: baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 4),
             Center(
               child: SizedBox(
@@ -442,14 +598,22 @@ class ReceiptWidget extends StatelessWidget {
             ),
           ],
 
-          if (eInvoiceUrl != null && eInvoiceUrl.isNotEmpty && isFinancialBill) ...[
+          if (eInvoiceUrl != null &&
+              eInvoiceUrl.isNotEmpty &&
+              isFinancialBill) ...[
             const SizedBox(height: 24),
-            Center(child: Text('QUÉT MÃ TRA CỨU HĐĐT', style: boldTextStyle.copyWith(fontSize: fsInfo))),
+            Center(
+                child: Text('QUÉT MÃ TRA CỨU HĐĐT',
+                    style: boldTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 8),
             if (eInvoiceMst != null)
-              Center(child: Text('MST bên bán: $eInvoiceMst', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+              Center(
+                  child: Text('MST bên bán: $eInvoiceMst',
+                      style: baseTextStyle.copyWith(fontSize: fsInfo))),
             if (eInvoiceCode != null)
-              Center(child: Text('Mã tra cứu: $eInvoiceCode', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+              Center(
+                  child: Text('Mã tra cứu: $eInvoiceCode',
+                      style: baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 8),
             Center(
               child: SizedBox(
@@ -470,8 +634,16 @@ class ReceiptWidget extends StatelessWidget {
           // 8. FOOTER
           if (settings.billShowFooter && isFinancialBill) ...[
             const SizedBox(height: 24),
-            if (settings.footerText1.isNotEmpty) Center(child: Text(settings.footerText1, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
-            if (settings.footerText2.isNotEmpty) Center(child: Text(settings.footerText2, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
+            if (settings.footerText1.isNotEmpty)
+              Center(
+                  child: Text(settings.footerText1,
+                      style: italicTextStyle.copyWith(fontSize: fsInfo),
+                      textAlign: TextAlign.center)),
+            if (settings.footerText2.isNotEmpty)
+              Center(
+                  child: Text(settings.footerText2,
+                      style: italicTextStyle.copyWith(fontSize: fsInfo),
+                      textAlign: TextAlign.center)),
           ]
         ],
       ),
@@ -480,13 +652,13 @@ class ReceiptWidget extends StatelessWidget {
 
   // --- HELPER METHODS GIỮ NGUYÊN NHƯ CŨ ---
   Widget _buildTimeBasedDetails(
-      OrderItem item,
-      double fontSize,
-      DateFormat timeFormat,
-      NumberFormat currencyFormat,
-      TextStyle baseStyle,
-      TextStyle boldStyle,
-      ) {
+    OrderItem item,
+    double fontSize,
+    DateFormat timeFormat,
+    NumberFormat currencyFormat,
+    TextStyle baseStyle,
+    TextStyle boldStyle,
+  ) {
     final blocks = item.priceBreakdown;
     if (blocks.isEmpty) return const SizedBox.shrink();
 
@@ -523,7 +695,8 @@ class ReceiptWidget extends StatelessWidget {
         children: [
           Text(
             "${timeFormat.format(startTime)} - ${timeFormat.format(endTime)} (${_formatMinutes(totalMinutes)})",
-            style: baseStyle.copyWith(fontSize: fontSize, fontStyle: FontStyle.italic),
+            style: baseStyle.copyWith(
+                fontSize: fontSize),
           ),
           ...blocks.map((rawBlock) {
             final dynamic block = rawBlock;
@@ -548,7 +721,8 @@ class ReceiptWidget extends StatelessWidget {
 
             String timeRange = "";
             if (bStart != null && bEnd != null) {
-              timeRange = "${timeFormat.format(bStart)} - ${timeFormat.format(bEnd)}";
+              timeRange =
+                  "${timeFormat.format(bStart)} - ${timeFormat.format(bEnd)}";
             }
 
             if (percentDiscount > 0) {
@@ -558,13 +732,15 @@ class ReceiptWidget extends StatelessWidget {
             }
             if (bRate < 0) bRate = 0;
 
-            String details = "+ $timeRange (${_formatMinutes(bMinutes)} x ${currencyFormat.format(bRate)}/h)";
+            String details =
+                "+ $timeRange (${_formatMinutes(bMinutes)} x ${currencyFormat.format(bRate)}/h)";
 
             return Padding(
               padding: const EdgeInsets.only(top: 2.0),
               child: Text(
                 details,
-                style: baseStyle.copyWith(fontSize: fontSize - 2, color: Colors.black87),
+                style: baseStyle.copyWith(
+                    fontSize: fontSize - 2, color: Colors.black87),
               ),
             );
           }),
@@ -589,7 +765,8 @@ class ReceiptWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: style),
-          Expanded(child: Text(value, textAlign: TextAlign.right, style: style)),
+          Expanded(
+              child: Text(value, textAlign: TextAlign.right, style: style)),
         ],
       ),
     );

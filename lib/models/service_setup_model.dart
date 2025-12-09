@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 
-// Model cho một cặp giá trị-đơn vị hoa hồng
 class CommissionValue {
   double value;
   String unit;
@@ -24,7 +23,6 @@ class CommissionValue {
   }
 }
 
-// Model cho một khung giờ
 class TimeFrameModel {
   TimeOfDay startTime;
   TimeOfDay endTime;
@@ -95,15 +93,16 @@ class TimeFrameModel {
   }
 }
 
-// Model cho cấu trúc giá theo thời gian
 class TimePricingModel {
   int priceUpdateInterval;
   int initialDurationMinutes;
+  double initialPrice;
   List<TimeFrameModel> timeFrames;
 
   TimePricingModel({
     this.priceUpdateInterval = 1,
     this.initialDurationMinutes = 0,
+    this.initialPrice = 0,
     List<TimeFrameModel>? timeFrames,
   }) : timeFrames = timeFrames ?? [];
 
@@ -111,6 +110,7 @@ class TimePricingModel {
     return TimePricingModel(
       priceUpdateInterval: (map['priceUpdateInterval'] as num?)?.toInt() ?? 1,
       initialDurationMinutes: (map['initialDurationMinutes'] as num?)?.toInt() ?? 0,
+      initialPrice: (map['initialPrice'] as num?)?.toDouble() ?? 0,
       timeFrames: (map['timeFrames'] as List<dynamic>?)
           ?.map((e) => TimeFrameModel.fromMap(e as Map<String, dynamic>))
           .toList() ?? [],
@@ -121,12 +121,12 @@ class TimePricingModel {
     return {
       'priceUpdateInterval': priceUpdateInterval,
       'initialDurationMinutes': initialDurationMinutes,
+      'initialPrice': initialPrice,
       'timeFrames': timeFrames.map((e) => e.toMap()).toList(),
     };
   }
 }
 
-// Model chính cho toàn bộ thiết lập dịch vụ
 class ServiceSetupModel {
   bool isTimeBased;
   TimePricingModel timePricing;
@@ -177,7 +177,6 @@ class ServiceSetupModel {
   }
 }
 
-// Hàm tiện ích private
 String _timeOfDayToString(TimeOfDay tod) =>
     '${tod.hour.toString().padLeft(2, '0')}:${tod.minute.toString().padLeft(2, '0')}';
 

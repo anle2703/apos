@@ -25,6 +25,7 @@ import '../../screens/tax_management_screen.dart'
 import 'package:intl/intl.dart';
 import 'dart:math';
 import '../../models/surcharge_model.dart';
+import '../../services/pricing_service.dart';
 
 class PaymentState {
   final double discountAmount;
@@ -1431,8 +1432,20 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         return newItem;
       }).toList();
 
-      // [QUAN TRỌNG] Logic ẩn Dư nợ nếu chọn Tiền mặt
-      // Nếu phương thức thanh toán đang chọn là TIỀN MẶT -> hideDebt = true
+      String finalAddress = widget.customerAddress ?? '';
+      if (finalAddress.isEmpty) {
+        finalAddress = widget.order.guestAddress ?? '';
+      }
+      if (finalAddress.isEmpty && widget.customer != null) {
+        finalAddress = widget.customer!.address ?? ''; // Fallback cuối cùng
+      }
+
+      // Logic tương tự cho SĐT
+      String finalPhone = widget.customer?.phone ?? '';
+      if (finalPhone.isEmpty) {
+        finalPhone = widget.order.customerPhone ?? '';
+      }
+
       final bool isCashPayment = _selectedMethodIds.contains(_cashMethod!.id);
 
       // Dữ liệu Bill (Bổ sung SĐT, Địa chỉ và cờ hideDebt)
@@ -1728,7 +1741,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'voucherDiscount': _voucherDiscountValue,
         'customer': {
           'name': billData['customerName'] ?? 'Khách lẻ',
-          'phone': billData['customerPhone'],
+          'phone': billData['customerPhone'] ?? '',
           'guestAddress': billData['guestAddress'] ?? '',
         },
         'bankDetails': result.bankDetailsForPrinting,
@@ -2863,17 +2876,34 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
     for (final itemMap in widget.order.items) {
       final product = itemMap['product'] as Map<String, dynamic>? ?? {};
+
+      // Giá vốn nhập trong danh mục (Với DV giờ thì đây là Chi phí/Giờ)
       final double costPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
+
       final isTimeBased = product['serviceSetup']?['isTimeBased'] == true;
 
       if (isTimeBased) {
-        // Với dịch vụ: Tính giá vốn theo tỷ lệ nếu có giá bán gốc, hoặc = 0
-        final double sellPrice = (itemMap['price'] as num?)?.toDouble() ?? 0.0;
-        final double baseSellPrice = (product['sellPrice'] as num?)?.toDouble() ?? 0.0;
+        // [SỬA LẠI LOGIC TÍNH GIÁ VỐN DỊCH VỤ TÍNH GIỜ]
+        // Công thức: Chi phí = (Giá vốn 1 giờ / 60) * Tổng số phút sử dụng
 
-        if (baseSellPrice > 0) {
-          totalCost += sellPrice * (costPrice / baseSellPrice);
+        double totalMinutes = 0;
+        final priceBreakdown = itemMap['priceBreakdown'];
+
+        if (priceBreakdown is List) {
+          for (final block in priceBreakdown) {
+            // Kiểm tra kiểu dữ liệu để lấy số phút an toàn
+            if (block is Map) {
+              totalMinutes += (block['minutes'] as num?)?.toDouble() ?? 0;
+            } else if (block is TimeBlock) {
+              // Trường hợp itemMap giữ object TimeBlock (hiếm nhưng có thể xảy ra)
+              totalMinutes += block.minutes.toDouble();
+            }
+          }
         }
+
+        // Tính chi phí hoạt động dựa trên thời gian thực tế
+        totalCost += (costPrice / 60.0) * totalMinutes;
+
       } else {
         // Hàng hóa thường: Giá vốn * Số lượng
         final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;

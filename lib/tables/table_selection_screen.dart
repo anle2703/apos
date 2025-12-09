@@ -183,26 +183,40 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
               totalPausedDurationInSeconds: totalPausedDuration,
             );
 
-            // Duyệt qua từng Block để áp dụng giảm giá vào ĐƠN GIÁ GIỜ
             for (var block in timeResult.blocks) {
-              double effectiveRate = block.ratePerHour;
+              double blockCost = 0;
 
-              if (discountVal > 0) {
-                if (isPercent) {
-                  // Giảm theo % trên đơn giá giờ
-                  effectiveRate = block.ratePerHour * (1 - discountVal / 100);
-                } else {
-                  // Giảm tiền mặt trên đơn giá giờ (VNĐ/h)
-                  effectiveRate = block.ratePerHour - discountVal;
+              // Kiểm tra xem đây có phải là Block giá cố định (Giá tối thiểu) không?
+              // Dấu hiệu: ratePerHour = 0 nhưng cost > 0
+              bool isFixedPriceBlock = (block.ratePerHour == 0 && block.cost > 0);
+
+              if (isFixedPriceBlock) {
+                // --- TRƯỜNG HỢP 1: BLOCK GIÁ CỐ ĐỊNH (TỐI THIỂU) ---
+                // Yêu cầu: Không áp dụng tăng/giảm giá cho phần này (giữ nguyên giá gốc)
+                blockCost = block.cost;
+              } else {
+                // --- TRƯỜNG HỢP 2: TÍNH THEO GIỜ BÌNH THƯỜNG ---
+                double effectiveRate = block.ratePerHour;
+
+                // Áp dụng tăng/giảm giá vào ĐƠN GIÁ GIỜ (Rate)
+                // Cho phép discountVal âm (để xử lý tăng giá) hoặc dương (giảm giá)
+                if (discountVal != 0) {
+                  if (isPercent) {
+                    effectiveRate = block.ratePerHour * (1 - discountVal / 100);
+                  } else {
+                    effectiveRate = block.ratePerHour - discountVal;
+                  }
                 }
-              }
-              if (effectiveRate < 0) effectiveRate = 0;
+                if (effectiveRate < 0) effectiveRate = 0;
 
-              // Tính thành tiền của block
-              double blockCost = (effectiveRate / 60.0) * block.minutes;
+                // Tính thành tiền: (Giá mới / 60) * số phút
+                blockCost = (effectiveRate / 60.0) * block.minutes;
+              }
+
               itemFinalTotal += blockCost;
             }
-            // Làm tròn tổng tiền của món này giống OrderScreen
+
+            // Làm tròn tổng tiền của món này
             itemFinalTotal = itemFinalTotal.roundToDouble();
 
           } else {
@@ -231,19 +245,22 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
 
             // 2. Tính giá trị món chính sau giảm giá (trên 1 đơn vị)
             double discountedUnitPrice = price;
-            if (discountVal > 0) {
+
+            if (discountVal != 0) {
               if (isPercent) {
+                // Công thức: Giá * (1 - (-10/100)) = Giá * 1.1 (Tăng 10%) -> ĐÚNG
                 discountedUnitPrice = price * (1 - discountVal / 100);
               } else {
+                // Công thức: Giá - (-10,000) = Giá + 10,000 -> ĐÚNG
                 discountedUnitPrice = price - discountVal;
               }
             }
+            // Đảm bảo không âm
             if (discountedUnitPrice < 0) discountedUnitPrice = 0;
 
-            // 3. Công thức chuẩn: Số lượng * (Giá đã giảm + Giá Topping)
+            // 3. Tổng = Số lượng * (Giá đã điều chỉnh + Topping)
             itemFinalTotal = quantity * (discountedUnitPrice + toppingsTotalPerUnit);
           }
-
           recalculatedTotal += itemFinalTotal;
         }
         order.totalAmount = recalculatedTotal;

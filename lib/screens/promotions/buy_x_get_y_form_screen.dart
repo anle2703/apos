@@ -158,7 +158,6 @@ class _BuyXGetYFormScreenState extends State<BuyXGetYFormScreen> {
     }
   }
 
-  // [SỬA] Sử dụng AppDropdown để đồng bộ giao diện
   Widget _buildUnitDropdown({
     required ProductModel? product,
     required String? currentUnit,
@@ -387,15 +386,35 @@ class _BuyXGetYFormScreenState extends State<BuyXGetYFormScreen> {
                 ),
                 validator: (v) => v!.isEmpty ? "Nhập tên chương trình" : null,
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text("Kích hoạt"),
                 value: _isActive,
                 onChanged: (val) => setState(() => _isActive = val),
               ),
-              const SizedBox(height: 10),
-
+              const SizedBox(height: 8),
+              _buildSectionHeader("Thời gian áp dụng", Icons.access_time),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        _buildRadioTime("Cụ thể", "specific"),
+                        _buildRadioTime("Hàng ngày", "daily"),
+                        _buildRadioTime("Hàng tuần", "weekly"),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: _buildTimeContent(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
               // KHỐI MUA
               _buildSectionHeader("Điều kiện Mua (X)", Icons.shopping_cart_outlined),
               Card(
@@ -441,7 +460,7 @@ class _BuyXGetYFormScreenState extends State<BuyXGetYFormScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
               // KHỐI TẶNG
               _buildSectionHeader("Quà tặng (Y)", Icons.card_giftcard),
@@ -506,30 +525,7 @@ class _BuyXGetYFormScreenState extends State<BuyXGetYFormScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // KHỐI THỜI GIAN
-              _buildSectionHeader("Thời gian áp dụng", Icons.access_time),
-              const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        _buildRadioTime("Cụ thể", "specific"),
-                        _buildRadioTime("Hàng ngày", "daily"),
-                        _buildRadioTime("Hàng tuần", "weekly"),
-                      ],
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: _buildTimeContent(),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 16),
             ],
           ),
         ),

@@ -36,6 +36,7 @@ class _ServiceSetupScreenState extends State<ServiceSetupScreen> {
 
   final _initialDurationController = TextEditingController();
   final _updateIntervalController = TextEditingController();
+  final _initialPriceController = TextEditingController();
 
   @override
   void initState() {
@@ -52,6 +53,8 @@ class _ServiceSetupScreenState extends State<ServiceSetupScreen> {
         _localSetup.timePricing.initialDurationMinutes.toString();
     _updateIntervalController.text =
         _localSetup.timePricing.priceUpdateInterval.toString();
+    final double initPrice = _localSetup.timePricing.initialPrice;
+    _initialPriceController.text = initPrice == 0 ? '0' : formatNumber(initPrice);
   }
 
   @override
@@ -61,6 +64,7 @@ class _ServiceSetupScreenState extends State<ServiceSetupScreen> {
     _commissionL3Controller.dispose();
     _initialDurationController.dispose();
     _updateIntervalController.dispose();
+    _initialPriceController.dispose();
     super.dispose();
   }
 
@@ -135,42 +139,70 @@ class _ServiceSetupScreenState extends State<ServiceSetupScreen> {
   }
 
   Widget _buildTimeBasedView() {
+    // Định nghĩa các input fields ra biến để tái sử dụng
+    final intervalField = CustomTextFormField(
+      controller: _updateIntervalController,
+      decoration: const InputDecoration(labelText: 'Cập nhật giá mỗi (Phút)'),
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      onChanged: (value) {
+        _localSetup.timePricing.priceUpdateInterval = int.tryParse(value) ?? 1;
+      },
+    );
+
+    final durationField = CustomTextFormField(
+      controller: _initialDurationController,
+      decoration: const InputDecoration(labelText: 'Thời gian tối thiểu (Phút)'),
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      onChanged: (value) {
+        _localSetup.timePricing.initialDurationMinutes = int.tryParse(value) ?? 0;
+      },
+    );
+
+    final initialPriceField = CustomTextFormField(
+      controller: _initialPriceController,
+      decoration: const InputDecoration(labelText: 'Giá tối thiểu'),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [ThousandDecimalInputFormatter()],
+      onChanged: (value) {
+        _localSetup.timePricing.initialPrice = parseVN(value);
+      },
+    );
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: CustomTextFormField(
-                controller: _updateIntervalController,
-                decoration:
-                    const InputDecoration(labelText: 'Cập nhật giá mỗi (Phút)'),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (value) {
-                  _localSetup.timePricing.priceUpdateInterval =
-                      int.tryParse(value) ?? 1;
-                },
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: CustomTextFormField(
-                controller: _initialDurationController,
-                decoration: const InputDecoration(
-                    labelText: 'Thời gian tối thiểu (Phút)'),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (value) {
-                  _localSetup.timePricing.initialDurationMinutes =
-                      int.tryParse(value) ?? 0;
-                },
-              ),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Desktop (> 600px): 1 hàng 3 cột
+            if (constraints.maxWidth > 600) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: intervalField),
+                  const SizedBox(width: 16),
+                  Expanded(child: durationField),
+                  const SizedBox(width: 16),
+                  Expanded(child: initialPriceField),
+                ],
+              );
+            } else {
+              // Mobile: 3 hàng dọc (Mỗi mục 1 hàng)
+              return Column(
+                children: [
+                  intervalField,
+                  const SizedBox(height: 16),
+                  durationField,
+                  const SizedBox(height: 16),
+                  initialPriceField,
+                ],
+              );
+            }
+          },
         ),
+
         const SizedBox(height: 24),
         Text('Giá bán thay đổi theo khung giờ',
             style: Theme.of(context)
@@ -189,15 +221,13 @@ class _ServiceSetupScreenState extends State<ServiceSetupScreen> {
               frame: frame,
               onDelete: () {
                 setState(
-                    () => _localSetup.timePricing.timeFrames.removeAt(index));
+                        () => _localSetup.timePricing.timeFrames.removeAt(index));
               },
               onChanged: (updatedFrame) {
-                // SỬA LỖI: Kiểm tra ngay khi có thay đổi
                 final originalFrame = _localSetup.timePricing.timeFrames[index];
                 setState(() =>
-                    _localSetup.timePricing.timeFrames[index] = updatedFrame);
+                _localSetup.timePricing.timeFrames[index] = updatedFrame);
                 if (!_validateTimeFrames(ignoreIndex: index)) {
-                  // Nếu lỗi, hoàn tác lại
                   setState(() => _localSetup.timePricing.timeFrames[index] =
                       originalFrame);
                 }

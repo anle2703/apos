@@ -46,6 +46,8 @@ class RetailTab {
   Map<String, OrderItem> items;
   DateTime createdAt;
   String? cloudOrderId;
+  String? guestAddress;
+  String? guestNote;
 
   RetailTab({
     required this.id,
@@ -54,6 +56,8 @@ class RetailTab {
     Map<String, OrderItem>? items,
     DateTime? createdAt,
     this.cloudOrderId,
+    this.guestAddress,
+    this.guestNote,
   })  : items = items ?? {},
         createdAt = createdAt ?? DateTime.now();
 
@@ -83,6 +87,8 @@ class RetailTab {
       }).toList(),
       'createdAt': createdAt.millisecondsSinceEpoch,
       'cloudOrderId': cloudOrderId,
+      'guestAddress': guestAddress,
+      'guestNote': guestNote,
     };
   }
 
@@ -90,13 +96,11 @@ class RetailTab {
   factory RetailTab.fromMap(
       Map<String, dynamic> map, List<ProductModel> allProducts) {
     final Map<String, OrderItem> loadedItems = {};
-
     if (map['items'] != null) {
       final rawList = map['items'] as List;
       for (var rawItem in rawList) {
         try {
           final itemMap = Map<String, dynamic>.from(rawItem);
-          // Convert ngược int thành Timestamp
           if (itemMap['addedAt'] is int) {
             itemMap['addedAt'] =
                 Timestamp.fromMillisecondsSinceEpoch(itemMap['addedAt']);
@@ -111,11 +115,9 @@ class RetailTab {
       }
     }
 
-    // [QUAN TRỌNG] Khôi phục khách hàng an toàn
     CustomerModel? loadedCustomer;
     if (map['customer'] != null) {
       try {
-        // Ép kiểu Map<String, dynamic> an toàn
         final customerMap = Map<String, dynamic>.from(map['customer']);
         loadedCustomer = CustomerModel.fromMap(customerMap);
       } catch (e) {
@@ -127,12 +129,13 @@ class RetailTab {
       id: map['id'] ?? 'unknown',
       name: map['name'] ?? 'Đơn hàng',
       customer: loadedCustomer,
-      // Gán khách hàng đã load
       items: loadedItems,
       createdAt: map['createdAt'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['createdAt'])
           : null,
       cloudOrderId: map['cloudOrderId'],
+      guestAddress: map['guestAddress'],
+      guestNote: map['guestNote'],
     );
   }
 }
@@ -259,7 +262,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   List<DiscountModel> _activeDiscounts = [];
   bool _isSaving = false;
   bool get isDesktop => MediaQuery.of(context).size.width >= 1100;
-
+  final ScrollController _tabScrollController = ScrollController();
+  final Map<String, GlobalKey> _tabKeys = {};
   bool _printBillAfterPayment = true;
   bool _promptForCash = true;
   List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
@@ -343,8 +347,29 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     super.dispose();
   }
 
+  void _scrollToTab(String tabId) {
+    final key = _tabKeys[tabId];
+    if (key != null && key.currentContext != null) {
+      Scrollable.ensureVisible(
+        key.currentContext!,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
   void _openMobileCart() {
     if (_currentTab == null) return;
+
+    bool isLockedCustomer = false;
+    if (_currentTab!.cloudOrderId != null) {
+      if (_currentTab!.cloudOrderId!.startsWith('booking_')) {
+        isLockedCustomer = true;
+      } else if (!_currentTab!.cloudOrderId!.startsWith('retail_') && !_currentTab!.cloudOrderId!.startsWith('tab_')) {
+        isLockedCustomer = true;
+      }
+    }
 
     showModalBottomSheet(
         context: context,
@@ -364,21 +389,25 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               child: Scaffold(
                 backgroundColor: Colors.white,
                 appBar: AppBar(
-                  // [SỬA] Bọc Title trong StreamBuilder để cập nhật tên khách ngay lập tức
                   title: StreamBuilder<void>(
                       stream: _cartUpdateController.stream,
                       builder: (context, snapshot) {
-                        return SizedBox(
-                          height: 40,
-                          child: CustomerSelector(
-                            currentCustomer: _currentTab!.customer,
-                            firestoreService: _firestoreService,
-                            storeId: widget.currentUser.storeId,
-                            onCustomerSelected: (customer) {
-                              _updateTabCustomer(customer);
-                              // Bắn tín hiệu để StreamBuilder nhận được và vẽ lại tên mới
-                              _cartUpdateController.add(null);
-                            },
+                        return AbsorbPointer(
+                          absorbing: isLockedCustomer,
+                          child: Opacity(
+                            opacity: isLockedCustomer ? 0.6 : 1.0,
+                            child: SizedBox(
+                              height: 40,
+                              child: CustomerSelector(
+                                currentCustomer: _currentTab!.customer,
+                                firestoreService: _firestoreService,
+                                storeId: widget.currentUser.storeId,
+                                onCustomerSelected: (customer) {
+                                  _updateTabCustomer(customer);
+                                  _cartUpdateController.add(null);
+                                },
+                              ),
+                            ),
                           ),
                         );
                       }
@@ -454,16 +483,37 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     final Map<String, OrderItem> updates = {};
 
     for (final entry in _currentTab!.items.entries) {
-      final item = entry.value;
+      var item = entry.value;
 
-      // Bỏ qua món quà tặng
-      if (item.note != null && item.note!.contains("Tặng kèm")) continue;
+      // 1. [MỚI] CẬP NHẬT GIÁ GỐC TỪ MENU (Nếu chủ quán vừa đổi giá bán)
+      // Tìm sản phẩm mới nhất trong danh sách đã tải
+      final latestProduct = _menuProducts.firstWhereOrNull((p) => p.id == item.product.id);
 
-      // Tìm khuyến mãi tốt nhất hiện tại
+      if (latestProduct != null) {
+        // Lấy giá bán hiện tại theo đơn vị tính
+        double currentBasePrice = _getBasePriceForUnit(latestProduct, item.selectedUnit);
+
+        // Nếu giá gốc lệch nhau, hoặc thông tin sản phẩm thay đổi -> Cập nhật lại Item
+        if (item.price != currentBasePrice || item.product.productName != latestProduct.productName) {
+          item = item.copyWith(
+              product: latestProduct,
+              price: currentBasePrice
+          );
+          hasChanges = true;
+        }
+      }
+
+      // Bỏ qua món quà tặng (để logic BuyXGetY tự xử lý)
+      if (item.note != null && item.note!.contains("Tặng kèm")) {
+        updates[entry.key] = item;
+        continue;
+      }
+
+      // 2. TÍNH LẠI GIẢM GIÁ (Dựa trên giá gốc mới & chương trình KM hiện tại)
       final discountItem = _discountService.findBestDiscountForProduct(
         product: item.product,
         activeDiscounts: _activeDiscounts,
-        customer: _currentTab!.customer,
+        customer: _currentTab!.customer, // Dùng khách hàng của Tab hiện tại
         checkTime: DateTime.now(),
       );
 
@@ -479,19 +529,21 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       final double oldVal = item.discountValue ?? 0;
       final String oldUnit = item.discountUnit ?? '%';
 
-      // Nếu khác thì cập nhật
-      if ((oldVal - newDiscountVal).abs() > 0.01 ||
-          oldUnit != newDiscountUnit) {
+      if ((oldVal - newDiscountVal).abs() > 0.01 || oldUnit != newDiscountUnit || hasChanges) {
         updates[entry.key] = item.copyWith(
           discountValue: newDiscountVal,
           discountUnit: newDiscountUnit,
         );
         hasChanges = true;
+      } else {
+        // Nếu không đổi giảm giá nhưng đã đổi giá gốc ở bước 1, vẫn phải add vào updates
+        updates[entry.key] = item;
       }
     }
 
     if (hasChanges) {
       setState(() {
+        _currentTab!.items.clear();
         _currentTab!.items.addAll(updates);
       });
       _session.saveSessionToLocal();
@@ -698,10 +750,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   void _addNewTab({String? forceName, bool save = true}) {
     final String newId = 'tab_${DateTime.now().microsecondsSinceEpoch}';
 
-    // [SỬA LỖI LOGIC] Không dùng length + 1 nữa
-    // Nếu không ép buộc tên, tự động tìm tên "Đơn hàng X" còn trống
     final String name = forceName ?? _generateUniqueDefaultName();
-
     final newTab = RetailTab(id: newId, name: name);
 
     setState(() {
@@ -711,19 +760,34 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     });
 
     if (save) _session.saveSessionToLocal();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToTab(newId));
   }
 
   void _switchTab(String id) {
-    if (_session.activeTabId == id) return;
+    if (_session.activeTabId == id) {
+      _scrollToTab(id);
+      return;
+    }
+
     setState(() {
       _session.activeTabId = id;
       _isPaymentView = false;
     });
 
+    // [THÊM MỚI] Ngay khi chuyển tab, ép tính lại toàn bộ giá
+    // Việc này đảm bảo khi bấm qua tab khác, nó sẽ lấy bảng giá & khuyến mãi mới nhất áp dụng ngay
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_isPaymentView && isDesktop){
-        _searchFocusNode.requestFocus();}
+      if (mounted) {
+        _recalculateCartDiscounts(); // Cập nhật giá gốc + Giảm giá
+        _applyBuyXGetYLogic();       // Cập nhật quà tặng
+
+        if (!_isPaymentView && isDesktop) {
+          _searchFocusNode.requestFocus();
+        }
+        _scrollToTab(id);
+      }
     });
+
     _session.saveSessionToLocal();
   }
 
@@ -821,6 +885,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         customerId: finalCustomerId,
         customerName: finalCustomerName,
         customerPhone: finalCustomerPhone,
+        guestAddress: tab.guestAddress,
+        guestNote: tab.guestNote,
       ).toMap();
 
       if (isWebOrder) {
@@ -1024,19 +1090,16 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                           IconData typeIcon;
                           Color typeColor;
                           String typeLabel;
-                          bool isWeb = false;
 
                           if (order.id.startsWith('booking_')) {
                             typeIcon = Icons.calendar_month;
                             typeColor = Colors.blue;
                             typeLabel = 'Đặt lịch';
-                            isWeb = true;
                           } else if (data['isWebOrder'] == true ||
                               order.tableName.toUpperCase().contains('GIAO HÀNG')) {
-                            typeIcon = Icons.local_shipping;
+                            typeIcon = Icons.delivery_dining_outlined;
                             typeColor = Colors.orange;
                             typeLabel = 'Giao hàng';
-                            isWeb = true;
                           } else {
                             typeIcon = Icons.storefront;
                             typeColor = Colors.green;
@@ -1053,7 +1116,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withAlpha(12),
-                                  blurRadius: 4,
+                                  blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 )
                               ],
@@ -1187,50 +1250,125 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
+  // Tìm và thay thế toàn bộ hàm _restoreOrderFromCloud
   void _restoreOrderFromCloud(OrderModel order, DocumentReference ref) {
-    if (_session.tabs.any((t) => t.cloudOrderId == ref.id)) {
+    // 1. KIỂM TRA: Đơn hàng này đã được mở trong Tab nào chưa?
+    final existingTab = _session.tabs.firstWhereOrNull((t) => t.cloudOrderId == ref.id);
+
+    if (existingTab != null) {
+      // TRƯỜNG HỢP 1: ĐÃ CÓ TAB
+      setState(() {
+        // A. Đưa tab này lên đầu danh sách (Index 0)
+        _session.tabs.remove(existingTab);
+        _session.tabs.insert(0, existingTab);
+
+        // B. Set tab này là Active
+        _session.activeTabId = existingTab.id;
+      });
+
+      // C. Gọi hàm chuyển tab để scroll tới và tính lại giá
+      _switchTab(existingTab.id);
+
+      // D. Cuộn thanh Tab về đầu (vị trí 0)
+      if (isDesktop && _tabScrollController.hasClients) {
+        _tabScrollController.animateTo(
+            0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut
+        );
+      }
+
       ToastService().show(
-          message: "Đơn hàng này đang được mở rồi!", type: ToastType.warning);
+          message: "Đã chuyển sang đơn hàng đang mở.", type: ToastType.success);
       return;
     }
 
+    // TRƯỜNG HỢP 2: CHƯA CÓ TAB (KHÔI PHỤC MỚI)
     final Map<String, OrderItem> items = {};
     for (var itemMap in order.items) {
-      final item = OrderItem.fromMap(itemMap as Map<String, dynamic>, allProducts: _menuProducts);
+      var item = OrderItem.fromMap(
+          itemMap as Map<String, dynamic>,
+          allProducts: _menuProducts
+      );
+
+      final latestProduct = _menuProducts.firstWhereOrNull((p) => p.id == item.product.id);
+      if (latestProduct != null) {
+        double currentPrice = _getBasePriceForUnit(latestProduct, item.selectedUnit);
+        item = item.copyWith(product: latestProduct, price: currentPrice);
+      }
       items[item.lineId] = item;
     }
 
-    String newTabName;
-    if (order.customerName != null && order.customerName!.isNotEmpty) {
-      newTabName = order.customerName!;
-    } else {
-      newTabName = _generateUniqueDefaultName();
+    CustomerModel? basicCustomer;
+    if (order.customerId != null) {
+      basicCustomer = CustomerModel(
+          id: order.customerId!,
+          storeId: order.storeId,
+          name: order.customerName ?? '',
+          phone: order.customerPhone ?? '',
+          address: order.guestAddress, // Lấy địa chỉ nếu có
+          points: 0, debt: 0, searchKeys: []
+      );
     }
+
+    String newTabName = (order.customerName != null && order.customerName!.isNotEmpty)
+        ? order.customerName!
+        : _generateUniqueDefaultName();
 
     final String newTabId = 'tab_restored_${DateTime.now().microsecondsSinceEpoch}';
 
     final newTab = RetailTab(
       id: newTabId,
       name: newTabName,
-      customer: (order.customerId != null)
-          ? CustomerModel(id: order.customerId!, storeId: order.storeId, name: order.customerName ?? '', phone: order.customerPhone ?? '', points: 0, debt: 0, searchKeys: [])
-          : null,
+      customer: basicCustomer,
       items: items,
       createdAt: order.createdAt?.toDate(),
       cloudOrderId: ref.id,
+      guestAddress: order.guestAddress,
+      guestNote: order.guestNote,
     );
 
+    // THAY ĐỔI Ở ĐÂY: Thêm vào đầu danh sách (insert 0) thay vì cuối (add)
     setState(() {
-      _session.tabs.add(newTab);
+      _session.tabs.insert(0, newTab); // Đưa lên đầu
       _session.activeTabId = newTabId;
     });
 
-    _session.saveSessionToLocal();
-    if (!isDesktop && newTab.items.isNotEmpty) {
+    // Logic tải lại thông tin khách hàng (Giữ nguyên)
+    if (basicCustomer != null) {
+      _firestoreService.getCustomerById(basicCustomer.id).then((fullCustomer) {
+        if (mounted && fullCustomer != null) {
+          setState(() {
+            final tabToUpdate = _session.tabs.firstWhereOrNull((t) => t.id == newTabId);
+            if (tabToUpdate != null) {
+              tabToUpdate.customer = fullCustomer;
+              _recalculateCartDiscounts();
+              _applyBuyXGetYLogic();
+              _session.saveSessionToLocal();
+              _cartUpdateController.add(null);
+            }
+          });
+        }
+      });
+    } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _openMobileCart();
+        _recalculateCartDiscounts();
+        _applyBuyXGetYLogic();
+        _session.saveSessionToLocal();
       });
     }
+
+    if (!isDesktop && newTab.items.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openMobileCart());
+    } else if (isDesktop && _tabScrollController.hasClients) {
+      // Cuộn về đầu danh sách cho Desktop
+      _tabScrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    }
+
+    ToastService().show(
+        message: "Đã khôi phục đơn hàng.",
+        type: ToastType.success
+    );
   }
 
   void _showActiveTabsList() {
@@ -1666,7 +1804,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
             if (count > 0)
               Positioned(
                 top: -2,
-                left: 2, // Đặt badge bên phải trên
+                right: 2, // Đặt badge bên phải trên
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
@@ -1713,7 +1851,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
             if (count > 0)
               Positioned(
                 top: -2,
-                left: 2,
+                right: 2,
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
@@ -1803,21 +1941,11 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               const SizedBox(width: 8),
             ],
 
-            // 2. NẾU LÀ DESKTOP -> Hiện Icon Web & Cloud TRƯỚC (Bên trái)
-            if (isDesktop) ...[
-              // [THÊM] Icon Web Order
-              webOrdersWidget,
-              const SizedBox(width: 4),
-
-              // Icon Saved Order
-              savedOrdersWidget,
-              const SizedBox(width: 4),
-            ],
-
             // 3. HIỂN THỊ TAB NGANG (Chỉ Desktop - Giữ nguyên)
             if (isDesktop)
               Expanded(
                 child: ListView.separated(
+                  controller: _tabScrollController, // [THÊM MỚI] Gắn controller
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
                   itemCount: _session.tabs.length,
@@ -1825,7 +1953,27 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   itemBuilder: (context, index) {
                     final tab = _session.tabs[index];
                     final isSelected = tab.id == _session.activeTabId;
+
+                    // [THÊM MỚI] Tạo hoặc lấy Key cho tab này
+                    final key = _tabKeys.putIfAbsent(tab.id, () => GlobalKey());
+
+                    // [LOGIC MỚI] Xác định Icon loại đơn
+                    IconData typeIcon = Icons.shopping_bag_outlined; // Mặc định
+
+                    if (tab.cloudOrderId != null && tab.cloudOrderId!.startsWith('booking_')) {
+                      typeIcon = Icons.calendar_month; // Icon Lịch
+                    } else if (tab.cloudOrderId != null &&
+                        !tab.cloudOrderId!.startsWith('retail_') &&
+                        !tab.cloudOrderId!.startsWith('tab_')) {
+                      typeIcon = Icons.delivery_dining_outlined; // Icon Ship
+                    }
+
+                    // [LOGIC MỚI] Xác định trạng thái đã lưu Cloud
+                    // Nếu ID không bắt đầu bằng 'tab_' nghĩa là đã có ID thật (đã lưu hoặc từ cloud về)
+                    bool isSavedToCloud = tab.cloudOrderId != null && !tab.cloudOrderId!.startsWith('tab_');
+
                     return Center(
+                      key: key, // [QUAN TRỌNG] Gắn key vào widget để scroll tìm thấy
                       child: InkWell(
                         onTap: () => _switchTab(tab.id),
                         borderRadius: BorderRadius.circular(8),
@@ -1856,6 +2004,13 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // [HIỂN THỊ ICON LOẠI ĐƠN]
+                              Icon(typeIcon,
+                                  size: 16,
+                                  color: isSelected ? Colors.white70 : Colors.grey[600]
+                              ),
+                              const SizedBox(width: 6),
+
                               Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1869,16 +2024,30 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13,
                                     ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                   if (tab.items.isNotEmpty)
-                                    Text(
-                                      formatNumber(tab.totalAmount),
-                                      style: TextStyle(
-                                          color: isSelected
-                                              ? Colors.white.withAlpha(230)
-                                              : Colors.grey[700],
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (isSavedToCloud) ...[
+                                          Icon(Icons.cloud_done,
+                                              size: 12,
+                                              color: isSelected ? Colors.white : Colors.blue
+                                          ),
+                                          const SizedBox(width: 4),
+                                        ],
+                                        Text(
+                                          formatNumber(tab.totalAmount),
+                                          style: TextStyle(
+                                              color: isSelected
+                                                  ? Colors.white.withAlpha(230)
+                                                  : Colors.grey[700],
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
                                     )
                                 ],
                               ),
@@ -1906,9 +2075,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
             // 4. NẾU LÀ MOBILE -> Hiện Icon Web & Cloud SAU CÙNG (Bên phải)
             if (!isDesktop) ...[
-              // [THÊM] Icon Web Order bên trái Icon Saved
               webOrdersWidget,
-              // Icon Saved
               savedOrdersWidget,
             ],
 
@@ -1932,7 +2099,11 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                           borderRadius: BorderRadius.circular(8))),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
+              webOrdersWidget,
+              const SizedBox(width: 8),
+              savedOrdersWidget,
+              const SizedBox(width: 8),
               SizedBox(width: 300, child: _buildSearchBar()),
             ],
           ],
@@ -2243,6 +2414,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
+  // Tìm và thay thế toàn bộ hàm _buildCartView (khoảng dòng 1200)
   Widget _buildCartView(
       {ScrollController? scrollController, bool showCustomerSelector = true}) {
     final tab = _currentTab;
@@ -2251,22 +2423,156 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     final cartEntries = tab.items.entries.toList().reversed.toList();
     final currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
 
+    // 1. Xác định loại đơn để khóa khách hàng
+    bool isBooking = false;
+    bool isWebOrder = false;
+
+    if (tab.cloudOrderId != null) {
+      if (tab.cloudOrderId!.startsWith('booking_')) {
+        isBooking = true;
+      } else if (!tab.cloudOrderId!.startsWith('retail_') &&
+          !tab.cloudOrderId!.startsWith('tab_')) {
+        isWebOrder = true;
+      }
+    }
+    bool isLockedCustomer = isBooking || isWebOrder;
+
+    // 2. [CHUẨN BỊ DỮ LIỆU HIỂN THỊ]
+    final customer = tab.customer;
+    final String? phone = customer?.phone;
+
+    String? displayInfo;
+    IconData displayIcon = Icons.location_on_outlined; // Mặc định Icon Map
+
+    if (isBooking) {
+      // --- VỚI ĐƠN ĐẶT LỊCH ---
+      displayIcon = Icons.calendar_month_outlined; // Icon Lịch
+
+      // Ưu tiên 1: Lấy giờ hẹn từ guestAddress (nếu có)
+      if (tab.guestAddress != null && tab.guestAddress!.isNotEmpty) {
+        displayInfo = tab.guestAddress;
+      }
+      // Ưu tiên 2: Nếu null, lấy thời gian tạo đơn
+      else {
+        displayInfo = DateFormat('HH:mm dd/MM/yyyy').format(tab.createdAt);
+      }
+    } else {
+      // --- VỚI ĐƠN GIAO HÀNG / TẠI QUẦY ---
+      // Ưu tiên 1: Địa chỉ giao riêng của đơn
+      if (tab.guestAddress != null && tab.guestAddress!.isNotEmpty) {
+        displayInfo = tab.guestAddress;
+      }
+      // Ưu tiên 2: Địa chỉ trong hồ sơ khách
+      else {
+        displayInfo = customer?.address;
+      }
+    }
+
+    final String? note = tab.guestNote;
+
+    // Kiểm tra có dữ liệu để hiển thị không
+    final bool hasInfo = (phone != null && phone.isNotEmpty) ||
+        (displayInfo != null && displayInfo.isNotEmpty) ||
+        (note != null && note.isNotEmpty);
+
     return Column(
       children: [
-        // [SỬA] Chỉ hiện ô chọn khách hàng ở đây nếu showCustomerSelector = true
         if (showCustomerSelector)
           Container(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: CustomerSelector(
-                    currentCustomer: tab.customer,
-                    firestoreService: _firestoreService,
-                    storeId: widget.currentUser.storeId,
-                    onCustomerSelected: _updateTabCustomer,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: AbsorbPointer(
+                        absorbing: isLockedCustomer,
+                        child: Opacity(
+                          opacity: isLockedCustomer ? 0.6 : 1.0,
+                          child: CustomerSelector(
+                            currentCustomer: tab.customer,
+                            firestoreService: _firestoreService,
+                            storeId: widget.currentUser.storeId,
+                            onCustomerSelected: _updateTabCustomer,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+
+                // [SỬA ĐỔI: GIAO DIỆN WRAP LINH HOẠT GIỐNG ORDER SCREEN]
+                if (hasInfo)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        // Màu nền giống file order_screen.dart
+                        color: AppTheme.primaryColor.withAlpha(20),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Wrap(
+                        spacing: 16.0, // Khoảng cách ngang
+                        runSpacing: 8.0, // Khoảng cách dọc khi xuống dòng
+                        crossAxisAlignment: WrapCrossAlignment.center, // Căn giữa icon và text
+                        children: [
+                          // 1. Số điện thoại
+                          if (phone != null && phone.isNotEmpty)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.phone_outlined,
+                                    size: 16, color: Colors.grey.shade700),
+                                const SizedBox(width: 6),
+                                Text(phone,
+                                    style: Theme.of(context).textTheme.bodyMedium),
+                              ],
+                            ),
+
+                          // 2. Địa chỉ hoặc Giờ hẹn
+                          if (displayInfo != null && displayInfo.isNotEmpty)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(displayIcon,
+                                    size: 16, color: Colors.grey.shade700),
+                                const SizedBox(width: 6),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 250),
+                                  child: Text(
+                                    displayInfo,
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                          // 3. Ghi chú (Tự động xuống dòng nếu hết chỗ)
+                          if (note != null && note.isNotEmpty)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.note_alt_outlined,
+                                    size: 16, color: Colors.red),
+                                const SizedBox(width: 6),
+                                Text(
+                                  note,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                      color: Colors.red),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -2274,30 +2580,29 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         Expanded(
           child: cartEntries.isEmpty
               ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.remove_shopping_cart,
-                          size: 60, color: Colors.grey[300]),
-                      const SizedBox(height: 16),
-                      Text("Chưa có sản phẩm nào",
-                          style: TextStyle(color: Colors.grey[500]))
-                    ],
-                  ),
-                )
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.remove_shopping_cart,
+                    size: 60, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                Text("Chưa có sản phẩm nào",
+                    style: TextStyle(color: Colors.grey[500]))
+              ],
+            ),
+          )
               : ListView.builder(
-                  controller: scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  itemCount: cartEntries.length,
-                  itemBuilder: (ctx, i) {
-                    final entry = cartEntries[i];
-                    return _buildCartItemCard(
-                        entry.key, entry.value, currencyFormat);
-                  },
-                ),
+            controller: scrollController,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            itemCount: cartEntries.length,
+            itemBuilder: (ctx, i) {
+              final entry = cartEntries[i];
+              return _buildCartItemCard(
+                  entry.key, entry.value, currencyFormat);
+            },
+          ),
         ),
 
-        // Footer Actions
         _buildCartActions(currencyFormat),
       ],
     );
@@ -2321,26 +2626,36 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
 
     // 1. Tính toán giá
     double originalListingPrice =
-        _getBasePriceForUnit(item.product, item.selectedUnit);
+    _getBasePriceForUnit(item.product, item.selectedUnit);
     double sellingPrice = item.price;
 
     double discountAmount = 0;
-    if (item.discountValue != null && item.discountValue! > 0) {
+
+    // [SỬA LỖI 1]: Cho phép tính toán nếu discountValue KHÁC 0 (chấp nhận số âm để tăng giá)
+    if (item.discountValue != null && item.discountValue! != 0) {
       if (item.discountUnit == 'VNĐ') {
         discountAmount = item.discountValue!;
       } else {
+        // Nếu % là số âm (tăng giá) -> discountAmount cũng sẽ âm
         discountAmount = item.price * (item.discountValue! / 100);
       }
     }
 
-    // Giá thực thu (Net Price)
+    // Giá thực thu (Net Price).
+    // Nếu discountAmount âm (tăng giá) -> price - (-tăng) = price + tăng -> ĐÚNG
     final double finalPrice = item.price - discountAmount;
 
+    // [SỬA LỖI 2]: Hiển thị giá gốc gạch ngang nếu có bất kỳ thay đổi giá nào (khác 0)
     bool showOriginalPrice =
-        (item.discountValue != null && item.discountValue! > 0) ||
+        (item.discountValue != null && item.discountValue! != 0) ||
             (sellingPrice != originalListingPrice);
 
     final bool isGift = item.note != null && item.note!.contains("Tặng kèm");
+
+    // Xác định màu sắc và ký tự cho Badge
+    final bool isIncrease = (item.discountValue ?? 0) < 0; // < 0 là Tăng giá
+    final Color badgeColor = isIncrease ? Colors.green : Colors.red;
+    final String badgePrefix = isIncrease ? "+" : "-";
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -2364,7 +2679,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // === DÒNG 1: TÊN + THUẾ + GIÁ GỐC (GIỮ NGUYÊN) ===
+              // === DÒNG 1: TÊN + THUẾ + GIÁ GỐC ===
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2386,7 +2701,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                             ),
                           ),
 
-                        // Hiển thị thuế (Đã có trong code bạn gởi)
                         if (_getTaxDisplayString(item.product).isNotEmpty)
                           TextSpan(
                             text: '${_getTaxDisplayString(item.product)} ',
@@ -2405,8 +2719,10 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                               fontSize: 13,
                             ),
                           ),
+
+                        // [SỬA LỖI 3]: Hiển thị Badge Tăng/Giảm
                         if (item.discountValue != null &&
-                            item.discountValue! > 0)
+                            item.discountValue! != 0)
                           WidgetSpan(
                             alignment: PlaceholderAlignment.middle,
                             child: Container(
@@ -2414,16 +2730,17 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 4, vertical: 1),
                               decoration: BoxDecoration(
-                                  color: Colors.red.shade50,
+                                // Nền xanh nếu tăng, đỏ nếu giảm
+                                  color: badgeColor.withAlpha(25),
                                   borderRadius: BorderRadius.circular(4),
-                                  border:
-                                      Border.all(color: Colors.red.shade100)),
+                                  border: Border.all(color: badgeColor.withAlpha(75))),
                               child: Text(
+                                // Logic hiển thị: +10% hoặc -10%
                                 item.discountUnit == '%'
-                                    ? "-${formatNumber(item.discountValue ?? 0)}%"
-                                    : "-${formatNumber(item.discountValue ?? 0)}",
-                                style: const TextStyle(
-                                    color: Colors.red,
+                                    ? "$badgePrefix${formatNumber(item.discountValue!.abs())}%"
+                                    : "$badgePrefix${formatNumber(item.discountValue!.abs())}",
+                                style: TextStyle(
+                                    color: badgeColor,
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold),
                               ),
@@ -2455,7 +2772,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                     ),
                   ),
                 ),
-              // === DÒNG 2: GIÁ ĐÃ GIẢM - SỐ LƯỢNG - THÀNH TIỀN ===
+              // === DÒNG 2: GIÁ ĐÃ ĐIỀU CHỈNH - SỐ LƯỢNG - THÀNH TIỀN ===
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -2463,7 +2780,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   SizedBox(
                     width: 90,
                     child: Text(
-                      fmt.format(finalPrice), // Giá đã trừ CK
+                      fmt.format(finalPrice), // Giá đơn vị đã Tăng/Giảm
                       style: textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                           fontSize: 14,
@@ -2529,10 +2846,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   SizedBox(
                     width: 100,
                     child: Text(
-                      // --- SỬA Ở ĐÂY: Dùng finalPrice * quantity để khớp tuyệt đối ---
+                      // Dùng finalPrice * quantity để khớp tuyệt đối hiển thị
                       fmt.format(finalPrice * item.quantity),
-                      // (Code cũ là item.subtotal - đôi khi item.subtotal chưa cập nhật kịp)
-
                       textAlign: TextAlign.right,
                       style: textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,

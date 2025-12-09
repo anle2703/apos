@@ -21,12 +21,14 @@ class TableTransferScreen extends StatefulWidget {
   final UserModel currentUser;
   final OrderModel sourceOrder;
   final TableModel sourceTable;
+  final bool isBookingCheckIn;
 
   const TableTransferScreen({
     super.key,
     required this.currentUser,
     required this.sourceOrder,
     required this.sourceTable,
+    this.isBookingCheckIn = false,
   });
 
   @override
@@ -57,7 +59,8 @@ class _TableTransferScreenState extends State<TableTransferScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    final tabCount = widget.isBookingCheckIn ? 1 : 3;
+    _tabController = TabController(length: tabCount, vsync: this);
     _loadDataFuture = _loadData();
   }
 
@@ -99,7 +102,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         'orders': _allActiveOrders,
       };
     } catch (e) {
-      debugPrint("Lỗi tải dữ liệu chuyển bàn: $e");
+      debugPrint("Lỗi tải dữ liệu chuyển phòng/bàn: $e");
       throw Exception("Không thể tải dữ liệu: $e");
     }
   }
@@ -111,18 +114,33 @@ class _TableTransferScreenState extends State<TableTransferScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Quản lý bàn: ${widget.sourceTable.tableName}'),
+        title: Text(widget.isBookingCheckIn
+            ? 'Nhận khách: ${widget.sourceTable.tableName}'
+            : 'Quản lý Phòng/bàn: ${widget.sourceTable.tableName}'),
         bottom: TabBar(
           controller: _tabController,
-          isScrollable: true, // <-- SỬA: Cho phép cuộn tab trên mobile
-          tabs: [
+          isScrollable: true,
+          tabs: widget.isBookingCheckIn
+              ? [
             Tab(
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: const [
                   Icon(Icons.swap_horiz, size: 20),
                   SizedBox(width: 8),
-                  Text('Chuyển Bàn'),
+                  Text('Chọn Phòng/bàn nhận khách'),
+                ],
+              ),
+            ),
+          ]
+              : [
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.swap_horiz, size: 20),
+                  SizedBox(width: 8),
+                  Text('Chuyển Phòng/bàn'),
                 ],
               ),
             ),
@@ -132,7 +150,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
                 children: const [
                   Icon(Icons.merge_type, size: 20),
                   SizedBox(width: 8),
-                  Text('Gộp Bàn'),
+                  Text('Gộp Phòng/bàn'),
                 ],
               ),
             ),
@@ -142,7 +160,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
                 children: const [
                   Icon(Icons.call_split, size: 20),
                   SizedBox(width: 8),
-                  Text('Tách Bàn'),
+                  Text('Tách Phòng/bàn'),
                 ],
               ),
             ),
@@ -191,8 +209,11 @@ class _TableTransferScreenState extends State<TableTransferScreen>
 
           return TabBarView(
             controller: _tabController,
-            children: [
-              // --- SỬA: Truyền cờ isMobile vào các hàm build ---
+            children: widget.isBookingCheckIn
+                ? [
+              _buildTransferTableView(context, emptyTables, isMobile),
+            ]
+                : [
               _buildTransferTableView(context, emptyTables, isMobile),
               _buildMergeTableView(context, occupiedTables, isMobile),
               _buildSplitTableView(context, emptyTables, isMobile),
@@ -212,14 +233,14 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         'actionTitle': actionTitle, // Ví dụ: "CHUYỂN BÀN"
         'message': message, // Ví dụ: "Từ: Bàn 1 -> Đến: Bàn 2"
         'timestamp': DateTime.now().toIso8601String(),
-        'tableName': 'Chuyển/Gộp/Tách Bàn',
+        'tableName': 'Chuyển/Gộp/Tách',
         'items': [],
       };
 
       // Gửi lệnh in với loại job mới
       await PrintQueueService().addJob(PrintJobType.tableManagement, jobData);
     } catch (e) {
-      debugPrint("Lỗi in thông báo quản lý bàn: $e");
+      debugPrint("Lỗi in thông báo quản lý Phòng/bàn: $e");
       // Lỗi âm thầm, không cần thông báo cho người dùng
     }
   }
@@ -252,7 +273,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
 
     final panelC = _buildTableGridSelector(
       context,
-      'Chọn bàn nhận tách món:',
+      'Chọn Phòng/bàn nhận tách món:',
       splitTargetTables,
       _selectedSplitTargetTable,
           (table) {
@@ -280,7 +301,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
             ),
           ),
           _buildConfirmButton(
-            'Tách Bàn',
+            'Tách Phòng/bàn',
             _itemsToMove.isNotEmpty && _selectedSplitTargetTable != null
                 ? _performSplit
                 : null,
@@ -312,7 +333,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
           ),
         ),
         _buildConfirmButton(
-          'Tách Bàn',
+          'Tách Phòng/bàn',
           _itemsToMove.isNotEmpty && _selectedSplitTargetTable != null
               ? _performSplit
               : null,
@@ -326,7 +347,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
 
     final panelA = _buildMultiTableGridSelector(
       context,
-      'Chọn các bàn muốn gộp:',
+      'Chọn các Phòng/bàn muốn gộp:',
       occupiedTables,
       _selectedMergeSourceTables,
           (table) {
@@ -342,7 +363,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
               _selectedMergeSourceOrders.add(order);
             } else {
               ToastService().show(
-                  message: "Lỗi: Bàn này không có đơn hàng.",
+                  message: "Lỗi: Phòng/bàn này không có đơn hàng.",
                   type: ToastType.error);
             }
           }
@@ -361,7 +382,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
       child: Column(
         mainAxisSize: isMobile ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          _buildOrderPreviewCard("Vào bàn:", widget.sourceOrder,
+          _buildOrderPreviewCard("Vào Phòng/bàn:", widget.sourceOrder,
               isTarget: true, isMobile: isMobile),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -371,7 +392,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
                 Icon(Icons.add_circle_outline_rounded,
                     size: 28, color: Colors.grey.shade400),
                 const SizedBox(width: 8),
-                Text("Các bàn sẽ được gộp vào:",
+                Text("Các Phòng/bàn sẽ được gộp vào:",
                     style: Theme.of(context)
                         .textTheme
                         .titleSmall
@@ -416,7 +437,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
           ),
         ),
         _buildConfirmButton(
-          'Gộp (${_selectedMergeSourceTables.length}) Bàn',
+          'Gộp (${_selectedMergeSourceTables.length}) Phòng/bàn',
           _selectedMergeSourceTables.isNotEmpty ? _performMerge : null,
         ),
       ],
@@ -508,7 +529,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         ? Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Text('Không có bàn nào phù hợp',
+          child: Text('Không có Phòng/bàn nào phù hợp',
               style: TextStyle(color: Colors.grey.shade600)),
         ))
         : GridView.builder(
@@ -592,7 +613,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
             child: Column(
               children: [
                 _buildOrderPreviewCard(
-                    "Chuyển từ bàn:", widget.sourceOrder,
+                    "Chuyển từ Phòng/bàn:", widget.sourceOrder,
                     isMobile: isMobile),
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -602,7 +623,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
                 Expanded(
                   child: _buildTableGridSelector(
                     context,
-                    'Chọn bàn chuyển đến:',
+                    'Chọn Phòng/bàn chuyển đến:',
                     targetTables,
                     _selectedTransferTargetTable,
                         (table) {
@@ -617,7 +638,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
           ),
         ),
         _buildConfirmButton(
-          'Chuyển Bàn',
+          'Chuyển Phòng/bàn',
           _selectedTransferTargetTable != null ? _performTransfer : null,
         ),
       ],
@@ -632,7 +653,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Text(
-            "Chưa chọn bàn nào từ bên trái.",
+            "Chưa chọn Phòng/bàn nào từ bên trái.",
             style: TextStyle(color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),
@@ -646,7 +667,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
       itemCount: orders.length,
       itemBuilder: (context, index) {
         final order = orders[index];
-        return _buildOrderPreviewCard("Từ Bàn", order,
+        return _buildOrderPreviewCard("Từ Phòng/bàn", order,
             isTarget: false, isMini: true, isMobile: isMobile);
       },
     );
@@ -770,7 +791,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         ? Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Text('Không có bàn nào phù hợp',
+          child: Text('Không có Phòng/bàn nào phù hợp',
               style: TextStyle(color: Colors.grey.shade600)),
         ))
         : GridView.builder(
@@ -915,7 +936,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Số lượng tại bàn: ${formatNumber(maxQuantity)}'),
+              Text('Số lượng tại Phòng/bàn: ${formatNumber(maxQuantity)}'),
               const SizedBox(height: 16),
               TextField(
                 controller: controller,
@@ -1002,7 +1023,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
       }
       if (!isSplittingToSlave && targetSnap.exists &&
           (targetSnap.data() as Map<String, dynamic>)['status'] == 'active') {
-        throw Exception("Bàn ${targetTable.tableName} đã có khách!");
+        throw Exception("${targetTable.tableName} đã có khách!");
       }
       // 1. Cập nhật Bàn Gốc (Source)
       final sourceData = sourceSnap.data() as Map<String, dynamic>;
@@ -1016,7 +1037,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         // Nếu tách hết, hủy bàn gốc
         batch.update(sourceOrderRef, {
           'status': 'cancelled',
-          'note': 'Tách hết món sang bàn ${targetTable.tableName}',
+          'note': 'Tách hết món sang ${targetTable.tableName}',
           'items': [],
           'totalAmount': 0.0,
           'version': currentVersion + 1,
@@ -1073,14 +1094,14 @@ class _TableTransferScreenState extends State<TableTransferScreen>
             .map((e) =>
         '${e.product.productName} (x${formatNumber(e.quantity)})')
             .join(', ');
-        _printTableManagementNotification("TÁCH BÀN",
+        _printTableManagementNotification("TÁCH PHÒNG/BÀN",
             "$itemsText Tách Từ ${widget.sourceTable.tableName} -> Đến ${targetTable.tableName}");
       } catch (e) {
-        debugPrint("Lỗi tạo nội dung in tách bàn: $e");
+        debugPrint("Lỗi tạo nội dung in tách Phòng/bàn: $e");
       }
 
       ToastService()
-          .show(message: "Tách bàn thành công!", type: ToastType.success);
+          .show(message: "Tách Phòng/bàn thành công!", type: ToastType.success);
       navigator.pop(true);
     } catch (e) {
       ToastService().show(message: "Lỗi: $e", type: ToastType.error);
@@ -1108,7 +1129,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
       }
       if (targetSnap.exists &&
           (targetSnap.data() as Map<String, dynamic>)['status'] == 'active') {
-        throw Exception("Bàn ${targetTable.tableName} đã có khách!");
+        throw Exception("${targetTable.tableName} đã có khách!");
       }
 
       final sourceData = sourceSnap.data() as Map<String, dynamic>;
@@ -1121,7 +1142,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
       // 1. Cập nhật Bàn Gốc (Source) -> Hủy
       batch.update(sourceOrderRef, {
         'status': 'cancelled',
-        'note': 'Chuyển sang bàn ${targetTable.tableName}',
+        'note': 'Chuyển sang ${targetTable.tableName}',
         'version': currentVersion + 1,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -1157,12 +1178,16 @@ class _TableTransferScreenState extends State<TableTransferScreen>
 
       await batch.commit();
 
-      _printTableManagementNotification("CHUYỂN BÀN",
-          "Từ ${widget.sourceTable.tableName} -> Đến ${targetTable.tableName}");
-
+      if (!widget.isBookingCheckIn) {
+        _printTableManagementNotification("CHUYỂN PHÒNG/BÀN",
+            "Từ ${widget.sourceTable.tableName} -> Đến ${targetTable.tableName}");
+      }
       ToastService()
-          .show(message: "Chuyển bàn thành công!", type: ToastType.success);
-      navigator.pop(true); // Trả về true để order_screen biết cần đóng
+          .show(message: "Chuyển Phòng/bàn thành công!", type: ToastType.success);
+      navigator.pop({
+        'success': true,
+        'targetTable': targetTable,
+      });
     } catch (e) {
       ToastService().show(message: "Lỗi: $e", type: ToastType.error);
     }
@@ -1180,7 +1205,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
       _firestoreService.getOrderReference(widget.sourceOrder.id);
       final sourceSnap = await sourceOrderRef.get();
       if (!sourceSnap.exists) {
-        throw Exception("Đơn hàng gốc (bàn đích) không tồn tại");
+        throw Exception("Đơn hàng gốc (Phòng/bàn đích) không tồn tại");
       }
       final sourceData = sourceSnap.data() as Map<String, dynamic>;
 
@@ -1207,7 +1232,7 @@ class _TableTransferScreenState extends State<TableTransferScreen>
         final mergeSnap = await mergeOrderRef.get();
 
         if (!mergeSnap.exists) {
-          throw Exception("Đơn hàng của bàn ${orderToMergeFrom.tableName} không tồn tại");
+          throw Exception("Đơn hàng của ${orderToMergeFrom.tableName} không tồn tại");
         }
 
         final mergeData = mergeSnap.data() as Map<String, dynamic>;

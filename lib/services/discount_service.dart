@@ -54,8 +54,8 @@ class DiscountService {
 
       double currentPriceAfterDiscount;
       if (item.isPercent) {
-        // [Safety] Clamp phần trăm từ 0-100
-        double percent = item.value.clamp(0, 100);
+
+        double percent = item.value;
         currentPriceAfterDiscount = product.sellPrice * (1 - percent / 100);
       } else {
         currentPriceAfterDiscount = product.sellPrice - item.value;
@@ -63,9 +63,7 @@ class DiscountService {
 
       if (currentPriceAfterDiscount < 0) currentPriceAfterDiscount = 0;
 
-      // [FIX] Thêm điều kiện (bestDiscountItem == null) để luôn lấy cái đầu tiên tìm thấy nếu chưa có
-      // Dùng <= để đảm bảo cập nhật nếu giá ngang nhau nhưng cấu hình thay đổi
-      if (currentPriceAfterDiscount < bestPrice || (bestDiscountItem == null && currentPriceAfterDiscount <= bestPrice)) {
+      if (bestDiscountItem == null || currentPriceAfterDiscount < bestPrice) {
         bestPrice = currentPriceAfterDiscount;
         bestDiscountItem = item;
       }

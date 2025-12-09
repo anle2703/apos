@@ -26,6 +26,11 @@ import '../contacts/add_edit_customer_dialog.dart';
 import '../../theme/string_extensions.dart';
 import '../../widgets/product_search_delegate.dart';
 import 'package:collection/collection.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 
 enum WebOrderStatusFilter { all, pending, confirmed, completed, cancelled }
 
@@ -52,7 +57,9 @@ class WebOrderListScreen extends StatefulWidget {
 
 class _WebOrderListScreenState extends State<WebOrderListScreen> {
   final FirestoreService _firestoreService = FirestoreService();
-
+  bool _enableShipQr = true;
+  bool _enableBookingQr = true;
+  final String _qrOrderBaseUrl = "https://cash-bae5d.web.app/order";
   late Future<List<ProductModel>> _productsFuture;
 
   String? _expandedOrderId;
@@ -86,6 +93,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     _ordersStream = _ordersStreamController.stream;
 
     _loadSettingsAndFetchData();
+    _loadQrSettings();
   }
 
   @override
@@ -94,6 +102,200 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     _ordersStreamController.close();
     _settingsSub?.cancel(); // <-- Thêm
     super.dispose();
+  }
+
+  void _loadQrSettings() {
+    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    SettingsService().watchStoreSettings(settingsId).listen((settings) {
+      if (mounted) {
+        setState(() {
+          _enableShipQr = settings.enableShip ?? true;
+          _enableBookingQr = settings.enableBooking ?? true;
+        });
+      }
+    });
+  }
+
+  // [HÀM MỚI] Lưu ảnh QR
+  Future<void> _saveQrToFile(GlobalKey qrKey, String fileName) async {
+    try {
+      RenderRepaintBoundary boundary =
+      qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+      Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      final safeFileName = fileName.replaceAll(RegExp(r'[\\/*?:"<>|]'), '_');
+      final String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Lưu mã QR',
+        fileName: '$safeFileName.png',
+        bytes: pngBytes,
+        type: FileType.custom,
+        allowedExtensions: ['png'],
+      );
+
+      if (outputFile != null) {
+        ToastService().show(message: "Đã lưu mã QR.", type: ToastType.success);
+      }
+    } catch (e) {
+      ToastService().show(message: "Lỗi lưu ảnh: $e", type: ToastType.error);
+    }
+  }
+
+  // [HÀM MỚI] Hiển thị Dialog QR chi tiết
+  Future<void> _showQrDetailDialog(String type) async {
+    final bool isShip = type == 'ship';
+    final String title = isShip ? "QR Đặt Giao Hàng" : "QR Đặt Lịch Hẹn";
+    final String qrUrl = '$_qrOrderBaseUrl?store=${widget.currentUser.storeId}&type=$type';
+    final GlobalKey qrKey = GlobalKey();
+
+    bool localEnabled = isShip ? _enableShipQr : _enableBookingQr;
+    bool isProcessing = false;
+
+    await showDialog(
+        context: context,
+        builder: (ctx) {
+          return StatefulBuilder(
+              builder: (context, setStateDialog) {
+                return AlertDialog(
+                  contentPadding: const EdgeInsets.all(16),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      const SizedBox(height: 16),
+
+                      if (localEnabled)
+                        SizedBox(
+                          width: 250,
+                          height: 250,
+                          child: RepaintBoundary(
+                            key: qrKey,
+                            child: Container(
+                              color: Colors.white,
+                              padding: const EdgeInsets.all(12),
+                              child: QrImageView(
+                                data: qrUrl,
+                                version: QrVersions.auto,
+                                backgroundColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        const SizedBox(
+                          height: 200,
+                          width: 250,
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.visibility_off, size: 50, color: Colors.grey),
+                                SizedBox(height: 8),
+                                Text("QR đang tắt", style: TextStyle(color: Colors.grey)),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                      const SizedBox(height: 16),
+
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: (!localEnabled || isProcessing) ? null : () {
+                              _saveQrToFile(qrKey, "QR_${isShip ? 'Ship' : 'Booking'}");
+                            },
+                            icon: const Icon(Icons.save_alt, size: 18),
+                            label: const Text("Lưu ảnh"),
+                            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+
+                            child: Row(
+                              children: [
+                                Text(localEnabled ? "Đang Bật" : "Đang Tắt",
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold,
+                                        color: localEnabled ? Colors.green : Colors.grey)),
+                                Switch(
+                                    value: localEnabled,
+                                    activeTrackColor: AppTheme.primaryColor.withAlpha(125),
+                                    activeThumbColor: AppTheme.primaryColor,
+                                    onChanged: isProcessing ? null : (val) async {
+                                      setStateDialog(() => isProcessing = true);
+                                      try {
+                                        final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+                                        final key = isShip ? 'enableShip' : 'enableBooking';
+                                        await SettingsService().updateStoreSettings(settingsId, {key: val});
+
+                                        setStateDialog(() {
+                                          localEnabled = val;
+                                          isProcessing = false;
+                                        });
+                                        setState(() {
+                                          if(isShip) {_enableShipQr = val;} else { _enableBookingQr = val;}
+                                        });
+                                      } catch (e) {
+                                        setStateDialog(() => isProcessing = false);
+                                      }
+                                    }
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
+                );
+              }
+          );
+        }
+    );
+  }
+
+  // [HÀM MỚI] Menu chọn loại QR
+  void _showQrMenu() {
+    showModalBottomSheet(
+        context: context,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        builder: (ctx) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Mã QR Online (Khách tự đặt)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.local_shipping, color: Colors.orange, size: 30),
+                title: const Text("QR Đặt Giao Hàng (Ship)", style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(_enableShipQr ? "Đang bật" : "Đang tắt"),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showQrDetailDialog('ship');
+                },
+              ),
+              const Divider( height: 1, thickness: 0.5, color: Colors.grey),
+              ListTile(
+                leading: const Icon(Icons.calendar_month, color: Colors.blue, size: 30),
+                title: const Text("QR Đặt Lịch Hẹn (Booking)", style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(_enableBookingQr ? "Đang bật" : "Đang tắt"),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showQrDetailDialog('schedule');
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        )
+    );
   }
 
   Future<CustomerModel?> _findCustomerByPhone(String phone) async {
@@ -114,7 +316,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     return null;
   }
 
-  // [HÀM MỚI] Đồng bộ tên khách hàng chuẩn vào Web Order (Cập nhật giao diện Card)
   Future<void> _syncCustomerToWebOrder(String orderId, CustomerModel customer) async {
     try {
       await FirebaseFirestore.instance.collection('web_orders').doc(orderId).update({
@@ -130,8 +331,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   Future<void> _confirmShipOrder(WebOrderModel order, String? note) async {
     try {
-      // --- LOGIC RETAIL ---
-      if (widget.currentUser.businessType == 'retail') {
+      if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
 
         // 1. Tìm hoặc Tạo khách
         CustomerModel? customer = await _findCustomerByPhone(order.customerPhone);
@@ -591,7 +791,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         // ----------------------------------------------
 
         // SẮP XẾP
-        if (widget.currentUser.businessType == 'retail') {
+        if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
           results.sort((a, b) {
             final modelA = a['model'] as WebOrderModel;
             final modelB = b['model'] as WebOrderModel;
@@ -1088,7 +1288,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   List<Widget> _buildFilterActions() {
     return [
-      // --- THÊM MỚI: Nút Tạo đơn thủ công ---
+      if (widget.currentUser.businessType == 'retail')
+        IconButton(
+          icon: const Icon(Icons.qr_code_2, color: AppTheme.primaryColor, size: 30),
+          tooltip: 'Mã QR Online',
+          onPressed: _showQrMenu,
+        ),
+      const SizedBox(width: 8),
       IconButton(
         icon: const Icon(Icons.add_circle_outlined,
             color: AppTheme.primaryColor, size: 30),
@@ -1096,8 +1302,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         onPressed: _openCreateManualOrder,
       ),
       const SizedBox(width: 8),
-      // --------------------------------------
-
       IconButton(
         icon: _isLoadingFilter
             ? const SizedBox(
@@ -1932,8 +2136,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   Future<void> _confirmScheduleOrder(
       WebOrderModel order, int? numberOfCustomers, String? note) async {
 
-    // --- LOGIC RETAIL (SỬA) ---
-    if (widget.currentUser.businessType == 'retail') {
+    if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
 
       // 1. Tìm hoặc Tạo khách hàng
       CustomerModel? customer = await _findCustomerByPhone(order.customerPhone);
@@ -2056,34 +2259,45 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   Future<void> _completeScheduleOrderRetail(WebOrderModel order, Map<String, dynamic> rawData) async {
     try {
-      // 1. LẤY DỮ LIỆU TRỰC TIẾP TỪ WEB ORDER (Ưu tiên số 1)
-      // Lấy trực tiếp từ Map rawData để tránh lỗi undefined getter và đảm bảo có dữ liệu
+      // 1. LẤY DỮ LIỆU TRỰC TIẾP TỪ RAW DATA (Để tránh lỗi Model mapping ra 'N/A')
       String? finalCustomerId = rawData['customerId'] as String?;
       String finalName = rawData['customerName']?.toString() ?? order.customerName;
       String finalPhone = rawData['customerPhone']?.toString() ?? order.customerPhone;
 
-      // 2. LOGIC DỰ PHÒNG (Chỉ chạy nếu trong Web Order bị thiếu ID khách)
-      // Nếu không có ID khách, thử tìm lại 1 lần bằng SĐT cho chắc (để link điểm tích lũy)
+      // [FIX] Lấy địa chỉ/giờ hẹn trực tiếp từ rawData
+      // Web Order manual lưu giờ hẹn vào 'customerAddress' và 'billing.address_1'
+      String finalAddress = rawData['customerAddress']?.toString() ?? order.customerAddress;
+
+      // Fallback: Nếu vẫn rỗng hoặc 'N/A', thử lấy trong billing
+      if (finalAddress.isEmpty || finalAddress == 'N/A') {
+        final billing = rawData['billing'] as Map<String, dynamic>?;
+        if (billing != null && billing['address_1'] != null) {
+          finalAddress = billing['address_1'].toString();
+        }
+      }
+
+      // Lấy note trực tiếp luôn cho chắc
+      String finalNote = rawData['note']?.toString() ?? order.note ?? '';
+
+      // 2. LOGIC DỰ PHÒNG TÌM KHÁCH (Nếu thiếu ID)
       if (finalCustomerId == null || finalCustomerId.isEmpty) {
         CustomerModel? found = await _findCustomerByPhone(finalPhone);
         if (found != null) {
           finalCustomerId = found.id;
-          // Nếu tên trong order là NA thì lấy tên trong DB
           if (finalName == 'NA' || finalName.isEmpty) {
             finalName = found.name;
           }
         }
       }
 
-      // 3. XỬ LÝ HIỂN THỊ TÊN (Tránh hiện NA)
       if (finalName == 'NA' || finalName.isEmpty) {
         finalName = 'Khách lẻ';
       }
 
-      // 4. CẬP NHẬT TRẠNG THÁI WEB ORDER
+      // 3. CẬP NHẬT TRẠNG THÁI WEB ORDER
       await _updateOrderStatus(order.id, 'completed');
 
-      // 5. TẠO ĐƠN SAVED (RETAIL)
+      // 4. TẠO ĐƠN SAVED (RETAIL)
       final newOrderId = 'booking_${order.id}';
 
       final savedOrderData = {
@@ -2101,15 +2315,14 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         'numberOfCustomers': 1,
         'version': 1,
 
-        // --- ĐÂY LÀ PHẦN QUAN TRỌNG ---
-        // Sử dụng dữ liệu đã lấy được ở trên, không ép buộc phải lookup lại
         'customerId': finalCustomerId,
         'customerName': finalName,
         'customerPhone': finalPhone,
-        // ------------------------------
 
-        'guestAddress': order.customerAddress,
-        'guestNote': order.note,
+        // [QUAN TRỌNG] Lưu giá trị đã lấy từ rawData
+        'guestAddress': finalAddress,
+        'guestNote': finalNote,
+
         'isWebOrder': true,
         'originalWebOrderId': order.id,
       };
@@ -2322,7 +2535,7 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
 
     Widget buildQtyInput() {
       // Chiều rộng vùng chứa nút (48px cho Desktop, 32px cho Mobile)
-      final double btnWidth = isDesktop ? 48.0 : 35.0;
+      final double btnWidth = isDesktop ? 35.0 : 30.0;
 
       return Container(
         height: 40,
@@ -2490,11 +2703,11 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        Expanded(flex: 3, child: buildUnitSelector()),
+                        Expanded(flex: 2, child: buildUnitSelector()),
                         const SizedBox(width: 8),
-                        Expanded(flex: 3, child: buildQtyInput()),
+                        Expanded(flex: 2, child: buildQtyInput()),
                         const SizedBox(width: 8),
-                        Expanded(flex: 4, child: buildNoteInput()),
+                        Expanded(flex: 6, child: buildNoteInput()),
                       ],
                     )
                   ],
@@ -2710,15 +2923,17 @@ class _CreateManualWebOrderScreenState
     final int stt = isShip ? -999 : -998;
 
     // 2. Tạo Bàn ảo (Chỉ cần thiết cho FnB, nhưng tạo cho Retail cũng không sao để giữ place)
-    final virtualTableData = {
-      'id': virtualTableId,
-      'tableName': tableName,
-      'storeId': widget.currentUser.storeId,
-      'stt': stt,
-      'serviceId': '',
-      'tableGroup': 'Online',
-    };
-    await _firestoreService.setTable(virtualTableId, virtualTableData);
+    if (!isRetail) {
+      final virtualTableData = {
+        'id': virtualTableId,
+        'tableName': tableName,
+        'storeId': widget.currentUser.storeId,
+        'stt': stt,
+        'serviceId': '',
+        'tableGroup': 'Online',
+      };
+      await _firestoreService.setTable(virtualTableId, virtualTableData);
+    }
 
     // 3. Tạo Order
     // [LOGIC GIÁ] Trừ tiền topping ra để lấy lại giá gốc vì OrderScreen sẽ tự cộng lại

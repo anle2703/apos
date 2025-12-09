@@ -5,6 +5,10 @@ import '../widgets/app_dropdown.dart';
 import '../widgets/custom_text_form_field.dart';
 import '../theme/number_utils.dart';
 import '../models/quick_note_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:omni_datetime_picker/omni_datetime_picker.dart';
+import '../theme/app_theme.dart';
 
 class EditOrderItemDialog extends StatefulWidget {
   final OrderItem initialItem;
@@ -40,6 +44,9 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
   late TextEditingController _addQtyController;
   late TextEditingController _subtractQtyController;
   late TextEditingController _totalQtyController;
+  DateTime _startTime = DateTime.now();
+  bool _isTimeBased = false;
+  bool _isIncrease = false;
 
   @override
   void initState() {
@@ -56,15 +63,25 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
       _selectedUnit = _availableUnits.first['unitName'];
     }
     _priceController = TextEditingController(text: formatNumber(item.price));
-
-    _discountValueController = TextEditingController(text: formatNumber(item.discountValue ?? 0));
+    double currentDiscount = item.discountValue ?? 0;
+    if (currentDiscount < 0) {
+      _isIncrease = true;
+      currentDiscount = currentDiscount.abs();
+    } else {
+      _isIncrease = false;
+    }
+    _discountValueController = TextEditingController(text: formatNumber(currentDiscount));
     _noteController = TextEditingController(text: item.note ?? '');
     String rawUnit = item.discountUnit ?? '%';
     if (rawUnit == 'VND') rawUnit = 'VNĐ';
     _discountUnit = rawUnit;
 
-    _isCommissionableService = item.product.productType == "Dịch vụ/Tính giờ" &&
-        (item.product.serviceSetup?['isTimeBased'] == false);
+    _isTimeBased = item.product.serviceSetup?['isTimeBased'] == true;
+    _isCommissionableService = item.product.productType == "Dịch vụ/Tính giờ" && !_isTimeBased;
+
+    if (_isTimeBased) {
+      _startTime = item.addedAt.toDate();
+    }
 
     if (_isCommissionableService) {
       _selectedLevel1 = item.commissionStaff?['level1'];
@@ -107,9 +124,9 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
 
   void _onConfirm() {
     final double price = parseVN(_priceController.text);
-    final double discountValue = parseVN(_discountValueController.text);
+    double rawDiscountVal = parseVN(_discountValueController.text);
+    final double discountValue = _isIncrease ? -rawDiscountVal : rawDiscountVal;
     final String note = _noteController.text.trim();
-
     double newQuantity = _initialQuantity;
     final double totalQty = parseVN(_totalQtyController.text);
     final double addQty = parseVN(_addQtyController.text);
@@ -140,6 +157,7 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
       'selectedUnit': _selectedUnit,
       'note': note.isEmpty ? null : note,
       'commissionStaff': commissionStaff,
+      'startTime': _isTimeBased ? Timestamp.fromDate(_startTime) : null,
     });
   }
 
@@ -162,6 +180,49 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_isTimeBased) ...[
+              Text('Giờ vào:',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () async {
+                  final DateTime? picked = await showOmniDateTimePicker(
+                    context: context,
+                    initialDate: _startTime,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now().add(const Duration(days: 1)),
+                    is24HourMode: true,
+                    isShowSeconds: false,
+                    minutesInterval: 1,
+                    borderRadius: const BorderRadius.all(Radius.circular(16)),
+                  );
+                  if (picked != null) {
+                    setState(() => _startTime = picked);
+                  }
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.access_time, color: AppTheme.primaryColor),
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        DateFormat('HH:mm dd/MM/yyyy').format(_startTime),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const Icon(Icons.edit, size: 18, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (_availableUnits.length > 1) ...[
               AppDropdown<String>(
                 labelText: 'Đơn vị tính',
@@ -234,34 +295,110 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  flex: 3,
-                  child: CustomTextFormField(
-                    controller: _discountValueController,
-                    decoration: const InputDecoration(labelText: 'Chiết khấu'),
-                    keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [ThousandDecimalInputFormatter()],
+                // 1. Cụm nút Tăng/Giảm (Custom Container)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  height: 48, // Chiều cao cố định khớp với Input
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12), // Bo góc 12 theo yêu cầu
+                    border: Border.all(color: Colors.grey.shade400), // Viền xám mờ
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // NÚT TRỪ (-)
+                      InkWell(
+                        onTap: () => setState(() => _isIncrease = false),
+                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                        child: Container(
+                          width: 45, // Độ rộng nút
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            // Nếu đang chọn Giảm (False) thì hiện nền đỏ nhạt
+                            color: !_isIncrease ? Colors.red.shade50 : null,
+                            borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                          ),
+                          child: Icon(
+                              Icons.remove,
+                              color: !_isIncrease ? Colors.red : Colors.grey.shade600
+                          ),
+                        ),
+                      ),
+
+                      // ĐƯỜNG KẺ ĐỨNG NGĂN CÁCH MỜ
+                      Container(
+                        width: 1,
+                        height: 45, // Chiều cao ngắn hơn container để tạo cảm giác thanh thoát
+                        color: Colors.grey.shade300,
+                      ),
+
+                      // NÚT CỘNG (+)
+                      InkWell(
+                        onTap: () => setState(() => _isIncrease = true),
+                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+                        child: Container(
+                          width: 45, // Độ rộng nút
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            // Nếu đang chọn Tăng (True) thì hiện nền xanh nhạt
+                            color: _isIncrease ? AppTheme.primaryColor.withValues(alpha: 0.1) : null,
+                            borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+                          ),
+                          child: Icon(
+                              Icons.add,
+                              color: _isIncrease ? AppTheme.primaryColor : Colors.grey.shade600
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+
+                // 2. Ô nhập giá trị (Input)
+                Expanded(
+                  flex: 3,
+                  child: SizedBox(
+                    height: 48, // Ép chiều cao khớp với nút bên cạnh
+                    child: CustomTextFormField(
+                      controller: _discountValueController,
+                      decoration: InputDecoration(
+                        labelText: _isIncrease ? 'Mức Tăng' : 'Mức Giảm',
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                        // Đảm bảo Input cũng bo góc 12
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey.shade400),
+                        ),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [ThousandDecimalInputFormatter()],
+                    ),
+                  ),
+                ),
+
+                // 3. Chọn đơn vị
                 const SizedBox(width: 8),
                 Expanded(
                   flex: 2,
-                  child: AppDropdown(
-                    labelText: 'Đơn vị',
-                    value: _discountUnit,
-                    items: ['%', 'VNĐ']
-                        .map((v) => DropdownMenuItem(value: v, child: Text(v)))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() => _discountUnit = v);
-                      }
-                    },
+                  child: SizedBox(
+                    height: 48, // Ép chiều cao khớp
+                    child: AppDropdown(
+                      labelText: 'Đơn vị',
+                      value: _discountUnit,
+                      items: ['%', 'VNĐ'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _discountUnit = v);
+                      },
+                      // Lưu ý: Bạn cần kiểm tra AppDropdown có hỗ trợ borderRadius không.
+                      // Nếu AppDropdown dùng InputDecoration mặc định của Theme thì nó sẽ tự bo theo theme.
+                    ),
                   ),
                 ),
               ],
             ),
+
             const SizedBox(height: 8),
             CustomTextFormField(
               controller: _noteController,

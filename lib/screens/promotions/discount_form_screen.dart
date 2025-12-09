@@ -158,7 +158,6 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
     super.dispose();
   }
 
-  // --- HÀM CHỌN THỜI GIAN CỤ THỂ (NGÀY THÁNG) ---
   Future<void> _pickRangeDate() async {
     List<DateTime>? result = await showOmniDateTimeRangePicker(
       context: context,
@@ -192,9 +191,6 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
     }
   }
 
-  // --- [CẬP NHẬT] HÀM CHỌN GIỜ TRONG NGÀY (MULTI RANGE) ---
-
-  // Helper chuyển đổi TimeOfDay sang phút để so sánh
   int _minutes(TimeOfDay t) => t.hour * 60 + t.minute;
   TimeOfDay _minutesToTime(int total) => TimeOfDay(hour: total ~/ 60, minute: total % 60);
 
@@ -258,7 +254,6 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
     });
   }
 
-  // --- HÀM CHỌN SẢN PHẨM & TÍNH TOÁN ---
   Future<void> _pickProducts() async {
     final prevSelected = _selectedItems.map((e) => ProductModel(
       id: e.productId,
@@ -305,95 +300,183 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
     }
   }
 
+  // Tìm hàm _applyBulkAdjustment (khoảng dòng 380)
   void _applyBulkAdjustment() {
     final valueStr = _calcValueController.text.replaceAll('.', '').replaceAll(',', '');
     final value = double.tryParse(valueStr) ?? 0.0;
+
     if (value <= 0) return;
+    if (_isCalcPercent && value > 100) {
+      ToastService().show(message: "Giá trị phần trăm không thể lớn hơn 100", type: ToastType.warning);
+      return;
+    }
 
     setState(() {
       final updatedList = <DiscountItem>[];
       for (var item in _selectedItems) {
+        // [LOGIC QUAN TRỌNG]
+        // Nếu _isIncrease (nút Tăng đang sáng) -> finalValue là số ÂM
+        // Nếu không -> finalValue là số DƯƠNG
+        final double finalValue = _isIncrease ? -value : value;
+
         updatedList.add(DiscountItem(
           productId: item.productId,
           productName: item.productName,
           imageUrl: item.imageUrl,
           oldPrice: item.oldPrice,
-          value: value,
+          value: finalValue,
           isPercent: _isCalcPercent,
         ));
       }
       _selectedItems = updatedList;
     });
-    ToastService().show(message: "Đã cập nhật mức giảm!", type: ToastType.success);
+    ToastService().show(message: "Đã cập nhật mức điều chỉnh!", type: ToastType.success);
   }
 
+  // Tìm và thay thế toàn bộ hàm _showEditSingleItemPrice (khoảng dòng 430)
   void _showEditSingleItemPrice(int index) {
     final item = _selectedItems[index];
-    final controller = TextEditingController(text: formatNumber(item.value));
+
+    // [QUAN TRỌNG] Xác định trạng thái Tăng/Giảm từ giá trị hiện tại
+    // Nếu giá trị < 0 (ví dụ -10,000) -> Là Tăng giá -> isIncreaseLocal = true
+    bool isIncreaseLocal = item.value < 0;
+
+    // Lấy giá trị tuyệt đối để hiển thị (ví dụ 10,000)
+    double displayValue = item.value.abs();
+
+    final controller = TextEditingController(text: formatNumber(displayValue));
     bool isPercentLocal = item.isPercent;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text("Giảm giá: ${item.productName}"),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text("Giá gốc: ${formatNumber(item.oldPrice)}"),
-                  const SizedBox(height: 16),
-                  Row(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text("Điều chỉnh: ${item.productName}"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("Giá niêm yết: ${formatNumber(item.oldPrice)}"),
+                const SizedBox(height: 16),
+
+                // --- [THÊM] Nút chọn Tăng / Giảm ---
+                Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
                     children: [
                       Expanded(
+                        child: InkWell(
+                          onTap: () => setDialogState(() => isIncreaseLocal = false),
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: !isIncreaseLocal ? Colors.red.shade100 : null,
+                              borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                            ),
+                            child: Text("Giảm giá",
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: !isIncreaseLocal ? Colors.red.shade800 : Colors.grey
+                                )
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => setDialogState(() => isIncreaseLocal = true),
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isIncreaseLocal ? Colors.green.shade100 : null,
+                              borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+                            ),
+                            child: Text("Tăng giá",
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: isIncreaseLocal ? Colors.green.shade800 : Colors.grey
+                                )
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 45,
                         child: CustomTextFormField(
                           controller: controller,
                           decoration: InputDecoration(
-                            labelText: isPercentLocal ? "Số % giảm" : "Số tiền giảm",
+                            labelText: isIncreaseLocal
+                                ? (isPercentLocal ? "Số % tăng" : "Số tiền tăng")
+                                : (isPercentLocal ? "Số % giảm" : "Số tiền giảm"),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           keyboardType: TextInputType.number,
                           inputFormatters: [ThousandDecimalInputFormatter()],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      ToggleButtons(
-                        constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
-                        isSelected: [isPercentLocal, !isPercentLocal],
-                        onPressed: (idx) {
-                          setDialogState(() => isPercentLocal = idx == 0);
-                        },
-                        children: const [Text("%"), Text("đ")],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Hủy")),
-                ElevatedButton(
-                    onPressed: () {
-                      final val = parseVN(controller.text);
-                      if (isPercentLocal && val > 100) {
-                        ToastService().show(message: "% không thể lớn hơn 100", type: ToastType.error);
-                        return;
-                      }
-                      setState(() {
-                        _selectedItems[index] = DiscountItem(
-                          productId: item.productId,
-                          productName: item.productName,
-                          imageUrl: item.imageUrl,
-                          oldPrice: item.oldPrice,
-                          value: val,
-                          isPercent: isPercentLocal,
-                        );
-                      });
-                      Navigator.pop(context);
-                    },
-                    child: const Text("Xác nhận")
+                    ),
+                    const SizedBox(width: 8),
+                    ToggleButtons(
+                      constraints: const BoxConstraints(minHeight: 45, minWidth: 48),
+                      borderRadius: BorderRadius.circular(12),
+                      isSelected: [isPercentLocal, !isPercentLocal],
+                      onPressed: (idx) {
+                        setDialogState(() => isPercentLocal = idx == 0);
+                      },
+                      children: const [
+                        Text("%", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                        Text("đ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      ],
+                    ),
+                  ],
                 ),
               ],
-            );
-          }
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Hủy")),
+              ElevatedButton(
+                  onPressed: () {
+                    double val = parseVN(controller.text);
+                    if (isPercentLocal && val > 100) {
+                      ToastService().show(message: "% không thể lớn hơn 100", type: ToastType.error);
+                      return;
+                    }
+
+                    // [SỬA LỖI LOGIC] Đổi dấu theo lựa chọn
+                    // Tăng giá = Số Âm (-), Giảm giá = Số Dương (+)
+                    final double finalValue = isIncreaseLocal ? -val : val;
+
+                    // [QUAN TRỌNG] Cập nhật lại UI cha
+                    setState(() {
+                      _selectedItems[index] = DiscountItem(
+                        productId: item.productId,
+                        productName: item.productName,
+                        imageUrl: item.imageUrl,
+                        oldPrice: item.oldPrice,
+                        value: finalValue,
+                        isPercent: isPercentLocal,
+                      );
+                    });
+                    Navigator.pop(context);
+                  },
+                  child: const Text("Xác nhận")),
+            ],
+          );
+        },
       ),
     );
   }
@@ -484,7 +567,7 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-// --- HÀM XỬ LÝ XÓA KHUYẾN MÃI MỚI ---
+
   Future<void> _deleteDiscount() async {
     if (widget.discount == null) return; // Chỉ xóa được khi đang sửa
 
@@ -536,12 +619,11 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Biến kiểm tra xem đang Sửa hay Tạo mới
     final bool isEditing = widget.discount != null;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEditing ? "Sửa Giảm Giá" : "Tạo Giảm Giá"),
+        title: Text(isEditing ? "Sửa Bảng Giá" : "Tạo Bảng Giá"),
         actions: [
           // --- [MỚI] NÚT XÓA (Chỉ hiện khi đang sửa) ---
           if (isEditing)
@@ -679,17 +761,24 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
                   physics: const NeverScrollableScrollPhysics(),
                   shrinkWrap: true,
                   itemCount: _selectedItems.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (_, __) => const SizedBox(height: 2),
                   itemBuilder: (context, index) {
                     final item = _selectedItems[index];
 
+                    // 1. Tính giá hiển thị
                     double finalDisplayPrice;
                     if (item.isPercent) {
+                      // Công thức: Giá * (1 - %) -> Nếu % âm (tăng) thì thành (1 + %)
                       finalDisplayPrice = item.oldPrice * (1 - (item.value / 100));
                     } else {
+                      // Công thức: Giá - Tiền -> Nếu Tiền âm (tăng) thì thành Giá + Tiền
                       finalDisplayPrice = item.oldPrice - item.value;
                     }
                     if (finalDisplayPrice < 0) finalDisplayPrice = 0;
+
+                    // 2. Xác định là Tăng hay Giảm để hiển thị
+                    final bool isDecrease = item.value > 0;
+                    final double absValue = item.value.abs(); // Lấy giá trị tuyệt đối để hiện số dương
 
                     return Card(
                       elevation: 2,
@@ -726,23 +815,34 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
                                 children: [
                                   Text(
                                       formatNumber(finalDisplayPrice),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 16)
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          // Nếu tăng giá thì hiện màu Xanh, giảm thì Đỏ (hoặc tùy bạn chọn)
+                                          color: isDecrease ? Colors.red : Colors.green,
+                                          fontSize: 16
+                                      )
                                   ),
-                                  if (item.value > 0)
+                                  if (item.value != 0)
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)),
+                                      decoration: BoxDecoration(
+                                        // Đổi màu nền tag
+                                          color: isDecrease ? Colors.red.shade50 : Colors.blue.shade50,
+                                          borderRadius: BorderRadius.circular(4)
+                                      ),
                                       child: Text(
                                           item.isPercent
-                                              ? "Giảm ${item.value.toStringAsFixed(1)}%"
-                                              : "Giảm ${formatNumber(item.value)}đ",
-                                          style: TextStyle(fontSize: 10, color: Colors.red.shade700)
+                                              ? "${isDecrease ? 'Giảm' : 'Tăng'} ${absValue.toStringAsFixed(1)}%"
+                                              : "${isDecrease ? 'Giảm' : 'Tăng'} ${formatNumber(absValue)}đ",
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              // Đổi màu chữ tag
+                                              color: isDecrease ? Colors.red.shade700 : Colors.green.shade700
+                                          )
                                       ),
                                     )
                                 ],
                               ),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.edit_outlined, size: 20, color: Colors.blue),
                             ],
                           ),
                         ),
@@ -757,8 +857,6 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
       ),
     );
   }
-
-  // --- WIDGETS CON ---
 
   Widget _buildSectionTitle(String title) {
     return Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold));
@@ -937,7 +1035,9 @@ class _DiscountFormScreenState extends State<DiscountFormScreen> {
                 isSelected: [_isCalcPercent, !_isCalcPercent],
                 onPressed: (idx) => setState(() => _isCalcPercent = idx == 0),
                 borderRadius: BorderRadius.circular(8),
-                children: const [Text("%"), Text("đ")],
+                children: const [
+                  Text("%", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("đ", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),],
               ),
               const SizedBox(width: 8),
               ElevatedButton(
