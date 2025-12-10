@@ -1805,4 +1805,15 @@ class FirestoreService {
   Future<void> addSurcharge(Map<String, dynamic> data) async => await _db.collection('surcharges').add(data);
   Future<void> updateSurcharge(String id, Map<String, dynamic> data) async => await _db.collection('surcharges').doc(id).update(data);
   Future<void> deleteSurcharge(String id) async => await _db.collection('surcharges').doc(id).delete();
+
+  Future<void> updateWebOrderStatus(String orderId, String newStatus) async {
+    try {
+      await _db.collection('web_orders').doc(orderId).update({
+        'status': newStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception('Không thể cập nhật trạng thái Web Order: $e');
+    }
+  }
 }

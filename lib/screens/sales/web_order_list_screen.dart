@@ -116,13 +116,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     });
   }
 
-  // [HÀM MỚI] Lưu ảnh QR
   Future<void> _saveQrToFile(GlobalKey qrKey, String fileName) async {
     try {
       RenderRepaintBoundary boundary =
-      qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+          qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
       ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
       Uint8List pngBytes = byteData.buffer.asUint8List();
 
@@ -143,11 +143,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     }
   }
 
-  // [HÀM MỚI] Hiển thị Dialog QR chi tiết
   Future<void> _showQrDetailDialog(String type) async {
     final bool isShip = type == 'ship';
     final String title = isShip ? "QR Đặt Giao Hàng" : "QR Đặt Lịch Hẹn";
-    final String qrUrl = '$_qrOrderBaseUrl?store=${widget.currentUser.storeId}&type=$type';
+    final String qrUrl =
+        '$_qrOrderBaseUrl?store=${widget.currentUser.storeId}&type=$type';
     final GlobalKey qrKey = GlobalKey();
 
     bool localEnabled = isShip ? _enableShipQr : _enableBookingQr;
@@ -156,146 +156,171 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     await showDialog(
         context: context,
         builder: (ctx) {
-          return StatefulBuilder(
-              builder: (context, setStateDialog) {
-                return AlertDialog(
-                  contentPadding: const EdgeInsets.all(16),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                      const SizedBox(height: 16),
-
-                      if (localEnabled)
-                        SizedBox(
-                          width: 250,
-                          height: 250,
-                          child: RepaintBoundary(
-                            key: qrKey,
-                            child: Container(
-                              color: Colors.white,
-                              padding: const EdgeInsets.all(12),
-                              child: QrImageView(
-                                data: qrUrl,
-                                version: QrVersions.auto,
-                                backgroundColor: Colors.white,
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        const SizedBox(
-                          height: 200,
-                          width: 250,
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.visibility_off, size: 50, color: Colors.grey),
-                                SizedBox(height: 8),
-                                Text("QR đang tắt", style: TextStyle(color: Colors.grey)),
-                              ],
-                            ),
+          return StatefulBuilder(builder: (context, setStateDialog) {
+            return AlertDialog(
+              contentPadding: const EdgeInsets.all(16),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 18)),
+                  const SizedBox(height: 16),
+                  if (localEnabled)
+                    SizedBox(
+                      width: 250,
+                      height: 250,
+                      child: RepaintBoundary(
+                        key: qrKey,
+                        child: Container(
+                          color: Colors.white,
+                          padding: const EdgeInsets.all(12),
+                          child: QrImageView(
+                            data: qrUrl,
+                            version: QrVersions.auto,
+                            backgroundColor: Colors.white,
                           ),
                         ),
+                      ),
+                    )
+                  else
+                    const SizedBox(
+                      height: 200,
+                      width: 250,
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.visibility_off,
+                                size: 50, color: Colors.grey),
+                            SizedBox(height: 8),
+                            Text("QR đang tắt",
+                                style: TextStyle(color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: (!localEnabled || isProcessing)
+                            ? null
+                            : () {
+                                _saveQrToFile(
+                                    qrKey, "QR_${isShip ? 'Ship' : 'Booking'}");
+                              },
+                        icon: const Icon(Icons.save_alt, size: 18),
+                        label: const Text("Lưu ảnh"),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryColor,
+                            foregroundColor: Colors.white),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: Row(
+                          children: [
+                            Text(localEnabled ? "Đang Bật" : "Đang Tắt",
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: localEnabled
+                                        ? Colors.green
+                                        : Colors.grey)),
+                            Switch(
+                                value: localEnabled,
+                                activeTrackColor:
+                                    AppTheme.primaryColor.withAlpha(125),
+                                activeThumbColor: AppTheme.primaryColor,
+                                onChanged: isProcessing
+                                    ? null
+                                    : (val) async {
+                                        setStateDialog(
+                                            () => isProcessing = true);
+                                        try {
+                                          final settingsId =
+                                              widget.currentUser.ownerUid ??
+                                                  widget.currentUser.uid;
+                                          final key = isShip
+                                              ? 'enableShip'
+                                              : 'enableBooking';
+                                          await SettingsService()
+                                              .updateStoreSettings(
+                                                  settingsId, {key: val});
 
-                      const SizedBox(height: 16),
-
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: (!localEnabled || isProcessing) ? null : () {
-                              _saveQrToFile(qrKey, "QR_${isShip ? 'Ship' : 'Booking'}");
-                            },
-                            icon: const Icon(Icons.save_alt, size: 18),
-                            label: const Text("Lưu ảnh"),
-                            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-
-                            child: Row(
-                              children: [
-                                Text(localEnabled ? "Đang Bật" : "Đang Tắt",
-                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold,
-                                        color: localEnabled ? Colors.green : Colors.grey)),
-                                Switch(
-                                    value: localEnabled,
-                                    activeTrackColor: AppTheme.primaryColor.withAlpha(125),
-                                    activeThumbColor: AppTheme.primaryColor,
-                                    onChanged: isProcessing ? null : (val) async {
-                                      setStateDialog(() => isProcessing = true);
-                                      try {
-                                        final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-                                        final key = isShip ? 'enableShip' : 'enableBooking';
-                                        await SettingsService().updateStoreSettings(settingsId, {key: val});
-
-                                        setStateDialog(() {
-                                          localEnabled = val;
-                                          isProcessing = false;
-                                        });
-                                        setState(() {
-                                          if(isShip) {_enableShipQr = val;} else { _enableBookingQr = val;}
-                                        });
-                                      } catch (e) {
-                                        setStateDialog(() => isProcessing = false);
-                                      }
-                                    }
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      )
+                                          setStateDialog(() {
+                                            localEnabled = val;
+                                            isProcessing = false;
+                                          });
+                                          setState(() {
+                                            if (isShip) {
+                                              _enableShipQr = val;
+                                            } else {
+                                              _enableBookingQr = val;
+                                            }
+                                          });
+                                        } catch (e) {
+                                          setStateDialog(
+                                              () => isProcessing = false);
+                                        }
+                                      }),
+                          ],
+                        ),
+                      ),
                     ],
-                  ),
-                );
-              }
-          );
-        }
-    );
+                  )
+                ],
+              ),
+            );
+          });
+        });
   }
-
-  // [HÀM MỚI] Menu chọn loại QR
   void _showQrMenu() {
     showModalBottomSheet(
         context: context,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
         builder: (ctx) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Mã QR Online (Khách tự đặt)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: const Icon(Icons.local_shipping, color: Colors.orange, size: 30),
-                title: const Text("QR Đặt Giao Hàng (Ship)", style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(_enableShipQr ? "Đang bật" : "Đang tắt"),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showQrDetailDialog('ship');
-                },
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Mã QR Online (Khách tự đặt)",
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    leading: const Icon(Icons.local_shipping,
+                        color: Colors.orange, size: 30),
+                    title: const Text("QR Đặt Giao Hàng (Ship)",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(_enableShipQr ? "Đang bật" : "Đang tắt"),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showQrDetailDialog('ship');
+                    },
+                  ),
+                  const Divider(height: 1, thickness: 0.5, color: Colors.grey),
+                  ListTile(
+                    leading: const Icon(Icons.calendar_month,
+                        color: Colors.blue, size: 30),
+                    title: const Text("QR Đặt Lịch Hẹn (Booking)",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(_enableBookingQr ? "Đang bật" : "Đang tắt"),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showQrDetailDialog('schedule');
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                ],
               ),
-              const Divider( height: 1, thickness: 0.5, color: Colors.grey),
-              ListTile(
-                leading: const Icon(Icons.calendar_month, color: Colors.blue, size: 30),
-                title: const Text("QR Đặt Lịch Hẹn (Booking)", style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(_enableBookingQr ? "Đang bật" : "Đang tắt"),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showQrDetailDialog('schedule');
-                },
-              ),
-              const SizedBox(height: 10),
-            ],
-          ),
-        )
-    );
+            ));
   }
 
   Future<CustomerModel?> _findCustomerByPhone(String phone) async {
@@ -316,12 +341,17 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     return null;
   }
 
-  Future<void> _syncCustomerToWebOrder(String orderId, CustomerModel customer) async {
+  Future<void> _syncCustomerToWebOrder(
+      String orderId, CustomerModel customer) async {
     try {
-      await FirebaseFirestore.instance.collection('web_orders').doc(orderId).update({
+      await FirebaseFirestore.instance
+          .collection('web_orders')
+          .doc(orderId)
+          .update({
         'customerName': customer.name,
         'customerId': customer.id,
-        'billing.first_name': customer.name, // Cập nhật cả trong cấu trúc billing
+        'billing.first_name': customer.name,
+        // Cập nhật cả trong cấu trúc billing
         'shipping.first_name': customer.name,
       });
     } catch (e) {
@@ -332,9 +362,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   Future<void> _confirmShipOrder(WebOrderModel order, String? note) async {
     try {
       if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
-
         // 1. Tìm hoặc Tạo khách
-        CustomerModel? customer = await _findCustomerByPhone(order.customerPhone);
+        CustomerModel? customer =
+            await _findCustomerByPhone(order.customerPhone);
         if (customer == null) {
           if (!mounted) return;
           final newCustomer = await showDialog<CustomerModel>(
@@ -351,7 +381,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           );
 
           if (newCustomer == null) {
-            ToastService().show(message: "Cần thông tin khách hàng.", type: ToastType.warning);
+            ToastService().show(
+                message: "Cần thông tin khách hàng.", type: ToastType.warning);
             return;
           }
           customer = newCustomer;
@@ -388,7 +419,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           'isWebOrder': true,
         };
 
-        await _firestoreService.getOrderReference(cloudOrderId).set(savedOrderData);
+        await _firestoreService
+            .getOrderReference(cloudOrderId)
+            .set(savedOrderData);
 
         ToastService().show(
             message: 'Đã xác nhận & Lưu đơn (Khách: ${customer.name})',
@@ -751,14 +784,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       }
 
       // 3. [THAY ĐỔI LỚN] KHÔNG LỌC NGÀY TRÊN FIRESTORE
-      // Lý do: Bạn muốn "Confirmed Schedule" luôn hiện bất kể ngày nào.
-      // Nếu lọc ở đây, đơn hẹn ngày mai sẽ bị mất khi xem hôm nay.
-      // Ta sẽ tải về và lọc Client-side (ở bên dưới).
-
-      // Tuy nhiên, để tránh tải quá nhiều đơn cũ (năm ngoái), ta có thể giới hạn sơ bộ
-      // Ví dụ: Chỉ lấy đơn từ 30 ngày trước đến tương lai.
-      // Nhưng theo yêu cầu "k quan tâm ngày nào", tạm thời ta bỏ qua filter createdAt ở query này.
-
       _orderSubscription = query.snapshots().map((snapshot) {
         List<Map<String, dynamic>> results = snapshot.docs.map((doc) {
           final model = WebOrderModel.fromFirestore(doc, allProducts);
@@ -770,58 +795,64 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
             'note': data['note'] as String?,
             'confirmedAt': data['confirmedAt'] as Timestamp?,
             'numberOfCustomers':
-            data['customerInfo']?['numberOfCustomers'] as int?,
+                data['customerInfo']?['numberOfCustomers'] as int?,
           };
         }).toList();
 
-        // --- [BỘ LỌC CLIENT-SIDE THEO YÊU CẦU MỚI] ---
         results = results.where((item) {
           final model = item['model'] as WebOrderModel;
 
-          // NHÓM 1: Chờ xử lý -> Luôn hiện
+          // 1. Chờ xử lý -> Luôn hiện
           if (model.status == 'pending') return true;
 
-          // NHÓM 2: Lịch hẹn (Schedule) + Đã xác nhận (Confirmed) -> Luôn hiện (Bất kể ngày)
-          if (model.type == 'schedule' && model.status == 'confirmed') return true;
+          // 2. Lịch hẹn sắp tới (Schedule + Confirmed) -> Luôn hiện tất cả (không lọc ngày)
+          if (model.type == 'schedule' && model.status == 'confirmed'){
+            return true;}
 
-          // NHÓM 3: Các đơn còn lại (Đã hoàn tất, Đã hủy, Ship, Tại bàn...)
-          // -> Chỉ hiện nếu nằm trong khoảng thời gian đang lọc
+          // 3. Các loại khác (Ship, Tại bàn, Lịch sử đã xong/hủy...)
+          // -> Lọc theo ngày tạo (createdAt)
           return _isWithinRange(model.createdAt.toDate());
         }).toList();
-        // ----------------------------------------------
 
-        // SẮP XẾP
-        if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
-          results.sort((a, b) {
-            final modelA = a['model'] as WebOrderModel;
-            final modelB = b['model'] as WebOrderModel;
+        // --- SỬA LẠI LOGIC SẮP XẾP ---
+        results.sort((a, b) {
+          final modelA = a['model'] as WebOrderModel;
+          final modelB = b['model'] as WebOrderModel;
 
-            // Ưu tiên 1: Chờ xử lý lên đầu
-            if (modelA.status == 'pending' && modelB.status != 'pending') return -1;
-            if (modelA.status != 'pending' && modelB.status == 'pending') return 1;
+          // Nhóm 1: Chờ xử lý luôn lên đầu
+          if (modelA.status == 'pending' && modelB.status != 'pending'){
+            return -1;}
+          if (modelA.status != 'pending' && modelB.status == 'pending'){
+            return 1;}
 
-            // Ưu tiên 2: Lịch hẹn (Sắp xếp theo ngày hẹn tăng dần: ai hẹn trước hiện trước)
-            if (modelA.type == 'schedule' && modelA.status == 'confirmed' &&
-                modelB.type == 'schedule' && modelB.status == 'confirmed') {
-              try {
-                final dateA = DateFormat('HH:mm dd/MM/yyyy').parse(modelA.customerAddress);
-                final dateB = DateFormat('HH:mm dd/MM/yyyy').parse(modelB.customerAddress);
-                return dateA.compareTo(dateB);
-              } catch (_) {
-                return modelB.createdAt.compareTo(modelA.createdAt);
-              }
+          // Nhóm 2: Lịch hẹn sắp tới (Schedule + Confirmed)
+          // Sắp xếp ngày hẹn GẦN NHẤT lên trên (Tăng dần)
+          bool isScheduleA =
+              modelA.type == 'schedule' && modelA.status == 'confirmed';
+          bool isScheduleB =
+              modelB.type == 'schedule' && modelB.status == 'confirmed';
+
+          if (isScheduleA && isScheduleB) {
+            try {
+              // Parse giờ hẹn từ customerAddress (Format: HH:mm dd/MM/yyyy)
+              final dateA =
+                  DateFormat('HH:mm dd/MM/yyyy').parse(modelA.customerAddress);
+              final dateB =
+                  DateFormat('HH:mm dd/MM/yyyy').parse(modelB.customerAddress);
+              return dateA.compareTo(dateB); // Tăng dần (Gần nhất lên đầu)
+            } catch (_) {
+              // Nếu lỗi format thì dùng ngày tạo (Mới nhất lên đầu)
+              return modelB.createdAt.compareTo(modelA.createdAt);
             }
+          }
 
-            // Còn lại: Mới nhất lên đầu
-            return modelB.createdAt.compareTo(modelA.createdAt);
-          });
-        } else {
-          results.sort((a, b) {
-            final modelA = a['model'] as WebOrderModel;
-            final modelB = b['model'] as WebOrderModel;
-            return modelB.createdAt.compareTo(modelA.createdAt);
-          });
-        }
+          // Ưu tiên nhóm lịch hẹn lên trên nhóm lịch sử
+          if (isScheduleA && !isScheduleB) return -1;
+          if (!isScheduleA && isScheduleB) return 1;
+
+          // Nhóm 3: Còn lại (Lịch sử) -> Mới nhất lên đầu (Giảm dần theo createdAt)
+          return modelB.createdAt.compareTo(modelA.createdAt);
+        });
 
         return results;
       }).listen((data) {
@@ -842,7 +873,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     }
   }
 
-  // Hàm phụ trợ kiểm tra ngày (không thay đổi)
   bool _isWithinRange(DateTime date) {
     if (_startDate == null || _endDate == null) return true;
     return date.isAfter(_startDate!.subtract(const Duration(seconds: 1))) &&
@@ -1290,7 +1320,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     return [
       if (widget.currentUser.businessType == 'retail')
         IconButton(
-          icon: const Icon(Icons.qr_code_2, color: AppTheme.primaryColor, size: 30),
+          icon: const Icon(Icons.qr_code_2,
+              color: AppTheme.primaryColor, size: 30),
           tooltip: 'Mã QR Online',
           onPressed: _showQrMenu,
         ),
@@ -1361,7 +1392,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                 String errorMsg = orderSnapshot.error.toString();
                 if (errorMsg.contains('operation requires an index')) {
                   errorMsg =
-                  "Lỗi: Cần tạo chỉ mục (index) trong Firestore.\n Vui lòng kiểm tra log (Debug Console) để xem link tạo tự động.";
+                      "Lỗi: Cần tạo chỉ mục (index) trong Firestore.\n Vui lòng kiểm tra log (Debug Console) để xem link tạo tự động.";
                 } else {
                   debugPrint('Lỗi tải đơn hàng: ${orderSnapshot.error}');
                 }
@@ -1384,28 +1415,24 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
               // Nhóm 1: Chờ xử lý (Pending)
               final pendingOrders = allOrdersData
                   .where((data) =>
-              (data['model'] as WebOrderModel).status == 'pending')
+                      (data['model'] as WebOrderModel).status == 'pending')
                   .toList();
 
               // Nhóm 2: Lịch hẹn sắp tới (Schedule + Confirmed)
-              final scheduledOrders = allOrdersData
-                  .where((data) {
+              final scheduledOrders = allOrdersData.where((data) {
                 final m = data['model'] as WebOrderModel;
                 return m.type == 'schedule' && m.status == 'confirmed';
-              })
-                  .toList();
+              }).toList();
 
               // Nhóm 3: Lịch sử / Đã xử lý (Các đơn còn lại)
-              final historyOrders = allOrdersData
-                  .where((data) {
+              final historyOrders = allOrdersData.where((data) {
                 final m = data['model'] as WebOrderModel;
                 // Loại bỏ những đơn đã thuộc 2 nhóm trên
                 bool isPending = m.status == 'pending';
-                bool isScheduled = m.type == 'schedule' &&
-                    m.status == 'confirmed';
+                bool isScheduled =
+                    m.type == 'schedule' && m.status == 'confirmed';
                 return !isPending && !isScheduled;
-              })
-                  .toList();
+              }).toList();
 
               // Nếu đang lọc theo trạng thái cụ thể, hiển thị danh sách phẳng
               if (_selectedStatus != WebOrderStatusFilter.all) {
@@ -1434,8 +1461,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                   if (pendingOrders.isNotEmpty) ...[
                     _buildSectionHeader('Chờ xử lý (${pendingOrders.length})',
                         Colors.red), // Màu đỏ cho nổi bật
-                    ...pendingOrders.map((data) =>
-                        _buildOrderCard(
+                    ...pendingOrders.map((data) => _buildOrderCard(
                           data['model'] as WebOrderModel,
                           data['rawData'] as Map<String, dynamic>,
                           data['confirmedBy'] as String?,
@@ -1452,20 +1478,20 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                       // Padding rộng hơn chút để tách nhóm
                       child: Row(
                         children: [
-                          Icon(Icons.calendar_month, color: Colors.blue,
-                              size: 20),
+                          Icon(Icons.calendar_month,
+                              color: Colors.blue, size: 20),
                           SizedBox(width: 8),
                           Text(
                             "Lịch hẹn sắp tới",
-                            style: TextStyle(fontSize: 18,
+                            style: TextStyle(
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.blue),
                           ),
                         ],
                       ),
                     ),
-                    ...scheduledOrders.map((data) =>
-                        _buildOrderCard(
+                    ...scheduledOrders.map((data) => _buildOrderCard(
                           data['model'] as WebOrderModel,
                           data['rawData'] as Map<String, dynamic>,
                           data['confirmedBy'] as String?,
@@ -1480,8 +1506,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                     _buildSectionHeader(
                         'Lịch sử đơn hàng (${historyOrders.length})',
                         Colors.grey.shade700),
-                    ...historyOrders.map((data) =>
-                        _buildOrderCard(
+                    ...historyOrders.map((data) => _buildOrderCard(
                           data['model'] as WebOrderModel,
                           data['rawData'] as Map<String, dynamic>,
                           data['confirmedBy'] as String?,
@@ -1492,13 +1517,15 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                   ],
 
                   // Nếu tất cả đều trống
-                  if (pendingOrders.isEmpty && scheduledOrders.isEmpty &&
+                  if (pendingOrders.isEmpty &&
+                      scheduledOrders.isEmpty &&
                       historyOrders.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 50),
-                      child: Center(child: Text(
-                          "Không có đơn hàng nào trong khoảng thời gian này.",
-                          style: TextStyle(color: Colors.grey))),
+                      child: Center(
+                          child: Text(
+                              "Không có đơn hàng nào trong khoảng thời gian này.",
+                              style: TextStyle(color: Colors.grey))),
                     )
                 ],
               );
@@ -1579,10 +1606,12 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         final billing = rawData['billing'] as Map<String, dynamic>?;
         final shipping = rawData['shipping'] as Map<String, dynamic>?;
 
-        if (billing != null && billing[nestedKey] != null){
-          return billing[nestedKey].toString();}
-        if (shipping != null && shipping[nestedKey] != null){
-          return shipping[nestedKey].toString();}
+        if (billing != null && billing[nestedKey] != null) {
+          return billing[nestedKey].toString();
+        }
+        if (shipping != null && shipping[nestedKey] != null) {
+          return shipping[nestedKey].toString();
+        }
       }
       if (modelValue != null && modelValue != 'NA' && modelValue.isNotEmpty) {
         return modelValue;
@@ -1644,7 +1673,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         }
       }
     } else if (['completed', 'Đã hoàn tất'].contains(order.status)) {
-      statusText = 'Đã hoàn tất';
+      if (order.type == 'schedule') {
+        statusText = 'Đã nhận khách'; // Đổi text cho booking
+      } else {
+        statusText = 'Đã hoàn tất';
+      }
       statusIcon = Icons.check_circle;
       statusColor = Colors.grey;
     } else if (order.status == 'cancelled' || order.status == 'Đã từ chối') {
@@ -1901,10 +1934,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                           onConfirm: () async {
                             final bool success =
                                 await _updateOrderStatus(order.id, 'cancelled');
-                            if (success){
+                            if (success) {
                               ToastService().show(
                                   message: 'Đã từ chối yêu cầu.',
-                                  type: ToastType.success);}
+                                  type: ToastType.success);
+                            }
                           },
                         ),
                       ),
@@ -1992,30 +2026,50 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                             foregroundColor: Colors.white),
                         onPressed: () {
                           _showConfirmationDialog(
-                              title: "Hoàn tất",
-                              content:
-                                  "Xác nhận khách đã đến và tạo đơn bán hàng?",
-                              // Truyền thêm rawData['customerId'] vào tham số thứ 2
-                            onConfirm: () => _completeScheduleOrderRetail(order, rawData),);
+                            title: "Hoàn tất",
+                            content:
+                                "Xác nhận khách đã đến và tạo đơn bán hàng?",
+                            // Truyền thêm rawData['customerId'] vào tham số thứ 2
+                            onConfirm: () =>
+                                _completeScheduleOrderRetail(order, rawData),
+                          );
                         },
                       ))
                     ]
                   ])
-                ] else if (order.type == 'ship') ...[
-                  // FnB Ship Logic (Giữ nguyên nút Xem đơn)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16.0),
-                    child: Row(children: [
+                ] else if (order.type == 'ship' || order.type == 'schedule') ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      // 1. NÚT HỦY ĐƠN (Mới thêm)
                       Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.cancel),
+                          label: const Text("Hủy đơn"),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                          ),
+                          onPressed: () => _handleCancelFnBConfirmed(order),
+                        ),
+                      ),
+
+                      // 2. NÚT XEM ĐƠN (Giữ lại nếu là Ship để xem món)
+                      if (order.type == 'ship') ...[
+                        const SizedBox(width: 12),
+                        Expanded(
                           child: ElevatedButton.icon(
-                        icon: const Icon(Icons.fact_check_outlined),
-                        label: const Text('Xem đơn'),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.grey,
-                            foregroundColor: Colors.white),
-                        onPressed: () => _openShipOrderInOrderScreen(order),
-                      )),
-                    ]),
+                            icon: const Icon(Icons.fact_check_outlined),
+                            label: const Text('Xem đơn'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () => _openShipOrderInOrderScreen(order),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ]
               ]
@@ -2086,6 +2140,10 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     final confirmedAtString =
         confirmedAt != null ? timeFormat.format(confirmedAt.toDate()) : '';
 
+    String statusLabel = 'Đã hoàn tất';
+    if (order.type == 'schedule') {
+      statusLabel = 'Đã nhận khách';
+    }
     return Card(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         elevation: 2,
@@ -2114,8 +2172,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                         decoration: BoxDecoration(
                             color: Colors.grey.withAlpha(25),
                             borderRadius: BorderRadius.circular(12)),
-                        child: const Text('Đã hoàn tất',
-                            style: TextStyle(
+                        child: Text(statusLabel,
+                            style: const TextStyle(
                                 color: Colors.grey,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13)),
@@ -2135,9 +2193,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   Future<void> _confirmScheduleOrder(
       WebOrderModel order, int? numberOfCustomers, String? note) async {
-
     if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
-
       // 1. Tìm hoặc Tạo khách hàng
       CustomerModel? customer = await _findCustomerByPhone(order.customerPhone);
 
@@ -2157,7 +2213,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         );
 
         if (newCustomer == null) {
-          ToastService().show(message: "Cần thông tin khách hàng để xác nhận.", type: ToastType.warning);
+          ToastService().show(
+              message: "Cần thông tin khách hàng để xác nhận.",
+              type: ToastType.warning);
           return;
         }
         customer = newCustomer;
@@ -2172,7 +2230,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         if (note != null && note != order.note) {
           await _updateOrderNote(order.id, note);
         }
-        ToastService().show(message: 'Đã xác nhận lịch hẹn.', type: ToastType.success);
+        ToastService()
+            .show(message: 'Đã xác nhận lịch hẹn.', type: ToastType.success);
       }
       return;
     }
@@ -2257,16 +2316,20 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     }
   }
 
-  Future<void> _completeScheduleOrderRetail(WebOrderModel order, Map<String, dynamic> rawData) async {
+  Future<void> _completeScheduleOrderRetail(
+      WebOrderModel order, Map<String, dynamic> rawData) async {
     try {
       // 1. LẤY DỮ LIỆU TRỰC TIẾP TỪ RAW DATA (Để tránh lỗi Model mapping ra 'N/A')
       String? finalCustomerId = rawData['customerId'] as String?;
-      String finalName = rawData['customerName']?.toString() ?? order.customerName;
-      String finalPhone = rawData['customerPhone']?.toString() ?? order.customerPhone;
+      String finalName =
+          rawData['customerName']?.toString() ?? order.customerName;
+      String finalPhone =
+          rawData['customerPhone']?.toString() ?? order.customerPhone;
 
       // [FIX] Lấy địa chỉ/giờ hẹn trực tiếp từ rawData
       // Web Order manual lưu giờ hẹn vào 'customerAddress' và 'billing.address_1'
-      String finalAddress = rawData['customerAddress']?.toString() ?? order.customerAddress;
+      String finalAddress =
+          rawData['customerAddress']?.toString() ?? order.customerAddress;
 
       // Fallback: Nếu vẫn rỗng hoặc 'N/A', thử lấy trong billing
       if (finalAddress.isEmpty || finalAddress == 'N/A') {
@@ -2332,7 +2395,6 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       ToastService().show(
           message: 'Đã hoàn tất & Lưu đơn ra màn hình chính.',
           type: ToastType.success);
-
     } catch (e) {
       debugPrint("Lỗi hoàn tất: $e");
       ToastService().show(message: "Lỗi: $e", type: ToastType.error);
@@ -2422,6 +2484,41 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _handleCancelFnBConfirmed(WebOrderModel order) async {
+    _showConfirmationDialog(
+      title: "Hủy đơn",
+      content: "Bạn có chắc muốn hủy đơn này? Bàn ảo sẽ bị xóa và đơn hàng sẽ bị hủy.",
+      onConfirm: () async {
+        try {
+          // 1. Cập nhật Web Order -> cancelled
+          await _updateOrderStatus(order.id, 'cancelled');
+
+          // 2. Xác định ID bàn ảo
+          // Logic: Ship -> ship_{id}, Schedule -> schedule_{id}
+          final String prefix = order.type == 'ship' ? 'ship_' : 'schedule_';
+          final String virtualTableId = '$prefix${order.id}';
+
+          // 3. Xóa bàn ảo khỏi collection 'tables'
+          // Cần try-catch riêng vì có thể bàn đã bị xóa trước đó
+          try {
+            await _firestoreService.deleteTable(virtualTableId);
+          } catch (e) {
+            debugPrint("Lỗi xóa bàn ảo (có thể không tồn tại): $e");
+          }
+
+          // 4. Hủy đơn hàng trong collection 'orders'
+          // (Lưu ý: ID đơn hàng bán chính là ID của web order theo logic xác nhận)
+          await _firestoreService.updateOrderStatus(order.id, 'cancelled');
+
+          ToastService().show(message: "Đã hủy đơn và xóa bàn ảo thành công.", type: ToastType.success);
+        } catch (e) {
+          debugPrint("Lỗi khi hủy đơn FnB: $e");
+          ToastService().show(message: "Lỗi hệ thống: $e", type: ToastType.error);
+        }
+      },
     );
   }
 }
@@ -2917,7 +3014,8 @@ class _CreateManualWebOrderScreenState
     }
 
     final String prefix = isShip ? 'ship_' : 'schedule_';
-    final String tableName = isShip ? 'Giao hàng' : (isRetail ? 'Đặt lịch' : 'Booking');
+    final String tableName =
+        isShip ? 'Giao hàng' : (isRetail ? 'Đặt lịch' : 'Booking');
 
     final String virtualTableId = isRetail ? orderId : '$prefix$orderId';
     final int stt = isShip ? -999 : -998;
@@ -2946,12 +3044,13 @@ class _CreateManualWebOrderScreenState
       }
       final double basePrice = item.price - toppingTotal;
 
-      return item.copyWith(
-          price: basePrice,
-          // Retail Ship/Schedule đều chưa trừ kho (sentQuantity=0) cho đến khi thanh toán
-          // FnB Ship thì trừ luôn (sentQuantity = quantity)
-          sentQuantity: (isShip && !isRetail) ? item.quantity : 0
-      ).toMap();
+      return item
+          .copyWith(
+              price: basePrice,
+              // Retail Ship/Schedule đều chưa trừ kho (sentQuantity=0) cho đến khi thanh toán
+              // FnB Ship thì trừ luôn (sentQuantity = quantity)
+              sentQuantity: (isShip && !isRetail) ? item.quantity : 0)
+          .toMap();
     }).toList();
 
     // [QUAN TRỌNG] Retail dùng 'saved', FnB dùng 'active'
@@ -2973,8 +3072,10 @@ class _CreateManualWebOrderScreenState
       'storeId': widget.currentUser.storeId,
       'createdAt': webOrderData['createdAt'],
       'createdByUid': widget.currentUser.uid,
-      'createdByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
-      'numberOfCustomers': webOrderData['customerInfo']['numberOfCustomers'] ?? 1,
+      'createdByName':
+          widget.currentUser.name ?? widget.currentUser.phoneNumber,
+      'numberOfCustomers':
+          webOrderData['customerInfo']['numberOfCustomers'] ?? 1,
       'version': 1,
       'customerId': customer.id,
       'customerName': customer.name,
@@ -3072,7 +3173,7 @@ class _CreateManualWebOrderScreenState
       final String staffName =
           widget.currentUser.name ?? widget.currentUser.phoneNumber;
       final newDocRef =
-      FirebaseFirestore.instance.collection('web_orders').doc();
+          FirebaseFirestore.instance.collection('web_orders').doc();
       final String orderId = newDocRef.id;
 
       // [SỬA LẠI ĐOẠN NÀY] Khai báo trực tiếp map contactInfo để dùng
@@ -3150,9 +3251,7 @@ class _CreateManualWebOrderScreenState
         counterText: "",
       ),
       keyboardType: TextInputType.phone,
-
       maxLength: 10,
-
       validator: (val) {
         if (val == null || val.isEmpty) return 'Nhập SĐT';
 

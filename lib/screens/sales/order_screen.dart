@@ -2647,16 +2647,12 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<void> _handleBookingCheckIn() async {
-    // 1. QUAN TRỌNG: Lưu đơn hàng hiện tại lên Server trước
-    // Việc này đảm bảo các món "chưa bấm lưu" (đang ở local) sẽ được lưu lại
-    // và có thể chuyển sang bàn mới.
     final saveSuccess = await _saveOrder();
     if (!saveSuccess) {
       ToastService().show(message: "Lỗi lưu đơn, không thể nhận khách lúc này.", type: ToastType.error);
       return;
     }
     if (!mounted) return;
-    // Sau khi save, _currentOrder chắc chắn đã được cập nhật mới nhất từ server
     if (_currentOrder == null) return;
 
     // 2. Mở màn hình chuyển bàn với chế độ "Nhận khách" (chỉ hiện tab chuyển)
@@ -2666,7 +2662,7 @@ class _OrderScreenState extends State<OrderScreen> {
           currentUser: widget.currentUser,
           sourceOrder: _currentOrder!,
           sourceTable: widget.table,
-          isBookingCheckIn: true, // <-- TRUYỀN TRUE ĐỂ ẨN TAB GỘP/TÁCH
+          isBookingCheckIn: true,
         ),
       ),
     );
@@ -2674,10 +2670,18 @@ class _OrderScreenState extends State<OrderScreen> {
     // 3. Xử lý sau khi chuyển thành công (Tự động in bếp)
     if (result != null && result is Map && result['success'] == true) {
       final TableModel targetTable = result['targetTable'];
+      if (widget.table.id.startsWith('schedule_')) {
+        try {
+          final webOrderId = widget.table.id.replaceFirst('schedule_', '');
+          await _firestoreService.updateWebOrderStatus(webOrderId, 'completed');
+        } catch (e) {
+          debugPrint("Lỗi cập nhật trạng thái Web Order: $e");
+        }
+      }
       await _processAutoKitchenPrintForTargetTable(targetTable);
 
       if (mounted) {
-        Navigator.of(context).pop(); // Thoát màn hình Booking
+        Navigator.of(context).pop();
       }
     }
   }
