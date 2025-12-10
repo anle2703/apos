@@ -407,7 +407,6 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
 
     Widget productInfo() {
       final hasUnit = (product.unit != null && product.unit!.trim().isNotEmpty);
-      final hasStock = true;
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -419,85 +418,77 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
               color: AppTheme.textColor,
               fontWeight: FontWeight.bold,
             ),
+            maxLines: 2, // Giới hạn 2 dòng cho tên dài
+            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
 
-          // Mã sản phẩm
+          // HÀNG 1: Mã sản phẩm & Tồn kho
           Row(
             children: [
-              const Icon(Icons.qr_code_scanner, size: 16, color: Colors.grey),
+              // Mã sản phẩm
+              const Icon(Icons.qr_code_scanner, size: 14, color: Colors.grey),
+              const SizedBox(width: 4),
+              Flexible( // Dùng Flexible để mã dài không bị lỗi
+                child: Text(
+                  product.productCode ?? '---',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+
+              const SizedBox(width: 12), // Khoảng cách giữa Mã và Tồn
+
+              // Tồn kho
+              const Icon(Icons.inventory_2_outlined, size: 14, color: Colors.grey),
               const SizedBox(width: 4),
               Text(
-                product.productCode ?? 'Không có mã',
-                style: Theme.of(context).textTheme.bodyMedium,
+                'Tồn: ${formatNumber(product.stock)}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: product.stock <= 0 ? Colors.red : Colors.grey.shade700,
+                    fontWeight: product.stock <= 0 ? FontWeight.bold : FontWeight.normal
+                ),
               ),
             ],
           ),
 
           const SizedBox(height: 4),
 
-          // Giá bán & Giá vốn
+          // HÀNG 2: Giá bán & ĐVT
           Row(
             children: [
-              if (product.sellPrice > 0) ...[
-                const Icon(Icons.attach_money, size: 16, color: Colors.grey),
-                const SizedBox(width: 4),
-                Text(
-                  formatNumber(product.sellPrice),
-                  style: Theme.of(context).textTheme.bodyMedium,
+              // Giá bán
+              Text(
+                formatNumber(product.sellPrice),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryColor,
+                    fontSize: 15
                 ),
-              ],
-              if (product.sellPrice > 0 && product.costPrice > 0)
-                const SizedBox(width: 12),
-              if (product.costPrice > 0) ...[
-                const Icon(Icons.money_off, size: 16, color: Colors.grey),
-                const SizedBox(width: 4),
-                Text(
-                  formatNumber(product.costPrice),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
+              ),
+
+              if (hasUnit) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.grey.shade300)
+                  ),
+                  child: Text(
+                    product.unit!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey.shade800
+                    ),
+                  ),
+                )
+              ]
             ],
           ),
-
-          // ĐVT & Tồn kho (ẩn nếu không có)
-          if (hasUnit || hasStock) ...[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 12,
-              runSpacing: 4,
-              children: [
-                if (hasUnit)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.category_outlined, size: 16, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(
-                        'ĐVT: ${product.unit}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
-                if (hasStock)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Tồn: ${formatNumber(product.stock)}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ],
         ],
       );
     }
-
     return InkWell(
       onTap: () {
         if (widget.isMultiSelect) {
