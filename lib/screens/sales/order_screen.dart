@@ -1713,18 +1713,19 @@ class _OrderScreenState extends State<OrderScreen> {
           if (didPop) return;
 
           final bool isBookingTable = widget.table.id.startsWith('schedule_');
+          final bool shouldWarn = (!isBookingTable && _hasUnsentItems) ||
+              (isBookingTable && _localChanges.isNotEmpty);
 
-          if (_hasUnsentItems && !isBookingTable) {
+          if (shouldWarn) {
             final wantsToExit = await _showExitConfirmationDialog();
             if (wantsToExit == true) {
-              _localChanges.clear();
-              if (context.mounted) Navigator.of(context).pop();
+              _localChanges.clear(); // Xóa các món đang lưu local
+              if (context.mounted) Navigator.of(context).pop(result);
             }
-          } else if (_localChanges.isNotEmpty) {
-            // --- SỬA ĐOẠN NÀY ĐỂ CHẠY NGẦM ---
-
-            // 1. Gọi hàm lưu NHƯNG KHÔNG DÙNG 'await'
-            // Việc này giúp lệnh lưu chạy song song
+          }
+          // 2. LOGIC TỰ ĐỘNG LƯU NGẦM (Chỉ áp dụng cho bàn thường khi sửa món cũ)
+          else if (_localChanges.isNotEmpty && !isBookingTable) {
+            // Gọi hàm lưu chạy ngầm (không await để UI thoát ngay)
             _saveOrder().then((success) {
               if (!success) {
                 debugPrint("Lưu ngầm thất bại (User đã thoát)");
@@ -1733,11 +1734,11 @@ class _OrderScreenState extends State<OrderScreen> {
               }
             });
 
-            // 2. Cho phép thoát màn hình NGAY LẬP TỨC
+            // Cho phép thoát ngay lập tức
             if (context.mounted) Navigator.of(context).pop(result);
-
-            // ----------------------------------
-          } else {
+          }
+          // 3. KHÔNG CÓ THAY ĐỔI GÌ -> THOÁT LUÔN
+          else {
             if (context.mounted) Navigator.of(context).pop(result);
           }
         },
@@ -1792,7 +1793,6 @@ class _OrderScreenState extends State<OrderScreen> {
               }
             }
 
-// 2. Trả về StreamBuilder lắng nghe đơn hàng luôn
             return StreamBuilder<DocumentSnapshot>(
               stream: _orderStream,
               builder: (context, orderSnapshot) {
@@ -1849,7 +1849,6 @@ class _OrderScreenState extends State<OrderScreen> {
                 return isDesktop ? _buildDesktopLayout() : _buildMobileLayout();
               },
             );
-// --- KẾT THÚC ĐOẠN SỬA ---
           },
         ));
   }
@@ -1904,37 +1903,11 @@ class _OrderScreenState extends State<OrderScreen> {
       _cart.clear();
       _cart.addAll(mergedCart);
 
-      // Bước 2: Xử lý logic đặt lịch (nếu có)
-      if (widget.table.id.startsWith('schedule_')) {
-        final Map<String, OrderItem> itemsToMove = {};
-        _cart.forEach((key, item) {
-          if (item.sentQuantity == 0 && item.quantity > 0) {
-            itemsToMove[key] = item;
-          }
-        });
-        if (itemsToMove.isNotEmpty) {
-          _localChanges.addAll(itemsToMove);
-        }
-      }
-
-      // Bước 3: CHẠY TÍNH TOÁN NGẦM (Không gọi setState trong các hàm con này)
-      // Các hàm này sẽ cập nhật trực tiếp vào _localChanges hoặc _cart
-
-      // Tính tiền giờ
+      // Bước 2: CHẠY TÍNH TOÁN NGẦM (Không gọi setState trong các hàm con này)
       _updateTimeBasedPrices(triggerSetState: false);
-
-      // Tính giảm giá (Logic quan trọng nhất gây nhảy giá)
-      // Hàm này sẽ update _localChanges dựa trên _cart mới nhất
       _recalculateCartDiscounts(triggerSetState: false);
-
-      // Tính Mua X Tặng Y (nếu hàm này của bạn có setState bên trong, hãy tạm thời để nó chạy sau hoặc sửa nó để chấp nhận tham số triggerSetState)
       _applyBuyXGetYLogic();
-
-      // Bước 4: Gọi setState MỘT LẦN DUY NHẤT để hiển thị tất cả kết quả
       setState(() {
-        // Lúc này _cart đã có dữ liệu
-        // _localChanges đã được các hàm trên tính toán xong xuôi
-        // UI sẽ render ra đúng giá tiền ngay lập tức, không bị nhảy.
       });
     }
   }
