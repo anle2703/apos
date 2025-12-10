@@ -1116,8 +1116,26 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final String newBillId = '${widget.currentUser.storeId}_$shortBillCode';
 
       // 2. CHUẨN BỊ DỮ LIỆU
-      final validPayments =
-      Map.fromEntries(_paymentAmounts.entries.where((e) => e.value > 0));
+      final Map<String, double> validPayments = {};
+
+      _paymentAmounts.forEach((methodId, inputAmount) {
+        if (inputAmount <= 0) return;
+
+        final method = _availableMethods.firstWhere((m) => m.id == methodId);
+        double recordedAmount = inputAmount;
+
+        // [QUAN TRỌNG] Nếu là Tiền mặt và có Tiền thừa -> Trừ tiền thừa ra khỏi Doanh thu
+        // Ví dụ: Bill 90k, Khách đưa 100k (inputAmount), Thừa 10k (_changeAmount)
+        // -> Thực thu (recordedAmount) = 100k - 10k = 90k
+        if (method.type == PaymentMethodType.cash && _changeAmount > 0) {
+          recordedAmount = inputAmount - _changeAmount;
+        }
+
+        // Đảm bảo số tiền ghi nhận > 0 (tránh trường hợp tiền thừa >= tiền đưa do lỗi tính toán nào đó)
+        if (recordedAmount > 0) {
+          validPayments[methodId] = recordedAmount;
+        }
+      });
 
       String? firstBankMethodId;
       try {
