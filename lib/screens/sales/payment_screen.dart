@@ -94,6 +94,7 @@ class PaymentScreen extends StatelessWidget {
   final bool promptForCash;
   final bool isRetailMode;
   final String? initialPaymentMethodId;
+  final String? currentShiftId;
 
   static void clearCache() {
     _PaymentPanelState.resetCache();
@@ -112,6 +113,7 @@ class PaymentScreen extends StatelessWidget {
     this.promptForCash = true,
     this.isRetailMode = false,
     this.initialPaymentMethodId,
+    this.currentShiftId,
   });
 
   @override
@@ -132,6 +134,7 @@ class PaymentScreen extends StatelessWidget {
         initialPaymentMethodId: initialPaymentMethodId,
         onCancel: () {},
         onConfirmPayment: (result) {},
+        currentShiftId: currentShiftId,
       ),
     );
   }
@@ -255,6 +258,7 @@ class PaymentView extends StatelessWidget {
   final bool promptForCash;
   final bool isRetailMode;
   final String? initialPaymentMethodId;
+  final String? currentShiftId;
 
   const PaymentView({
     super.key,
@@ -272,6 +276,7 @@ class PaymentView extends StatelessWidget {
     this.promptForCash = true,
     this.isRetailMode = false,
     this.initialPaymentMethodId,
+    this.currentShiftId,
   });
 
   @override
@@ -295,6 +300,7 @@ class PaymentView extends StatelessWidget {
         promptForCash: promptForCash,
         isRetailMode: isRetailMode,
         initialPaymentMethodId: initialPaymentMethodId,
+        currentShiftId: currentShiftId,
       ),
     );
   }
@@ -315,7 +321,7 @@ class _PaymentPanel extends StatefulWidget {
   final bool promptForCash;
   final bool isRetailMode;
   final String? initialPaymentMethodId;
-
+  final String? currentShiftId;
   const _PaymentPanel({
     required this.order,
     required this.currentUser,
@@ -331,6 +337,7 @@ class _PaymentPanel extends StatefulWidget {
     required this.promptForCash,
     required this.isRetailMode,
     this.initialPaymentMethodId,
+    this.currentShiftId,
   });
 
   @override
@@ -1217,7 +1224,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final double totalProfit = _calculateTotalProfit();
       int pointsEarned = 0;
       if (widget.customer != null && _earnRate > 0) {
-        pointsEarned = (_totalPayable / _earnRate).floor();
+        // 1. Tổng các khoản giảm trừ (Chiết khấu thủ công + Voucher + Tiền điểm đã dùng)
+        final double totalReductions = _calculateDiscount() + _voucherDiscountValue + _pointsMonetaryValue;
+        // 2. Doanh thu cơ sở để tính điểm = Subtotal - Tổng giảm trừ
+        double revenueForPoints = widget.subtotal - totalReductions;
+        if (revenueForPoints < 0) revenueForPoints = 0;
+        // 3. Tính điểm (Làm tròn xuống)
+        pointsEarned = (revenueForPoints / _earnRate).floor();
       }
 
       // Xử lý Staff Commissions
@@ -1265,6 +1278,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'orderId': widget.order.id,
         'storeId': widget.order.storeId,
         'tableName': finalTableNameForBill,
+        'shiftId': widget.currentShiftId,
         'items': billItems,
         'subtotal': widget.subtotal,
         'totalPayable': _totalPayable,
@@ -1731,9 +1745,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       debugPrint(">>> [PAYLOAD] Không có thông tin HĐĐT để in.");
     }
     final double debtToPrint = (billData['hideDebt'] == true) ? 0.0 : _debtAmount;
+    String tableNameToPrint = widget.order.tableName;
+    if (widget.isRetailMode) {
+      tableNameToPrint = widget.order.tableName;
+    }
     return {
       'storeId': widget.currentUser.storeId,
-      'tableName': widget.isRetailMode ? '' : widget.order.tableName,
+      'tableName': tableNameToPrint,
       'userName': widget.currentUser.name ?? 'Unknown',
       'items': billItems,
       'storeInfo': storeInfo,
@@ -2899,7 +2917,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final double costPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
 
       final isTimeBased = product['serviceSetup']?['isTimeBased'] == true;
-
+      double mainQuantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
       if (isTimeBased) {
         // [SỬA LẠI LOGIC TÍNH GIÁ VỐN DỊCH VỤ TÍNH GIỜ]
         // Công thức: Chi phí = (Giá vốn 1 giờ / 60) * Tổng số phút sử dụng
@@ -2918,14 +2936,36 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             }
           }
         }
-
         // Tính chi phí hoạt động dựa trên thời gian thực tế
         totalCost += (costPrice / 60.0) * totalMinutes;
-
       } else {
-        // Hàng hóa thường: Giá vốn * Số lượng
-        final double quantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-        totalCost += costPrice * quantity;
+        totalCost += costPrice * mainQuantity;
+      }
+
+      // B. [MỚI] TÍNH GIÁ VỐN TOPPING / HÀNG BÁN KÈM
+      final toppings = itemMap['toppings'];
+      if (toppings is List && toppings.isNotEmpty) {
+        for (var t in toppings) {
+          if (t is Map) {
+            // 1. Lấy giá vốn Topping
+            // Cấu trúc có thể là t['product']['costPrice'] hoặc t['costPrice'] tùy lúc lưu
+            double tCost = 0;
+            if (t['product'] is Map && t['product']['costPrice'] != null) {
+              tCost = (t['product']['costPrice'] as num).toDouble();
+            } else {
+              tCost = (t['costPrice'] as num?)?.toDouble() ?? 0.0;
+            }
+
+            // 2. Lấy số lượng Topping trên 1 đơn vị sản phẩm chính
+            double tQty = (t['quantity'] as num?)?.toDouble() ?? 0.0;
+
+            // 3. Cộng vào tổng giá vốn
+            // Công thức: Giá vốn Topping * SL Topping * SL Sản phẩm chính
+            // Ví dụ: 2 Ly trà sữa (mainQuantity=2), mỗi ly thêm 1 trân châu (tQty=1)
+            // -> Tổng trân châu = 2 -> Trừ vốn của 2 phần trân châu.
+            totalCost += (tCost * tQty * mainQuantity);
+          }
+        }
       }
     }
 

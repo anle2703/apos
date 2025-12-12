@@ -36,7 +36,6 @@ import '../../theme/number_utils.dart';
 import '../../models/quick_note_model.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-// Thêm dòng này vào phần import
 import 'web_order_list_screen.dart';
 
 class RetailTab {
@@ -269,10 +268,12 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   List<Map<String, dynamic>> _activeBuyXGetYPromos = [];
   StreamSubscription? _buyXGetYSub;
   bool _canSell = false;
+  String? _currentShiftId;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentShift();
     _loadTaxSettings();
 
     if (widget.currentUser.role == 'owner') {
@@ -333,6 +334,18 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
         _applyBuyXGetYLogic();
       }
     });
+  }
+
+  Future<void> _loadCurrentShift() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _currentShiftId = prefs.getString('current_shift_id');
+      });
+      debugPrint(">>> RetailOrderScreen: Ca hiện tại là $_currentShiftId");
+    } catch (e) {
+      debugPrint("Lỗi lấy ca làm việc: $e");
+    }
   }
 
   @override
@@ -1649,6 +1662,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
               printBillAfterPayment: _printBillAfterPayment,
               promptForCash: _promptForCash,
               isRetailMode: true,
+              currentShiftId: _currentShiftId,
             )));
 
     _checkPaymentResult(result, tab);

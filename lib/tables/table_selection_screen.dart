@@ -24,6 +24,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:collection/collection.dart';
 import '../../services/discount_service.dart';
 import '../../models/discount_model.dart';
+import '../screens/sales/return_order_screen.dart';
 
 enum TableStatusFilter { all, occupied, empty }
 
@@ -620,6 +621,8 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
 
   List<Widget> _buildAppBarActions() {
     return [
+      _buildReturnOrderButton(),
+      const SizedBox(width: 8),
       Badge(
         backgroundColor: Colors.red,
         offset: const Offset(-2, 2),
@@ -667,6 +670,23 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
         ),
       ),
     ];
+  }
+
+  Widget _buildReturnOrderButton() {
+    return IconButton(
+      icon: const Icon(Icons.assignment_return_outlined,
+          color: AppTheme.primaryColor, size: 30),
+      tooltip: 'Đổi trả hàng',
+      onPressed: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => ReturnOrderScreen(
+              currentUser: widget.currentUser,
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showFailedJobsSheet() {

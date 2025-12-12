@@ -18,6 +18,7 @@ import '../../../widgets/cash_flow_receipt_dialog.dart';
 import 'dart:async';
 import '../../../services/settings_service.dart';
 import '../../../models/store_settings_model.dart';
+import '../../../bills/bill_history_screen.dart';
 
 class UnifiedTransaction {
   final String id;
@@ -78,7 +79,7 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
   TimeRange _selectedRange = TimeRange.today;
   DateTime? _startDate;
   DateTime? _endDate;
-  bool _isLoading = true; // Sửa lỗi quay vô hạn: Bắt đầu là true
+  bool _isLoading = true;
 
   TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
   StreamSubscription<StoreSettings>? _settingsSub;
@@ -112,8 +113,6 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
     super.dispose();
   }
 
-  // --- SỬA LỖI SPINNER QUAY VÔ HẠN ---
-  // Sửa lại logic: Chỉ dùng .listen, không dùng .first và .listen cùng lúc.
   Future<void> _loadSettingsAndFetchData() async {
     final settingsService = SettingsService();
     final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
@@ -241,7 +240,7 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
       final billsQuery = db
           .collection('bills')
           .where('storeId', isEqualTo: storeId)
-          .where('status', isEqualTo: 'completed')
+          .where('status', whereIn: ['completed', 'return'])
           .where('createdAt', isGreaterThanOrEqualTo: _startDate)
           .where('createdAt', isLessThanOrEqualTo: _endDate)
           .orderBy('createdAt')
@@ -305,24 +304,45 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
 
     for (final doc in billDocs) {
       final bill = BillModel.fromFirestore(doc);
-      final double actualBillRevenue = bill.totalPayable - bill.debtAmount;
+      final double actualCashAmount = bill.totalPayable - bill.debtAmount;
+      if (actualCashAmount.abs() < 0.001) continue;
+      final String codeUpper = bill.billCode.trim().toUpperCase();
 
-      if (bill.debtAmount < bill.totalPayable) {
+      // 1. BILL TRẢ HÀNG (Mã bắt đầu bằng RT) -> CHI
+      if (codeUpper.startsWith('RT')) {
+        _allTransactions.add(UnifiedTransaction(
+          id: bill.id,
+          type: TransactionType.expense,
+          source: TransactionSource.bill,
+          date: bill.createdAt,
+          code: bill.billCode,
+          amount: actualCashAmount, // Số dương
+          description: 'Hoàn tiền trả hàng',
+          user: bill.createdByName ?? 'N/A',
+          partnerName: bill.customerName ?? 'Khách lẻ',
+          status: 'completed',
+          cancelledBy: null,
+        ));
+        totalExp += actualCashAmount;
+      }
+
+      // 2. BILL BÁN HÀNG (Mã KHÔNG phải RT, và không bị Hủy) -> THU
+      else if (bill.status != 'cancelled') {
         _allTransactions.add(UnifiedTransaction(
           id: bill.id,
           type: TransactionType.revenue,
           source: TransactionSource.bill,
           date: bill.createdAt,
           code: bill.billCode,
-          amount: actualBillRevenue,
+          amount: actualCashAmount,
           description: 'Thu tiền bán hàng',
           user: bill.createdByName ?? 'N/A',
           partnerName: bill.customerName ?? 'Khách lẻ',
           note: null,
-          status: 'completed',
+          status: bill.status,
           cancelledBy: null,
         ));
-        totalRev += actualBillRevenue;
+        totalRev += actualCashAmount;
       }
     }
 
@@ -330,18 +350,10 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
       final po = PurchaseOrderModel.fromFirestore(doc);
       if (po.paidAmount > 0) {
         _allTransactions.add(UnifiedTransaction(
-          id: po.id,
-          type: TransactionType.expense,
-          source: TransactionSource.purchaseOrder,
-          date: po.createdAt,
-          code: po.code,
-          amount: po.paidAmount,
-          description: 'Chi tiền nhập hàng',
-          user: po.createdBy,
-          partnerName: po.supplierName,
-          note: null,
-          status: 'completed',
-          cancelledBy: null,
+            id: po.id, type: TransactionType.expense, source: TransactionSource.purchaseOrder,
+            date: po.createdAt, code: po.code, amount: po.paidAmount,
+            description: 'Chi tiền nhập hàng', user: po.createdBy, partnerName: po.supplierName,
+            note: null, status: 'completed', cancelledBy: null
         ));
         totalExp += po.paidAmount;
       }
@@ -350,27 +362,15 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
     for (final doc in manualDocs) {
       final manual = CashFlowTransaction.fromFirestore(doc);
       _allTransactions.add(UnifiedTransaction(
-        id: manual.id,
-        type: manual.type,
-        source: TransactionSource.manual,
-        date: manual.date,
-        code: manual.id,
-        amount: manual.amount,
-        description: manual.reason,
-        user: manual.user,
-        partnerName: manual.type == TransactionType.revenue
-            ? manual.customerName
-            : manual.supplierName,
-        note: manual.note,
-        status: manual.status,
-        cancelledBy: manual.cancelledBy,
+          id: manual.id, type: manual.type, source: TransactionSource.manual,
+          date: manual.date, code: manual.id, amount: manual.amount,
+          description: manual.reason, user: manual.user,
+          partnerName: manual.type == TransactionType.revenue ? manual.customerName : manual.supplierName,
+          note: manual.note, status: manual.status, cancelledBy: manual.cancelledBy
       ));
       if (manual.status == 'completed') {
-        if (manual.type == TransactionType.revenue) {
-          totalRev += manual.amount;
-        } else {
-          totalExp += manual.amount;
-        }
+        if (manual.type == TransactionType.revenue) {totalRev += manual.amount;}
+        else {totalExp += manual.amount;}
       }
     }
 
@@ -379,7 +379,7 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
     setState(() {
       _totalRevenue = totalRev;
       _totalExpense = totalExp;
-      _applyFilters();
+      _applyFilters(); // Quan trọng: Phải gọi lại cái này để cập nhật list hiển thị
     });
   }
 
@@ -480,7 +480,6 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
     }
   }
 
-  // --- HÀM HELPER CHO BỘ LỌC THỜI GIAN ---
   String _getItemText(TimeRange range) {
     switch (range) {
       case TimeRange.custom: return 'Tùy chọn...';
@@ -493,7 +492,6 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
     }
   }
 
-  // --- CẬP NHẬT SHOWFILTERMODAL ---
   void showFilterModal() {
     // Lưu trạng thái tạm thời
     TimeRange tempSelectedRange = _selectedRange;
@@ -896,13 +894,45 @@ class _TransactionCard extends StatelessWidget {
     }
   }
 
+  Future<void> _showBillDetail(BuildContext context) async {
+    try {
+      // Hiện loading nhẹ hoặc người dùng đợi
+      final doc = await FirebaseFirestore.instance
+          .collection('bills')
+          .doc(transaction.id) // ID của transaction chính là ID của Bill
+          .get();
+
+      if (!doc.exists) {
+        ToastService().show(message: "Không tìm thấy hóa đơn gốc.", type: ToastType.error);
+        return;
+      }
+
+      final bill = BillModel.fromFirestore(doc);
+
+      if (context.mounted) {
+        // Sử dụng BillReceiptDialog từ file bill_history_screen.dart
+        showDialog(
+          context: context,
+          builder: (_) => BillReceiptDialog(
+            bill: bill,
+            currentUser: currentUser,
+            storeInfo: storeInfo,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải hóa đơn: $e");
+      ToastService().show(message: "Lỗi tải chi tiết: $e", type: ToastType.error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // --- LOGIC UI MỚI DỰA TRÊN STATUS ---
     final bool isCancelled = transaction.status == 'cancelled';
     final bool isRevenue = transaction.type == TransactionType.revenue;
+    final bool isReturnBill = transaction.source == TransactionSource.bill && transaction.type == TransactionType.expense;
 
     final Color color;
     final IconData icon;
@@ -910,6 +940,9 @@ class _TransactionCard extends StatelessWidget {
     if (isCancelled) {
       color = Colors.grey.shade600;
       icon = Icons.close;
+    } else if (isReturnBill) {
+      color = Colors.deepOrange;
+      icon = Icons.assignment_return;
     } else {
       color = isRevenue ? AppTheme.primaryColor : Colors.red;
       icon = isRevenue ? Icons.arrow_downward : Icons.arrow_upward;
@@ -920,10 +953,10 @@ class _TransactionCard extends StatelessWidget {
         transaction.partnerName != null && transaction.partnerName!.isNotEmpty;
 
     final bool isManual = transaction.source == TransactionSource.manual;
+    final bool isBill = transaction.source == TransactionSource.bill; // Check xem có phải Bill không
 
     String displayCode = transaction.code;
-    if (transaction.source == TransactionSource.manual &&
-        transaction.code.contains('_')) {
+    if (isManual && transaction.code.contains('_')) {
       displayCode = transaction.code.split('_').last;
     }
 
@@ -939,7 +972,15 @@ class _TransactionCard extends StatelessWidget {
       color: isCancelled ? Colors.grey.shade200 : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        onTap: isManual ? () => _showManualTxDialog(context) : null,
+        // --- CẬP NHẬT SỰ KIỆN ONTAP ---
+        onTap: () {
+          if (isManual) {
+            _showManualTxDialog(context);
+          } else if (isBill) {
+            _showBillDetail(context); // Gọi hàm xem bill
+          }
+        },
+        // --------------------------------
         borderRadius: BorderRadius.circular(12),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -992,7 +1033,8 @@ class _TransactionCard extends StatelessWidget {
                                 ),
                               )
                                   : Text(
-                                '${isRevenue ? '+' : '-'}${formatNumber(transaction.amount)} đ',
+                                // Logic dấu: Return hoặc Expense -> Trừ, Revenue -> Cộng
+                                '${(isReturnBill || !isRevenue) ? '-' : '+'}${formatNumber(transaction.amount)} đ',
                                 style: theme.textTheme.titleLarge
                                     ?.copyWith(
                                   fontSize: 16,

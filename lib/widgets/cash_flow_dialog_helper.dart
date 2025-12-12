@@ -10,6 +10,7 @@ import 'package:app_4cash/models/supplier_model.dart';
 import 'package:app_4cash/services/toast_service.dart';
 import 'package:app_4cash/theme/number_utils.dart';
 import 'package:app_4cash/widgets/app_dropdown.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _DropdownItem {
   final String id;
@@ -499,12 +500,14 @@ class CashFlowDialogHelper {
                     final db = FirebaseFirestore.instance;
                     final batch = db.batch();
 
+                    final prefs = await SharedPreferences.getInstance();
+                    final String? currentShiftId = prefs.getString('current_shift_id');
+
                     final newId = await generateNextTransactionCode(
                         currentUser.storeId,
                         transactionType,
                         selectedDate);
-                    final double amountToUpdate =
-                    parseVN(amountController.text);
+                    final double amountToUpdate = parseVN(amountController.text);
 
                     final newTransaction = CashFlowTransaction(
                       id: newId,
@@ -523,9 +526,17 @@ class CashFlowDialogHelper {
                       supplierName: selectedSupplier?.name,
                     );
 
+                    // 2. [SỬA ĐỔI] Chèn shiftId vào Map trước khi lưu
+                    final Map<String, dynamic> transactionData = newTransaction.toMap();
+
+                    // Kẹp thêm shiftId vào dữ liệu gửi lên Firestore
+                    transactionData['shiftId'] = currentShiftId;
+
                     final newTransactionRef =
                     db.collection('manual_cash_transactions').doc(newId);
-                    batch.set(newTransactionRef, newTransaction.toMap());
+
+                    // Dùng biến transactionData đã có shiftId
+                    batch.set(newTransactionRef, transactionData);
 
                     if (transactionType == TransactionType.revenue &&
                         selectedReason == "Thu nợ bán hàng" &&

@@ -72,8 +72,13 @@ class BillService {
     if (customerName != null && customerName.isNotEmpty) {
       query = query.where('customerName', isEqualTo: customerName);
     }
-    if (status != null && status.isNotEmpty) {
-      final dbStatus = (status == 'Đã hủy') ? 'cancelled' : 'completed';
+    if (status != null && status.isNotEmpty && status != 'Tất cả') {
+      String dbStatus = 'completed';
+      if (status == 'Đã hủy') {
+        dbStatus = 'cancelled';
+      } else if (status == 'Đã trả hàng') {
+        dbStatus = 'return';
+      }
       query = query.where('status', isEqualTo: dbStatus);
     }
     if (debtStatus != null && debtStatus.isNotEmpty) {
@@ -117,9 +122,18 @@ class BillService {
   }
 
   Future<void> cancelBillAndReverseTransactions(BillModel bill, String storeId) async {
+    final billRef = _db.collection('bills').doc(bill.id);
+
+    final docSnap = await billRef.get();
+    if (!docSnap.exists) throw Exception('Hóa đơn không tồn tại.');
+
+    final currentStatus = docSnap.data()?['status'];
+    if (currentStatus == 'cancelled') throw Exception('Hóa đơn này đã bị hủy trước đó.');
+    if (currentStatus == 'return') throw Exception('Hóa đơn này đã trả hàng toàn bộ.');
+
     final writeBatch = _db.batch();
 
-    final billRef = _db.collection('bills').doc(bill.id);
+    // Luôn set là cancelled
     writeBatch.update(billRef, {'status': 'cancelled'});
 
     if (bill.customerId != null && bill.customerId!.isNotEmpty) {
@@ -240,6 +254,36 @@ class BillService {
     await writeBatch.commit();
 
     await _performRecursiveStockRefund(bill, storeId);
+  }
+
+  Stream<List<BillModel>> getReturnBillsForOriginal(String originalBillId) {
+    return _db
+        .collection('bills')
+        .where('originalBillId', isEqualTo: originalBillId)
+        .where('tableName', isEqualTo: 'TRẢ HÀNG') // Lọc thêm cho chắc
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => BillModel.fromFirestore(d)).toList());
+  }
+
+  Future<BillModel?> getOriginalBill(String originalBillId) async {
+    final doc = await _db.collection('bills').doc(originalBillId).get();
+    if (doc.exists) return BillModel.fromFirestore(doc);
+    return null;
+  }
+
+  Future<String> generateCode(String storeId, String prefix) async {
+    final now = DateTime.now();
+    final datePrefix = DateFormat('ddMMyy').format(now);
+    final counterRef = _db.collection('counters').doc('${prefix}_${storeId}_$datePrefix');
+    try {
+      await counterRef.set({'count': FieldValue.increment(1)}, SetOptions(merge: true));
+      final doc = await counterRef.get();
+      final count = doc.data()?['count'] ?? 1;
+      return '$prefix$datePrefix${count.toString().padLeft(3, '0')}';
+    } catch (e) {
+      // Fallback nếu lỗi counter
+      return '$prefix$datePrefix${DateTime.now().millisecondsSinceEpoch % 1000}';
+    }
   }
 
   Future<void> deleteBillPermanently(String billId) async {
@@ -389,7 +433,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
   List<String> _tableOptions = [];
   List<String> _userOptions = [];
   List<String> _customerOptions = [];
-  final List<String> _statusOptions = ['Tất cả', 'Hoàn thành', 'Đã hủy'];
+  final List<String> _statusOptions = ['Tất cả', 'Hoàn thành', 'Đã hủy', 'Đã trả hàng'];
   final List<String> _debtOptions = ['Tất cả', 'Có', 'Không'];
   StreamSubscription<StoreSettings>? _settingsSub;
   String? _selectedOrderType;
@@ -425,7 +469,6 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     _loadFilterData();
   }
 
-  // --- THÊM HÀM NÀY ---
   Future<void> _fetchBusinessType() async {
     try {
       // Xác định UID của chủ cửa hàng
@@ -452,7 +495,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
 
   @override
   void dispose() {
-    _settingsSub?.cancel(); // <--- THÊM DÒNG NÀY
+    _settingsSub?.cancel();
     super.dispose();
   }
 
@@ -917,10 +960,32 @@ class _BillCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isCancelled = bill.status != 'completed';
-    final hasDebt = bill.debtAmount > 0;
+
+    // --- LOGIC MỚI: Xử lý màu sắc và trạng thái ---
+    final bool isReturned = bill.status == 'return';
+    final bool isCancelled = bill.status == 'cancelled';
+    final bool hasDebt = bill.debtAmount > 0;
     final bool hasEInvoice = bill.hasEInvoice;
-    final Color statusColor = isCancelled ? Colors.red : (hasDebt ? Colors.orange : AppTheme.primaryColor);
+    bool hasPartialReturn = false;
+    try {
+      hasPartialReturn = bill.items.any((i) {
+        return (i is Map && (i['returnedQuantity'] ?? 0) > 0);
+      });
+    } catch (_) {}
+
+    final Color statusColor = isReturned
+        ? Colors.grey
+        : (isCancelled
+        ? Colors.red
+        : (hasDebt ? Colors.orange : AppTheme.primaryColor));
+
+    // Xác định Text hiển thị
+    String statusLabel = "HOÀN THÀNH";
+    if (isReturned) {
+      statusLabel = "ĐÃ TRẢ HÀNG";
+    } else if (isCancelled) {
+      statusLabel = "ĐÃ HỦY";
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -1009,7 +1074,7 @@ class _BillCard extends StatelessWidget {
                           children: [
                             Chip(
                               label: Text(
-                                isCancelled ? "ĐÃ HỦY" : "HOÀN THÀNH",
+                                statusLabel,
                                 style: AppTheme.boldTextStyle
                                     .copyWith(color: statusColor, fontSize: 12),
                               ),
@@ -1018,6 +1083,17 @@ class _BillCard extends StatelessWidget {
                               visualDensity: VisualDensity.compact,
                               side: BorderSide.none,
                             ),
+                            if (hasPartialReturn && !isReturned && !isCancelled)
+                              Chip(
+                                label: Text(
+                                  "TRẢ HÀNG",
+                                  style: AppTheme.boldTextStyle.copyWith(color: statusColor, fontSize: 12),
+                                ),
+                                backgroundColor: statusColor.withAlpha(20),
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                                side: BorderSide.none,
+                              ),
                             if (hasDebt)
                               Chip(
                                 label: Text(
@@ -1124,6 +1200,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
 
     return {
       'billCode': widget.bill.billCode,
+      'originalBillCode': widget.bill.originalBillCode,
       'subtotal': widget.bill.subtotal,
 
       // Các trường liên quan đến chiết khấu
@@ -1297,6 +1374,103 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
     }
   }
 
+  Widget _buildRelatedBillsLink() {
+    // 1. Nếu là Bill Gốc -> Tìm các đơn trả hàng
+    if (widget.bill.tableName != 'TRẢ HÀNG') {
+      return StreamBuilder<List<BillModel>>(
+        stream: BillService().getReturnBillsForOriginal(widget.bill.id),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink();
+
+          final returnBills = snapshot.data!;
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200)
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Lịch sử trả hàng:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 4),
+                ...returnBills.map((rb) => InkWell(
+                  onTap: () {
+                    // Đóng dialog hiện tại rồi mới mở cái mới
+                    Navigator.pop(context);
+                    showDialog(
+                      context: context,
+                      builder: (_) => BillReceiptDialog(bill: rb, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.subdirectory_arrow_right, size: 16, color: Colors.red),
+                        const SizedBox(width: 4),
+                        Text("${rb.billCode} -${formatNumber(rb.totalPayable.abs())}đ",
+                            style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline, decorationColor: Colors.blue,)),
+                        const Spacer(),
+                        Text(DateFormat('HH:mm dd/MM/yyyy').format(rb.createdAt), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                  ),
+                )),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    // 2. Nếu là Bill Trả hàng -> Tìm về Bill Gốc
+    // Đã sửa lỗi: Kiểm tra mounted trước khi dùng context sau await
+    else if (widget.bill.originalBillId != null) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: InkWell(
+          onTap: () async {
+            final original = await BillService().getOriginalBill(widget.bill.originalBillId!);
+
+            // [FIX LỖI ASYNC GAP] Kiểm tra mounted trước khi dùng context
+            if (!context.mounted) return;
+
+            if (original != null) {
+              Navigator.pop(context);
+              showDialog(
+                context: context,
+                builder: (_) => BillReceiptDialog(bill: original, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
+              );
+            } else {
+              ToastService().show(message: "Không tìm thấy hóa đơn gốc.", type: ToastType.warning);
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200)
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.arrow_back, size: 16, color: Colors.blue),
+                SizedBox(width: 8),
+                Text("Xem Hóa Đơn Gốc", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
@@ -1309,7 +1483,6 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
     // --- 2. LOGIC NHẬN DIỆN BÁN LẺ (RETAIL) ---
     bool isRetailBill = false;
 
-    // Trường hợp A: Tên bàn mặc định của Retail ("Đơn hàng 1", "Đơn hàng...")
     if (safeTableName.toLowerCase().startsWith('đơn hàng') || safeTableName.isEmpty) {
       isRetailBill = true;
     }
@@ -1329,8 +1502,10 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       );
     }
 
+    final bool isReturnedBill = widget.bill.status == 'return' || widget.bill.tableName == 'TRẢ HÀNG';
+    final String receiptTitle = isReturnedBill ? 'PHIẾU TRẢ HÀNG' : 'HÓA ĐƠN';
     final Widget receiptWidget = ReceiptWidget(
-      title: 'HÓA ĐƠN',
+      title: receiptTitle,
       storeInfo: widget.storeInfo,
       items: widget.bill.items.whereType<Map<String, dynamic>>()
           .map((itemData) => OrderItem.fromMap(itemData)).toList(),
@@ -1359,7 +1534,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
           children: [
             Expanded(
               child: Container(
-                clipBehavior: Clip.antiAlias, // Bo góc mượt mà
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12.0)),
                 child: Screenshot(
                   controller: _screenshotController,
@@ -1368,17 +1543,25 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
                       color: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 20),
 
-                      // --- SỬA Ở ĐÂY: THU NHỎ GIAO DIỆN ---
-                      child: Center(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown, // Tự động thu nhỏ nếu quá to
-                          child: SizedBox(
-                            width: 550, // Ép chiều rộng chuẩn của Bill để layout không bị vỡ
-                            child: receiptWidget,
+                      // --- [SỬA LẠI ĐOẠN NÀY] ---
+                      // Bọc nội dung vào Column để chèn thêm Widget liên kết
+                      child: Column(
+                        children: [
+                          Center(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: SizedBox(
+                                width: 550,
+                                child: receiptWidget,
+                              ),
+                            ),
                           ),
-                        ),
+
+                          // [ĐÃ GỌI HÀM] Hiển thị liên kết đơn gốc/trả hàng tại đây
+                          _buildRelatedBillsLink(),
+                        ],
                       ),
-                      // -------------------------------------
+                      // ---------------------------
 
                     ),
                   ),
@@ -1387,7 +1570,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
             ),
             const SizedBox(height: 12),
             Container(
-              width: 350, // Đồng bộ width với Dialog
+              width: 350,
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12.0)),
               padding: const EdgeInsets.symmetric(vertical: 4.0),
               child: Row(
@@ -1400,10 +1583,10 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
                     )
                   else
                     if (_canHuyBill)
-                    TextButton(
-                      onPressed: () => _handleCancel(context),
-                      child: const Text("Hủy", style: TextStyle(color: Colors.red)),
-                    ),
+                      TextButton(
+                        onPressed: () => _handleCancel(context),
+                        child: const Text("Hủy", style: TextStyle(color: Colors.red)),
+                      ),
                   TextButton(
                     onPressed: _reprintReceipt,
                     child: const Text("In"),

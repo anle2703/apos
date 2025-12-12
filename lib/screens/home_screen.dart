@@ -25,6 +25,8 @@ import '../tables/qr_order_management_screen.dart';
 import 'tax_management_screen.dart';
 import 'sales/retail_order_screen.dart';
 import '../products/labels/product_label_print_screen.dart';
+import '../services/shift_service.dart';
+
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -100,6 +102,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_currentUser != null) {
       await PrintQueueService().initialize(_currentUser!.storeId);
       _checkAndShowBusinessTypePicker();
+    }
+
+    if (_currentUser!.role != 'guest') {
+      final String realOwnerUid = _currentUser!.role == 'owner'
+          ? _currentUser!.uid
+          : (_currentUser!.ownerUid ?? _currentUser!.uid);
+
+      ShiftService().ensureShiftOpen(
+        _currentUser!.storeId,
+        _currentUser!.uid,
+        _currentUser!.name ?? 'Nhân viên',
+        realOwnerUid,
+      );
     }
   }
 

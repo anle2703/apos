@@ -33,6 +33,8 @@ import '../../tables/table_transfer_screen.dart';
 import 'package:flutter/services.dart';
 import '../../services/discount_service.dart';
 import '../../models/discount_model.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/shift_service.dart';
 
 class OrderScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -151,10 +153,12 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _canCancelItem = false;
   bool _canChangeTable = false;
   bool _canEditNotes = false;
+  String? _currentShiftId;
 
   @override
   void initState() {
     super.initState();
+    _loadCurrentShift();
     _loadTaxSettings();
     _settingsService = SettingsService();
     _firestoreService
@@ -281,6 +285,18 @@ class _OrderScreenState extends State<OrderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
     });
+  }
+
+  Future<void> _loadCurrentShift() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _currentShiftId = prefs.getString('current_shift_id');
+      });
+      debugPrint(">>> OrderScreen: Ca hiện tại là $_currentShiftId");
+    } catch (e) {
+      debugPrint("Lỗi lấy ca làm việc: $e");
+    }
   }
 
   @override
@@ -1552,6 +1568,38 @@ class _OrderScreenState extends State<OrderScreen> {
       return;
     }
 
+    // --- SỬA ĐỔI: ĐẢM BẢO CA LÀM VIỆC LUÔN TỒN TẠI TRƯỚC KHI THANH TOÁN ---
+    try {
+      await ShiftService().ensureShiftOpen(
+        widget.currentUser.storeId,
+        widget.currentUser.uid,
+        widget.currentUser.name ?? 'NV',
+        widget.currentUser.ownerUid ?? widget.currentUser.uid,
+      );
+    } catch (e) {
+      debugPrint("Lỗi khởi tạo ca làm việc: $e");
+    }
+    // ----------------------------------------------------------------------
+
+    final prefs = await SharedPreferences.getInstance();
+    final String? latestShiftId = prefs.getString('current_shift_id');
+
+    // Kiểm tra kỹ thêm 1 lần nữa
+    if (latestShiftId == null) {
+      ToastService().show(
+          message: "Lỗi: Không thể tạo ca làm việc. Vui lòng thử lại.",
+          type: ToastType.error
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _currentShiftId = latestShiftId;
+      });
+    }
+    debugPrint(">>> [Payment] Shift ID lúc thanh toán: $_currentShiftId");
+
     setState(() => _isPaymentLoading = true);
 
     try {
@@ -1651,6 +1699,7 @@ class _OrderScreenState extends State<OrderScreen> {
               printBillAfterPayment: _printBillAfterPayment,
               initialState: savedState,
               promptForCash: _promptForCash,
+              currentShiftId: _currentShiftId,
             ),
           ),
         );
@@ -1987,6 +2036,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                   ? _paymentStateCache[_currentOrder!.id]
                                   : null,
                               promptForCash: _promptForCash,
+                              currentShiftId: _currentShiftId,
                               onCancel: () {
                                 setState(() {
                                   _isPaymentView = false;

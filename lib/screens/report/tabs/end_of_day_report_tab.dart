@@ -83,6 +83,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
   double _totalOtherRevenue = 0;
   double _totalOtherExpense = 0;
   double _closingBalance = 0;
+  double _totalReturnRevenue = 0;
 
   List<Map<String, dynamic>> _shiftDataList = [];
   Map<String, dynamic> _rootProductsSold = {};
@@ -96,8 +97,8 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     'totalRevenue',
     'totalProfit',
     'totalDebt',
-    'totalDiscount', // CK Món
-    'totalBillDiscount', // CK Tổng
+    'totalDiscount',
+    'totalBillDiscount',
     'totalVoucherDiscount',
     'totalPointsValue',
     'totalTax',
@@ -105,7 +106,8 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     'totalCash',
     'totalOtherPayments',
     'totalOtherRevenue',
-    'totalOtherExpense'
+    'totalOtherExpense',
+    'totalReturnRevenue'
   };
 
   bool get isLoading => _isLoading;
@@ -322,6 +324,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       _actualRevenue = 0;
       _totalOtherRevenue = 0;
       _totalOtherExpense = 0;
+      _totalReturnRevenue = 0;
       _closingBalance = 0;
       _shiftDataList = [];
       _rootProductsSold = {};
@@ -502,7 +505,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     allShifts.sort((a, b) {
       final aTime = (a['startTime'] as Timestamp?)?.toDate() ?? DateTime(0);
       final bTime = (b['startTime'] as Timestamp?)?.toDate() ?? DateTime(0);
-      return aTime.compareTo(bTime);
+      return bTime.compareTo(aTime);
     });
 
     final Map<String, DateTime> lastEndTimePerUser = {};
@@ -580,6 +583,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       _actualRevenue = actualRev;
       _totalOtherRevenue = totalData['totalOtherRevenue'] ?? 0.0;
       _totalOtherExpense = totalData['totalOtherExpense'] ?? 0.0;
+      _totalReturnRevenue = totalData['totalReturnRevenue'] ?? 0.0;
       _closingBalance = closingBal;
       _shiftDataList = processedShifts;
       _rootProductsSold = aggregatedRootProducts;
@@ -781,6 +785,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       'totalOtherExpense': _totalOtherExpense,
       'closingBalance': _closingBalance,
       'productsSold': _rootProductsSold,
+      'paymentMethods': _rootPaymentMethods,
     };
 
     final List<Map<String, dynamic>> shiftReportsData =
@@ -832,6 +837,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
         'calculatedStartTime': calculatedStartTime?.toIso8601String(),
         'calculatedEndTime': calculatedEndTime?.toIso8601String(),
         'productsSold': (shiftData['products'] as Map<String, dynamic>?) ?? {},
+        'paymentMethods': (shiftData['paymentMethods'] as Map<String, dynamic>?) ?? {},
       };
     }).toList();
 
@@ -872,6 +878,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       'totalOtherExpense': _totalOtherExpense,
       'closingBalance': _closingBalance,
       'productsSold': _rootProductsSold,
+      'paymentMethods': _rootPaymentMethods,
     };
 
     final List<Map<String, dynamic>> shiftReportsData = [];
@@ -938,6 +945,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       'calculatedStartTime': calculatedStartTime?.toIso8601String(),
       'calculatedEndTime': calculatedEndTime?.toIso8601String(),
       'productsSold': (shiftData['products'] as Map<String, dynamic>?) ?? {},
+      'paymentMethods': (shiftData['paymentMethods'] as Map<String, dynamic>?) ?? {},
     };
 
     showDialog(
@@ -1236,7 +1244,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     final double otherExpense =
         (data['totalOtherExpense'] as num?)?.toDouble() ?? 0.0;
     final productsSold = (data['products'] as Map<String, dynamic>?) ?? {};
-
+    final double returnRevenue = (data['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
     final String employeeName = (data['userName'] as String?) ?? 'Không rõ';
     final String status = (data['status'] as String?) ?? 'closed';
     final bool isOpen = status == 'open';
@@ -1246,14 +1254,14 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color:
-        isOpen ? Colors.green.shade100 : Colors.grey.shade200,
+        isOpen ? AppTheme.primaryColor.withAlpha(25) : Colors.grey.shade200,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         isOpen ? 'ĐANG MỞ' : 'ĐÃ ĐÓNG',
         style: TextStyle(
           color:
-          isOpen ? Colors.green : Colors.grey.shade700,
+          isOpen ? AppTheme.primaryColor : Colors.grey.shade700,
           fontWeight: FontWeight.bold,
           fontSize: 13,
         ),
@@ -1273,31 +1281,37 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     final bool hasData =
         orders > 0 || revenue > 0 || otherRevenue > 0 || otherExpense > 0 || openingBal > 0;
 
-    final divider =
-    Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300);
-    List<Widget> otherPaymentWidgets = [];
+    final divider = Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300);
+    final boldDivider = Divider(height: 1, thickness: 1, color: Colors.grey.shade700);
+
+    double cashFromMap = 0;
+    List<Widget> paymentWidgets = [];
+
     if (shiftPaymentMethods.isNotEmpty) {
-      shiftPaymentMethods.forEach((method, amount) {
-        // Loại bỏ Tiền mặt vì đã hiển thị riêng, chỉ hiện các loại khác có giá trị > 0
-        if (!method.startsWith("Tiền mặt") && (amount as num) > 0) {
-          otherPaymentWidgets.add(Column(
-            children: [
-              _buildReportRow(method, amount.toDouble()),
-              divider,
-            ],
-          ));
+      final sortedKeys = shiftPaymentMethods.keys.toList()..sort();
+
+      for (var method in sortedKeys) {
+        final double amount = (shiftPaymentMethods[method] as num).toDouble();
+
+        if (method == 'Tiền mặt') {
+          cashFromMap = amount;
+        } else {
+          if (amount.abs() > 0.001) {
+            paymentWidgets.add(Column(
+              children: [
+                _buildReportRow(method, amount),
+                divider,
+              ],
+            ));
+          }
         }
-      });
-    } else if (otherPayments > 0) {
-      // Fallback: Nếu dữ liệu cũ chưa có paymentMethods, hiện tổng cũ
-      otherPaymentWidgets.add(Column(
-        children: [
-          _buildReportRow('Thanh toán khác', otherPayments),
-          divider,
-        ],
-      ));
+      }
+    } else {
+      cashFromMap = cash;
+      if (otherPayments != 0) {
+        paymentWidgets.add(Column(children: [_buildReportRow('Thanh toán khác', otherPayments), divider]));
+      }
     }
-    // Tách nội dung thẻ ra để xử lý layout
     final Widget cardContent = Column(
       children: [
         if (!hasData)
@@ -1324,15 +1338,18 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               _buildReportRow('Phụ thu', surcharges),
               divider,
               _buildReportRow('Doanh thu bán hàng', revenue, isBold: true),
+              boldDivider,
+              if (returnRevenue > 0) ...[
+                _buildReportRow('Trả hàng', returnRevenue),
+                divider,
+              ],
+              _buildReportRow('Tiền mặt', cashFromMap),
               divider,
-              _buildReportRow('Tiền mặt', cash),
-              divider,
-              ...otherPaymentWidgets,
-              divider,
+              if (paymentWidgets.isNotEmpty) ...paymentWidgets,
               _buildReportRow('Ghi nợ', debt),
               divider,
               _buildReportRow('Thực thu', actualRev, isBold: true),
-              divider,
+              boldDivider,
               (isOpen && balanceController != null)
                   ? _buildShiftOpeningBalanceRow(
                   balanceController,
@@ -1363,7 +1380,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Tồn cuối ca', closingBal,
                   isBold: true, color: Colors.black),
-              divider,
+              boldDivider,
               _buildSoldProductsList(productsSold),
             ],
           ),
@@ -1376,7 +1393,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: isOpen
-            ? BorderSide(color: Colors.green.shade400, width: 2)
+            ? BorderSide(color: AppTheme.primaryColor.withAlpha(155), width: 2)
             : BorderSide(color: Colors.grey.shade300, width: 1),
       ),
       margin: EdgeInsets.zero,
@@ -1516,27 +1533,33 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
         _totalOtherRevenue > 0 ||
         _totalOtherExpense > 0 ||
         _openingBalance > 0;
-    final divider =
-    Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300);
-    List<Widget> otherPaymentWidgets = [];
+    final divider = Divider(height: 1, thickness: 0.5, color: Colors.grey.shade300);
+    final boldDivider = Divider(height: 1, thickness: 1, color: Colors.grey.shade700);
+
+    double totalCashFromMap = 0;
+    List<Widget> totalPaymentWidgets = [];
     if (_rootPaymentMethods.isNotEmpty) {
-      _rootPaymentMethods.forEach((method, amount) {
-        if (!method.startsWith("Tiền mặt") && amount > 0) {
-          otherPaymentWidgets.add(Column(
-            children: [
-              _buildReportRow(method, amount),
-              divider,
-            ],
-          ));
+      final sortedKeys = _rootPaymentMethods.keys.toList()..sort();
+      for (var method in sortedKeys) {
+        final double amount = _rootPaymentMethods[method]!;
+        if (method == 'Tiền mặt') {
+          totalCashFromMap = amount;
+        } else {
+          if (amount.abs() > 0.001) {
+            totalPaymentWidgets.add(Column(
+              children: [
+                _buildReportRow(method, amount),
+                divider,
+              ],
+            ));
+          }
         }
-      });
-    } else if (_totalOtherPayments > 0) {
-      otherPaymentWidgets.add(Column(
-        children: [
-          _buildReportRow('Thanh toán khác', _totalOtherPayments),
-          divider,
-        ],
-      ));
+      }
+    } else {
+      totalCashFromMap = _totalCash;
+      if (_totalOtherPayments != 0) {
+        totalPaymentWidgets.add(Column(children: [_buildReportRow('Thanh toán khác', _totalOtherPayments), divider]));
+      }
     }
     final Widget cardContent = Column(
       children: [
@@ -1566,16 +1589,19 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Doanh thu bán hàng', _totalRevenue,
                   isBold: true),
+              boldDivider,
+              if (_totalReturnRevenue > 0) ...[
+                _buildReportRow('Trả hàng', _totalReturnRevenue),
+                divider,
+              ],
+              _buildReportRow('Tiền mặt', totalCashFromMap),
               divider,
-              _buildReportRow('Tiền mặt', _totalCash),
-              divider,
-              ...otherPaymentWidgets,
-              divider,
+              if (totalPaymentWidgets.isNotEmpty) ...totalPaymentWidgets,
               _buildReportRow('Ghi nợ', _totalDebt),
               divider,
               _buildReportRow('Thực thu', _actualRevenue, isBold: true),
-              divider,
-              _buildOpeningBalanceRow(), // Quỹ đầu kỳ
+              boldDivider,
+              _buildOpeningBalanceRow(),
               divider,
               _buildReportRow('Thu khác (Phiếu thu)', _totalOtherRevenue,
                   color: Colors.black),
@@ -1585,7 +1611,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Tồn quỹ cuối kỳ', _closingBalance,
                   isBold: true, color: Colors.black),
-              divider,
+              boldDivider,
               _buildSoldProductsList(_rootProductsSold),
             ],
           ),

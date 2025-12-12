@@ -121,7 +121,13 @@ class ReceiptWidget extends StatelessWidget {
     final String? eInvoiceUrl = summary['eInvoiceFullUrl'] as String?;
     final String? eInvoiceCode = summary['eInvoiceCode'] as String?;
     final String? eInvoiceMst = summary['eInvoiceMst'] as String?;
+    final bool isProvisional = title.toUpperCase().contains('TẠM TÍNH') || title.toUpperCase().contains('KIỂM MÓN');
+    final bool isShipOrder = tableName.toLowerCase().contains('giao hàng') ||
+        tableName.toLowerCase().contains('ship') ||
+        (isRetailMode && tableName.isEmpty);
 
+    final String? originalBillCode = summary['originalBillCode'] as String?;
+    String finalTitle = title;
     return Container(
       width: 550,
       color: Colors.white,
@@ -158,33 +164,35 @@ class ReceiptWidget extends StatelessWidget {
           // 2. TITLE
           Text(
               tableName.isNotEmpty
-                  ? '$displayTitle - $tableName'
-                  : displayTitle,
+                  ? '$finalTitle - $tableName'
+                  : finalTitle,
               textAlign: TextAlign.center,
               style: boldTextStyle.copyWith(fontSize: fsTitle)),
-          // Hiện mã bill nếu có (bất kể là loại bill nào)
           if (billCode != null && billCode.isNotEmpty)
             Text(billCode,
                 textAlign: TextAlign.center,
                 style: baseTextStyle.copyWith(fontSize: fsInfo)),
+          if (originalBillCode != null && originalBillCode.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4.0),
+              child: Text(
+                '(Đơn gốc: $originalBillCode)',
+                textAlign: TextAlign.center,
+                style: italicTextStyle.copyWith(fontSize: fsInfo),
+              ),
+            ),
 
           const SizedBox(height: 12),
 
           // 3. INFO SECTION
           if (settings.billShowCustomerName) ...[
-            _buildInfoRow('Khách hàng:', khName,
-                baseTextStyle.copyWith(fontSize: fsInfo)),
-
-            // Logic hiển thị SĐT
-            if (khPhone.isNotEmpty)
-              _buildInfoRow(
-                  'SĐT:', khPhone, baseTextStyle.copyWith(fontSize: fsInfo)),
-
-            // Logic hiển thị Địa chỉ
-            if (khAddress.isNotEmpty)
-              // Nếu địa chỉ dài, dùng hàm _buildInfoRowMultilines hoặc để _buildInfoRow tự xuống dòng (nếu đã sửa Expanded)
-              _buildInfoRow(
-                  'ĐC:', khAddress, baseTextStyle.copyWith(fontSize: fsInfo)),
+            _buildInfoRow('Khách hàng:', khName, baseTextStyle.copyWith(fontSize: fsInfo)),
+            if (isShipOrder) ...[
+              if (khPhone.isNotEmpty)
+                _buildInfoRow('SĐT:', khPhone, baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (khAddress.isNotEmpty)
+                _buildInfoRow('ĐC:', khAddress, baseTextStyle.copyWith(fontSize: fsInfo)),
+            ]
           ],
           if (startTime != null && !isRetailMode)
             _buildInfoRow('Giờ vào:', timeFormat.format(startTime),
@@ -569,9 +577,8 @@ class ReceiptWidget extends StatelessWidget {
               if (changeAmount > 0)
                 _buildRow('Tiền thừa:', currencyFormat.format(changeAmount),
                     baseTextStyle.copyWith(fontSize: fsInfo)),
-              if (debtAmount > 0)
-                _buildRow('Dư nợ:', currencyFormat.format(debtAmount),
-                    baseTextStyle.copyWith(fontSize: fsInfo)),
+              if (debtAmount > 0 && !isProvisional)
+                _buildRow('Dư nợ:', currencyFormat.format(debtAmount), baseTextStyle.copyWith(fontSize: fsInfo)),
             ],
           ],
 

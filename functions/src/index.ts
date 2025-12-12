@@ -116,7 +116,7 @@ async function getReportDateInfoMoment(billData: {
 // ============================================================================
 export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
   async (event: FirestoreEvent<QueryDocumentSnapshot | undefined>) => {
-    console.log("--- Bắt đầu aggregateDailyReport v10.4 ---");
+    console.log("--- Bắt đầu aggregateDailyReport v10.6 (Fix Overlapping & Shift Logic) ---");
     const snap = event.data;
     if (!snap) return;
     const billId = event.params.billId;
@@ -134,6 +134,9 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
     const userName = billData.createdByName;
     const eventTime = billData.createdAt;
     const items = (billData.items as any[]) || [];
+    
+    // [FIX] Lấy shiftId từ App gửi lên
+    const clientShiftId = billData.shiftId as string | undefined;
 
     try {
       // 2. Lấy ngày báo cáo
@@ -258,48 +261,77 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
       await db.runTransaction(async (transaction) => {
         // --- VÙNG ĐỌC ---
         const shiftsRef = db.collection("employee_shifts");
-        const openShiftQuery = shiftsRef
-          .where("storeId", "==", storeId)
-          .where("userId", "==", userId)
-          .where("reportDateKey", "==", reportDateString)
-          .where("status", "==", "open")
-          .orderBy("startTime", "desc")
-          .limit(1);
-        const shiftQuerySnapshot = await transaction.get(openShiftQuery);
-
         const reportId = `${storeId}_${reportDateString}`;
         const reportRef = db.collection("daily_reports").doc(reportId);
         const reportDoc = await transaction.get(reportRef);
-        
-        let closedShiftSnapshot: admin.firestore.QuerySnapshot | null = null;
-        if (shiftQuerySnapshot.empty) {
-          const closedShiftQuery = shiftsRef
-            .where("storeId", "==", storeId)
-            .where("userId", "==", userId)
-            .where("reportDateKey", "==", reportDateString)
-            .where("status", "==", "closed")
-            .orderBy("endTime", "desc")
-            .limit(1);
-          closedShiftSnapshot = await transaction.get(closedShiftQuery);
-        }
 
-        // --- VÙNG GHI ---
         let shiftId: string;
         let startTime: admin.firestore.Timestamp;
         let isNewShift = false;
 
-        if (!shiftQuerySnapshot.empty) {
-          const shiftDoc = shiftQuerySnapshot.docs[0];
-          shiftId = shiftDoc.id;
-          startTime = shiftDoc.data().startTime as admin.firestore.Timestamp;
-        } else {
-          isNewShift = true;
-          const newShiftRef = shiftsRef.doc();
-          shiftId = newShiftRef.id;
-          startTime = (closedShiftSnapshot && !closedShiftSnapshot.empty)
-            ? closedShiftSnapshot.docs[0].data().endTime as admin.firestore.Timestamp
-            : reportDayStartTimestamp;
+        // [LOGIC MỚI] Ưu tiên ID ca từ Client gửi lên
+        if (clientShiftId) {
+          shiftId = clientShiftId;
+          const specificShiftDoc = await transaction.get(shiftsRef.doc(shiftId));
+          
+          if (specificShiftDoc.exists) {
+            // Ca có tồn tại -> Lấy startTime thực tế của ca
+            startTime = specificShiftDoc.data()?.startTime || reportDayStartTimestamp;
+          } else {
+            // Trường hợp hiếm: App gửi ID ca "ma" -> Coi như ca mới
+            console.warn(`[DailyReport] Ca ${shiftId} không tồn tại trên Server. Tạo mới.`);
+            isNewShift = true;
+            
+            const closedShiftQuery = shiftsRef
+              .where("storeId", "==", storeId)
+              .where("userId", "==", userId)
+              .where("reportDateKey", "==", reportDateString)
+              .where("status", "==", "closed")
+              .orderBy("endTime", "desc")
+              .limit(1);
+            const closedShiftSnapshot = await transaction.get(closedShiftQuery);
+            
+            startTime = (closedShiftSnapshot && !closedShiftSnapshot.empty)
+              ? closedShiftSnapshot.docs[0].data().endTime as admin.firestore.Timestamp
+              : reportDayStartTimestamp;
+          }
+        } 
+        else {
+          // [LOGIC CŨ] App không gửi shiftId -> Server tự tìm
+          const openShiftQuery = shiftsRef
+            .where("storeId", "==", storeId)
+            .where("userId", "==", userId)
+            .where("reportDateKey", "==", reportDateString)
+            .where("status", "==", "open")
+            .orderBy("startTime", "desc")
+            .limit(1);
+          const shiftQuerySnapshot = await transaction.get(openShiftQuery);
+          
+          if (!shiftQuerySnapshot.empty) {
+            const shiftDoc = shiftQuerySnapshot.docs[0];
+            shiftId = shiftDoc.id;
+            startTime = shiftDoc.data().startTime as admin.firestore.Timestamp;
+          } else {
+            isNewShift = true;
+            const newShiftRef = shiftsRef.doc();
+            shiftId = newShiftRef.id;
+            
+            const closedShiftQuery = shiftsRef
+              .where("storeId", "==", storeId)
+              .where("userId", "==", userId)
+              .where("reportDateKey", "==", reportDateString)
+              .where("status", "==", "closed")
+              .orderBy("endTime", "desc")
+              .limit(1);
+            const closedShiftSnapshot = await transaction.get(closedShiftQuery);
+
+            startTime = (closedShiftSnapshot && !closedShiftSnapshot.empty)
+              ? closedShiftSnapshot.docs[0].data().endTime as admin.firestore.Timestamp
+              : reportDayStartTimestamp;
+          }
         }
+
+        // --- VÙNG GHI ---
 
         // GHI 1: Tạo ca mới (nếu cần)
         if (isNewShift) {
@@ -372,11 +404,12 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
           }
 
           // Cập nhật chi tiết thanh toán (Từng key trong map)
+          // LƯU Ý: Không được set paymentMethods = {} vì sẽ gây overlap field paths
           for (const [method, amount] of Object.entries(paymentMethodBreakdown)) {
             if (amount !== 0) {
               // Cấp Ngày
               updatePayload[`paymentMethods.${method}`] = admin.firestore.FieldValue.increment(amount);
-              // Cấp Ca
+              // Cấp Ca (tự động tạo map nếu chưa có)
               updatePayload[`${shiftKeyPrefix}.paymentMethods.${method}`] = admin.firestore.FieldValue.increment(amount);
             }
           }
@@ -404,7 +437,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             updatePayload[`${shiftProductKey}.totalDiscount`] = discInc;
           }
 
-          // Khởi tạo ca mới nếu chưa có
+          // Khởi tạo ca mới nếu chưa có trong report (dù shiftId đã có)
           const existingShiftData = reportDoc.data()?.shifts?.[shiftId];
           if (!existingShiftData) {
             updatePayload[`${shiftKeyPrefix}.shiftId`] = shiftId;
@@ -414,7 +447,8 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
             updatePayload[`${shiftKeyPrefix}.status`] = "open";
             updatePayload[`${shiftKeyPrefix}.endTime`] = null;
             updatePayload[`${shiftKeyPrefix}.openingBalance`] = 0;
-            updatePayload[`${shiftKeyPrefix}.paymentMethods`] = {}; // Khởi tạo map rỗng
+            // [FIXED] KHÔNG set paymentMethods = {} hoặc products = {} ở đây
+            // Firestore sẽ tự tạo khi update field con
           }
           
           transaction.update(reportRef, updatePayload);
@@ -438,7 +472,7 @@ export const aggregateDailyReportV10 = onDocumentCreated("bills/{billId}",
 // ============================================================================
 export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_transactions/{txId}",
   async (event: FirestoreEvent<QueryDocumentSnapshot | undefined>) => {
-    console.log("--- Bắt đầu aggregateManualTransactions v2.4 ---");
+    console.log("--- Bắt đầu aggregateManualTransactions v2.6 (Fix Overlapping & Shift Logic) ---");
     const snap = event.data;
     if (!snap) return;
     const txId = event.params.txId;
@@ -457,6 +491,9 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
     const amount = (txData.amount as number) || 0;
     if (amount === 0) return;
 
+    // [FIX] Lấy shiftId từ App (nếu có)
+    const clientShiftId = txData.shiftId as string | undefined;
+
     try {
       const { reportDateForTimestamp, reportDateString, reportDayStartTimestamp } = await getReportDateInfoMoment({
         storeId: storeId,
@@ -470,51 +507,72 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
       };
 
       await db.runTransaction(async (transaction) => {
-        // ... (Vùng đọc giống hệt hàm trên)
         const shiftsRef = db.collection("employee_shifts");
-        const openShiftQuery = shiftsRef
-          .where("storeId", "==", storeId)
-          .where("userId", "==", userId)
-          .where("reportDateKey", "==", reportDateString)
-          .where("status", "==", "open")
-          .orderBy("startTime", "desc")
-          .limit(1);
-        const shiftQuerySnapshot = await transaction.get(openShiftQuery);
-
         const reportId = `${storeId}_${reportDateString}`;
         const reportRef = db.collection("daily_reports").doc(reportId);
         const reportDoc = await transaction.get(reportRef);
         
-        let closedShiftSnapshot: admin.firestore.QuerySnapshot | null = null;
-        if (shiftQuerySnapshot.empty) {
-          const closedShiftQuery = shiftsRef
-            .where("storeId", "==", storeId)
-            .where("userId", "==", userId)
-            .where("reportDateKey", "==", reportDateString)
-            .where("status", "==", "closed")
-            .orderBy("endTime", "desc")
-            .limit(1);
-          closedShiftSnapshot = await transaction.get(closedShiftQuery);
-        }
-
-        // --- Vùng ghi ---
         let shiftId: string;
         let startTime: admin.firestore.Timestamp;
         let isNewShift = false;
 
-        if (!shiftQuerySnapshot.empty) {
-          const shiftDoc = shiftQuerySnapshot.docs[0];
-          shiftId = shiftDoc.id;
-          startTime = shiftDoc.data().startTime as admin.firestore.Timestamp;
-        } else {
-          isNewShift = true;
-          const newShiftRef = shiftsRef.doc();
-          shiftId = newShiftRef.id;
-          startTime = (closedShiftSnapshot && !closedShiftSnapshot.empty)
-            ? closedShiftSnapshot.docs[0].data().endTime as admin.firestore.Timestamp
-            : reportDayStartTimestamp;
+        // [LOGIC MỚI] Ưu tiên Client Shift ID
+        if (clientShiftId) {
+          shiftId = clientShiftId;
+          const specificShiftDoc = await transaction.get(shiftsRef.doc(shiftId));
+          if (specificShiftDoc.exists) {
+            startTime = specificShiftDoc.data()?.startTime || reportDayStartTimestamp;
+          } else {
+            console.warn(`[ManualTx] Ca ${shiftId} không tồn tại. Tạo mới.`);
+            isNewShift = true;
+            // Logic tìm ca đóng gần nhất (fallback)
+            const closedShiftQuery = shiftsRef
+              .where("storeId", "==", storeId)
+              .where("userId", "==", userId)
+              .where("reportDateKey", "==", reportDateString)
+              .where("status", "==", "closed")
+              .orderBy("endTime", "desc")
+              .limit(1);
+            const closedShiftSnapshot = await transaction.get(closedShiftQuery);
+            startTime = (closedShiftSnapshot && !closedShiftSnapshot.empty)
+              ? closedShiftSnapshot.docs[0].data().endTime as admin.firestore.Timestamp
+              : reportDayStartTimestamp;
+          }
+        } 
+        else {
+          // [LOGIC CŨ] Server tự tìm
+          const openShiftQuery = shiftsRef
+            .where("storeId", "==", storeId)
+            .where("userId", "==", userId)
+            .where("reportDateKey", "==", reportDateString)
+            .where("status", "==", "open")
+            .orderBy("startTime", "desc")
+            .limit(1);
+          const shiftQuerySnapshot = await transaction.get(openShiftQuery);
+
+          if (!shiftQuerySnapshot.empty) {
+            const shiftDoc = shiftQuerySnapshot.docs[0];
+            shiftId = shiftDoc.id;
+            startTime = shiftDoc.data().startTime as admin.firestore.Timestamp;
+          } else {
+            isNewShift = true;
+            const newShiftRef = shiftsRef.doc();
+            shiftId = newShiftRef.id;
+            const closedShiftQuery = shiftsRef
+              .where("storeId", "==", storeId)
+              .where("userId", "==", userId)
+              .where("reportDateKey", "==", reportDateString)
+              .where("status", "==", "closed")
+              .orderBy("endTime", "desc")
+              .limit(1);
+            const closedShiftSnapshot = await transaction.get(closedShiftQuery);
+            startTime = (closedShiftSnapshot && !closedShiftSnapshot.empty)
+              ? closedShiftSnapshot.docs[0].data().endTime as admin.firestore.Timestamp
+              : reportDayStartTimestamp;
+          }
         }
 
+        // --- Vùng ghi ---
         if (isNewShift) {
           transaction.set(shiftsRef.doc(shiftId), {
             storeId: storeId,
@@ -573,8 +631,7 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
             updatePayload[`${shiftKeyPrefix}.status`] = "open";
             updatePayload[`${shiftKeyPrefix}.endTime`] = null;
             updatePayload[`${shiftKeyPrefix}.openingBalance`] = 0;
-            updatePayload[`${shiftKeyPrefix}.products`] = {};
-            updatePayload[`${shiftKeyPrefix}.paymentMethods`] = {};
+            // [FIXED] KHÔNG set paymentMethods = {} hoặc products = {}
           }
           transaction.update(reportRef, updatePayload);
         }

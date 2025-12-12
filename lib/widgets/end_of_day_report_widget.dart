@@ -22,10 +22,9 @@ class EndOfDayReportWidget extends StatelessWidget {
     const double fontScale = 1.6;
     final now = DateTime.now();
 
-    // Lấy tiêu đề từ data (nếu có), mặc định là BÁO CÁO CUỐI NGÀY
     final String reportTitle = (totalReportData['reportTitle'] as String?)?.toUpperCase() ?? 'BÁO CÁO CUỐI NGÀY';
 
-    // Lấy dữ liệu chi tiết (Sử dụng safe cast)
+    // Parse Data
     final totalOrders = (totalReportData['totalOrders'] as num?)?.toInt() ?? 0;
     final totalDiscount = (totalReportData['totalDiscount'] as num?)?.toDouble() ?? 0.0;
     final totalBillDiscount = (totalReportData['totalBillDiscount'] as num?)?.toDouble() ?? 0.0;
@@ -34,9 +33,16 @@ class EndOfDayReportWidget extends StatelessWidget {
     final totalTax = (totalReportData['totalTax'] as num?)?.toDouble() ?? 0.0;
     final totalSurcharges = (totalReportData['totalSurcharges'] as num?)?.toDouble() ?? 0.0;
 
+    // [THÊM] Trả hàng
+    final totalReturnRevenue = (totalReportData['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
+
     final totalRev = (totalReportData['totalRevenue'] as num?)?.toDouble() ?? 0.0;
+
+    // [SỬA] Chi tiết thanh toán
     final totalCash = (totalReportData['totalCash'] as num?)?.toDouble() ?? 0.0;
     final totalOtherPay = (totalReportData['totalOtherPayments'] as num?)?.toDouble() ?? 0.0;
+    final paymentMethods = (totalReportData['paymentMethods'] as Map<String, dynamic>?) ?? {};
+
     final totalDebt = (totalReportData['totalDebt'] as num?)?.toDouble() ?? 0.0;
     final actualRev = (totalReportData['actualRevenue'] as num?)?.toDouble() ?? 0.0;
 
@@ -71,9 +77,10 @@ class EndOfDayReportWidget extends StatelessWidget {
           const SizedBox(height: 8),
           const Divider(thickness: 2, color: Colors.black),
 
-          // 2. CHI TIẾT DOANH SỐ (Bổ sung phần này)
-          _buildRow('Đơn hàng:', '$totalOrders', baseStyle, boldStyle),
+          // 2. DOANH SỐ
+          Text("DOANH SỐ", style: boldStyle),
           const Divider(height: 8, thickness: 0.5),
+          _buildRow('Đơn hàng:', '$totalOrders', baseStyle, boldStyle),
           _buildRow('Chiết khấu/Món:', formatNumber(totalDiscount), baseStyle, baseStyle),
           _buildRow('Chiết khấu/Bill:', formatNumber(totalBillDiscount), baseStyle, baseStyle),
           _buildRow('Voucher:', formatNumber(totalVoucher), baseStyle, baseStyle),
@@ -81,22 +88,45 @@ class EndOfDayReportWidget extends StatelessWidget {
           _buildRow('Thuế:', formatNumber(totalTax), baseStyle, baseStyle),
           _buildRow('Phụ thu:', formatNumber(totalSurcharges), baseStyle, baseStyle),
 
+          if (totalReturnRevenue > 0)
+            _buildRow('Trả hàng:', formatNumber(totalReturnRevenue), baseStyle.copyWith(color: Colors.red), boldStyle.copyWith(color: Colors.red)),
+
+          // [TÙY CHỌN] Hiển thị Lợi nhuận
+          // _buildRow('Lợi nhuận (Thực):', formatNumber(netProfit), baseStyle, boldStyle),
+
           const Divider(height: 16, thickness: 1.5, color: Colors.black),
 
-          // 3. DOANH THU & THANH TOÁN
+          // 3. THANH TOÁN
+          Text("THANH TOÁN", style: boldStyle),
+          const Divider(height: 8, thickness: 0.5),
           _buildRow('Doanh Thu Bán Hàng:', formatNumber(totalRev), baseStyle, boldStyle),
-          const SizedBox(height: 4),
-          _buildRow('- Tiền mặt:', formatNumber(totalCash), baseStyle, baseStyle),
-          _buildRow('- Chuyển khoản/Khác:', formatNumber(totalOtherPay), baseStyle, baseStyle),
+
+          // Chi tiết PTTT
+          if (paymentMethods.isNotEmpty) ...[
+            ...paymentMethods.entries.map((e) {
+              final amt = (e.value as num).toDouble();
+              if (amt.abs() < 0.001) return const SizedBox.shrink();
+              return _buildRow('- ${e.key}:', formatNumber(amt), baseStyle, baseStyle);
+            }),
+          ] else ...[
+            _buildRow('- Tiền mặt:', formatNumber(totalCash), baseStyle, baseStyle),
+            if (totalOtherPay != 0) _buildRow('- Thanh toán khác:', formatNumber(totalOtherPay), baseStyle, baseStyle),
+          ],
+
           _buildRow('- Ghi nợ:', formatNumber(totalDebt), baseStyle, baseStyle),
 
           const Divider(height: 16, thickness: 1.5, color: Colors.black),
           _buildRow('THỰC THU:', formatNumber(actualRev), baseStyle.copyWith(fontWeight: FontWeight.bold, fontSize: 14 * fontScale), boldStyle.copyWith(fontSize: 14 * fontScale)),
 
           // 4. SỔ QUỸ
+          Text("SỔ QUỸ", style: boldStyle),
+          const Divider(height: 8, thickness: 0.5),
           _buildRow('Quỹ đầu:', formatNumber(opening), baseStyle, boldStyle),
-          _buildRow('Thu khác (Phiếu thu):', formatNumber(totalOtherRev), baseStyle, boldStyle),
-          _buildRow('Chi khác (Phiếu chi):', formatNumber(totalExpense), baseStyle, boldStyle),
+          _buildRow('Thu khác:', formatNumber(totalOtherRev), baseStyle, boldStyle),
+          _buildRow('Chi khác:', formatNumber(totalExpense), baseStyle, boldStyle),
+
+          if (totalReturnRevenue > 0)
+            _buildRow('Trả hàng (Chi):', formatNumber(totalReturnRevenue), baseStyle.copyWith(color: Colors.red), boldStyle.copyWith(color: Colors.red)),
 
           const SizedBox(height: 8),
           const Divider(thickness: 2, color: Colors.black),

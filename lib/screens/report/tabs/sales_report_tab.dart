@@ -43,19 +43,16 @@ class SalesReportTabState extends State<SalesReportTab> {
   TimeRange _selectedRange = TimeRange.today;
   bool _isLoading = true;
 
-  // Dùng cho query 'bills' (biểu đồ giờ)
   DateTime? _startDate;
   DateTime? _endDate;
 
-  // --- SỬA LỖI BÁO CÁO: Thêm 2 biến này ---
-  // Dùng cho query 'daily_reports' và 'product_daily_sales' (KPIs, Top bán)
   DateTime? _calendarStartDate;
   DateTime? _calendarEndDate;
-  // --- KẾT THÚC SỬA LỖI ---
 
   TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
   StreamSubscription<StoreSettings>? _settingsSub;
-
+  double _totalTax = 0;
+  double _totalReturnRevenue = 0;
   double _totalRevenue = 0;
   double _totalProfit = 0;
   double _totalCash = 0;
@@ -451,11 +448,12 @@ class SalesReportTabState extends State<SalesReportTab> {
 
   void _processAllReports(
       List<QueryDocumentSnapshot> mainReports,
-      // List<QueryDocumentSnapshot> productReports, // <-- ĐÃ XÓA
       List<QueryDocumentSnapshot> billDocs
       ) {
 
     double totalRevenue = 0, totalProfit = 0, totalDebt = 0, totalCash = 0, otherPayments = 0;
+    double totalTax = 0;
+    double totalReturnRevenue = 0;
     int totalOrders = 0;
     final Map<String, double> dailyRevenue = {}, dailyProfit = {}, topSellingProducts = {};
 
@@ -468,9 +466,10 @@ class SalesReportTabState extends State<SalesReportTab> {
       final dateLocal = dateTimestamp.toDate();
       final dayKey = DateFormat('dd/MM').format(dateLocal);
 
-      // Tính KPIs
       final dailyRev = (data['totalRevenue'] as num?)?.toDouble() ?? 0.0;
       final dailyProf = (data['totalProfit'] as num?)?.toDouble() ?? 0.0;
+      totalReturnRevenue += (data['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
+      totalTax += (data['totalTax'] as num?)?.toDouble() ?? 0.0;
       totalOrders += (data['billCount'] as num?)?.toInt() ?? 0;
       totalRevenue += dailyRev;
       totalProfit += dailyProf;
@@ -481,7 +480,6 @@ class SalesReportTabState extends State<SalesReportTab> {
       dailyRevenue.update(dayKey, (value) => value + dailyRev, ifAbsent: () => dailyRev);
       dailyProfit.update(dayKey, (value) => value + dailyProf, ifAbsent: () => dailyProf);
 
-      // --- SỬA: Lấy dữ liệu sản phẩm từ chính daily_report ---
       final rootProducts = (data['products'] as Map<String, dynamic>?) ?? {};
       for (final pEntry in rootProducts.entries) {
         // pEntry.value là một map: {productId, productName, ...}
@@ -493,7 +491,6 @@ class SalesReportTabState extends State<SalesReportTab> {
           topSellingProducts.update(productName, (value) => value + quantity, ifAbsent: () => quantity);
         }
       }
-      // --- KẾT THÚC SỬA ---
     }
 
     // 2. Xử lý Biểu đồ giờ (từ bills)
@@ -527,6 +524,8 @@ class SalesReportTabState extends State<SalesReportTab> {
       _totalOrders = totalOrders;
       _totalCash = totalCash;
       _otherPayments = otherPayments;
+      _totalTax = totalTax;
+      _totalReturnRevenue = totalReturnRevenue;
       _dailyRevenue = dailyRevenue;
       _dailyProfit = dailyProfit;
       _hourlyRevenue = hourlyRevenue;
@@ -715,11 +714,8 @@ class SalesReportTabState extends State<SalesReportTab> {
           builder: (context, constraints) {
             const double desktopBreakpoint = 1000.0;
             const double spacing = 12.0;
-
-            // --- SỬA LỖI: Đổi từ 4 thành 3 ---
             final int crossAxisCount =
-            constraints.maxWidth > desktopBreakpoint ? 3 : 2;
-            // --- KẾT THÚC SỬA LỖI ---
+            constraints.maxWidth > desktopBreakpoint ? 4 : 2;
 
             final double cardWidth =
                 (constraints.maxWidth - (spacing * (crossAxisCount - 1))) /
@@ -742,6 +738,18 @@ class SalesReportTabState extends State<SalesReportTab> {
                     value: _totalRevenue,
                     icon: Icons.trending_up,
                     color: AppTheme.primaryColor),
+                _KpiCard(
+                    width: cardWidth,
+                    title: 'Thuế',
+                    value: _totalTax,
+                    icon: Icons.percent,
+                    color: Colors.purple),
+                _KpiCard(
+                    width: cardWidth,
+                    title: 'Trả Hàng',
+                    value: _totalReturnRevenue,
+                    icon: Icons.assignment_return_outlined,
+                    color: Colors.deepOrange),
                 _KpiCard(
                     width: cardWidth,
                     title: 'Lợi Nhuận',

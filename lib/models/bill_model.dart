@@ -39,6 +39,8 @@ class BillModel {
   final Map<String, dynamic>? eInvoiceInfo;
   final bool hasEInvoice;
   final String? guestAddress;
+  final String? originalBillId;
+  final String? originalBillCode;
 
   BillModel({
     required this.id,
@@ -76,6 +78,8 @@ class BillModel {
     this.eInvoiceInfo,
     required this.hasEInvoice,
     this.guestAddress,
+    this.originalBillId,
+    this.originalBillCode,
   });
 
   factory BillModel.fromFirestore(DocumentSnapshot doc) {
@@ -145,6 +149,8 @@ class BillModel {
       eInvoiceInfo: data['eInvoiceInfo'] as Map<String, dynamic>?,
       hasEInvoice: checkHasEInvoice,
       guestAddress: data['guestAddress'] as String?,
+      originalBillId: data['originalBillId'] as String?,
+      originalBillCode: data['originalBillCode'] as String?,
     );
   }
 }

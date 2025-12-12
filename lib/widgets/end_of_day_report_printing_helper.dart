@@ -1,5 +1,3 @@
-// TỆP ĐÃ SỬA: lib/widgets/end_of_day_report_printing_helper.dart
-
 import 'dart:typed_data';
 import 'package:app_4cash/services/printing_service.dart';
 import 'package:app_4cash/theme/number_utils.dart';
@@ -11,7 +9,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class EndOfDayReportPrintingHelper {
 
-  // Hàm chính để tạo PDF
   static Future<Uint8List> generatePdf({
     required Map<String, String> storeInfo,
     required Map<String, dynamic> totalReportData,
@@ -21,15 +18,13 @@ class EndOfDayReportPrintingHelper {
     final font = await PrintingService.loadFont();
     final boldFont = await PrintingService.loadFont(isBold: true);
 
-    // --- SỬA LỖI IN TRẮNG: Dùng định dạng cuộn dài vô tận ---
-    const double printableWidthMm = 72; // Giống bill
+    const double printableWidthMm = 72;
     final pageFormat = PdfPageFormat(
       printableWidthMm * PdfPageFormat.mm,
-      double.infinity, // Quan trọng: Dùng infinity
-      marginAll: 3 * PdfPageFormat.mm, // Giống bill
+      double.infinity,
+      marginAll: 3 * PdfPageFormat.mm,
     );
 
-    // Xây dựng nội dung
     List<pw.Widget> content = [];
 
     // 1. Thêm thông tin cửa hàng
@@ -50,7 +45,6 @@ class EndOfDayReportPrintingHelper {
     if (shiftReportsData.isNotEmpty) {
       if (totalReportData.isNotEmpty) {
         content.add(pw.SizedBox(height: 15));
-        // [SỬA] Dùng divider thay cho text "BÁO CÁO CHI TIẾT"
         content.add(pw.Divider(height: 1, thickness: 1.5, borderStyle: pw.BorderStyle.solid));
         content.add(pw.SizedBox(height: 15));
       }
@@ -60,14 +54,12 @@ class EndOfDayReportPrintingHelper {
         if (i < shiftReportsData.length - 1) {
           content.add(pw.Padding(
             padding: const pw.EdgeInsets.symmetric(vertical: 15),
-            // [SỬA] Dùng divider dày hơn để phân tách các ca
             child: pw.Divider(height: 1, thickness: 1.5, borderStyle: pw.BorderStyle.solid),
           ));
         }
       }
     }
 
-    // Thêm vào trang
     doc.addPage(
       pw.Page(
         pageFormat: pageFormat,
@@ -82,9 +74,7 @@ class EndOfDayReportPrintingHelper {
     return doc.save();
   }
 
-  // [THÊM MỚI] Hàm helper để tạo dòng thời gian (HH:mm dd/MM)
   static String _buildPdfTimeRangeString(DateTime start, DateTime end) {
-    // Dùng format giống như bạn cung cấp
     final DateFormat formatter = DateFormat('HH:mm dd/MM');
     final String startTime = formatter.format(start);
     final String endTime;
@@ -97,7 +87,6 @@ class EndOfDayReportPrintingHelper {
     return "($startTime - $endTime)";
   }
 
-  // [THÊM MỚI] Hàm helper để tạo các tiêu đề phụ rõ ràng
   static pw.Widget _buildPdfSubHeader(String title, pw.Font boldFont, {bool showDivider = true}) {
     return pw.Padding(
         padding: pw.EdgeInsets.only(top: showDivider ? 8 : 4, bottom: 4),
@@ -112,36 +101,41 @@ class EndOfDayReportPrintingHelper {
     );
   }
 
-  // --- Hàm helper xây dựng giao diện (Lấy từ file end_of_day_report_tab.dart) ---
   static pw.Widget _buildPdfRow(String label, dynamic value, {
     pw.Font? font,
     pw.FontWeight fontWeight = pw.FontWeight.normal,
     bool isCurrency = true,
+    PdfColor? color,
   }) {
     String valueString;
     if (value is double) {
-      valueString = isCurrency ? '${formatNumber(value)} đ' : formatNumber(value);
+      if (value.abs() < 0.001) {
+        valueString = isCurrency ? '0 đ' : '0';
+      } else {
+        valueString = isCurrency ? '${formatNumber(value)} đ' : formatNumber(value);
+      }
     } else if (value is int) {
       valueString = isCurrency ? '${formatNumber(value.toDouble())} đ' : value.toString();
     } else {
       valueString = value.toString();
     }
+
     if (label.length > 25) {
       label = '${label.substring(0, 22)}...';
     }
+
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 2.5),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text(label, style: pw.TextStyle(font: font, fontSize: 9)),
-          pw.Text(valueString, style: pw.TextStyle(font: font, fontSize: 9, fontWeight: fontWeight)),
+          pw.Text(label, style: pw.TextStyle(font: font, fontSize: 9, color: color)),
+          pw.Text(valueString, style: pw.TextStyle(font: font, fontSize: 9, fontWeight: fontWeight, color: color)),
         ],
       ),
     );
   }
 
-  // [SỬA ĐỔI TOÀN BỘ] Hàm xây dựng layout cho từng mục
   static List<pw.Widget> _buildReportSectionWidgets(
       Map<String, dynamic> data,
       pw.Font ttf,
@@ -175,7 +169,6 @@ class EndOfDayReportPrintingHelper {
     pw.Widget? timeLine;
 
     if (!isShiftReport) {
-      // BÁO CÁO TỔNG
       if (startDate != null && endDate != null) {
         if (startDate.year == endDate.year && startDate.month == endDate.month && startDate.day == endDate.day) {
           dateLine = 'Ngày: ${dayFormatter.format(startDate)}';
@@ -186,14 +179,12 @@ class EndOfDayReportPrintingHelper {
         dateLine = 'Ngày: N/A';
       }
     } else {
-      // BÁO CÁO CA
       if (calculatedStartTime != null) {
         dateLine = 'Ngày: ${dayFormatter.format(calculatedStartTime)}';
-        // Nếu có thời gian, tạo dòng timeLine
         if (calculatedEndTime != null) {
           timeLine = pw.Center(
             child: pw.Text(
-              _buildPdfTimeRangeString(calculatedStartTime, calculatedEndTime), // Gọi helper mới
+              _buildPdfTimeRangeString(calculatedStartTime, calculatedEndTime),
               style: pw.TextStyle(font: ttf, fontSize: 9, fontStyle: pw.FontStyle.italic),
               textAlign: pw.TextAlign.center,
             ),
@@ -203,7 +194,6 @@ class EndOfDayReportPrintingHelper {
         dateLine = 'Ngày: N/A';
       }
     }
-    // --- Kết thúc Logic Ngày/Giờ ---
 
     final String reportTitle = data['reportTitle'] ?? 'BÁO CÁO';
 
@@ -212,55 +202,88 @@ class EndOfDayReportPrintingHelper {
         child: pw.Text(reportTitle, style: pw.TextStyle(font: boldTtf, fontSize: 11)),
       ),
       pw.SizedBox(height: 4),
-      // Dòng 1: Ngày
       pw.Center(
         child: pw.Text(dateLine, style: pw.TextStyle(font: ttf, fontSize: 9), textAlign: pw.TextAlign.center),
       ),
-      // Dòng 2: Giờ (chỉ hiển thị nếu là báo cáo ca)
-      if (timeLine != null)
-        timeLine,
+      if (timeLine != null) timeLine,
     ];
 
+    // --- PHẦN 1: DOANH SỐ ---
     widgets.add(_buildPdfSubHeader('DOANH SỐ', boldTtf, showDivider: true));
+
     widgets.add(_buildPdfRow('Đơn hàng', data['totalOrders'], font: ttf, isCurrency: false));
-    widgets.add(_buildPdfRow('Chiết khấu', data['totalDiscount'], font: ttf));
+    widgets.add(_buildPdfRow('Chiết khấu/SP', data['totalDiscount'], font: ttf));
+    widgets.add(_buildPdfRow('Chiết khấu/Tổng', data['totalBillDiscount'], font: ttf));
     widgets.add(_buildPdfRow('Voucher', data['totalVoucher'], font: ttf));
     widgets.add(_buildPdfRow('Điểm thưởng', data['totalPointsValue'], font: ttf));
     widgets.add(_buildPdfRow('Thuế', data['totalTax'], font: ttf));
     widgets.add(_buildPdfRow('Phụ thu', data['totalSurcharges'], font: ttf));
 
-    // Nhóm 2: Thanh toán
+    final double returnRevenue = safeParseDouble(data['totalReturnRevenue']);
+    if (returnRevenue > 0) {
+      widgets.add(_buildPdfRow('Trả hàng', returnRevenue, font: ttf, color: PdfColors.red));
+    }
+
+    // --- PHẦN 2: THANH TOÁN (ĐÃ SỬA: CHI TIẾT PTTT) ---
     widgets.add(_buildPdfSubHeader('THANH TOÁN', boldTtf));
     widgets.add(_buildPdfRow('Doanh thu bán hàng', data['totalRevenue'], font: boldTtf));
-    widgets.add(_buildPdfRow('Tiền mặt', data['totalCash'], font: ttf));
-    widgets.add(_buildPdfRow('Thanh toán khác', data['totalOtherPayments'], font: ttf));
+
+    // [LOGIC MỚI] Lấy Payment Methods từ data
+    final Map<String, dynamic> paymentMethods = (data['paymentMethods'] as Map<String, dynamic>?) ?? {};
+
+    if (paymentMethods.isNotEmpty) {
+      // Sắp xếp key để hiển thị đẹp
+      final sortedKeys = paymentMethods.keys.toList()..sort();
+
+      for (var method in sortedKeys) {
+        final double amount = safeParseDouble(paymentMethods[method]);
+        // Hiển thị nếu số tiền khác 0 (bao gồm cả số âm nếu có hoàn tiền CK)
+        if (amount.abs() > 0.001) {
+          widgets.add(_buildPdfRow(method, amount, font: ttf));
+        }
+      }
+    } else {
+      // Fallback cho dữ liệu cũ (chưa có Map) -> Dùng các biến tổng hợp
+      widgets.add(_buildPdfRow('Tiền mặt', data['totalCash'], font: ttf));
+      if (safeParseDouble(data['totalOtherPayments']) != 0) {
+        widgets.add(_buildPdfRow('Thanh toán khác', data['totalOtherPayments'], font: ttf));
+      }
+    }
+
     widgets.add(_buildPdfRow('Ghi nợ', data['totalDebt'], font: ttf));
+
     widgets.add(pw.SizedBox(height: 2));
     widgets.add(pw.Divider(height: 1, thickness: 0.5, borderStyle: pw.BorderStyle.dotted));
     widgets.add(pw.SizedBox(height: 2));
     widgets.add(_buildPdfRow('Thực thu', data['actualRevenue'], font: boldTtf));
 
-    // Nhóm 3: Sổ quỹ (Di chuyển logic tính toán ra ngoài)
+    // --- PHẦN 3: SỔ QUỸ (ĐÃ SỬA: CÓ DÒNG TRẢ HÀNG) ---
     double openingBalance = safeParseDouble(data['openingBalance']);
     final double closingBalance = safeParseDouble(data['closingBalance']);
 
     if (!isShiftReport && openingBalance == 0.0 && closingBalance != 0.0) {
-
-    final double actualRevenue = safeParseDouble(data['actualRevenue']);
-    final double otherRevenue = safeParseDouble(data['totalOtherRevenue']);
-    final double otherExpense = safeParseDouble(data['totalOtherExpense']);
-
-    openingBalance = closingBalance - actualRevenue - otherRevenue + otherExpense;
+      final double actualRevenue = safeParseDouble(data['actualRevenue']);
+      final double otherRevenue = safeParseDouble(data['totalOtherRevenue']);
+      final double otherExpense = safeParseDouble(data['totalOtherExpense']);
+      // Tự tính ngược lại Đầu kỳ nếu chưa lưu
+      openingBalance = closingBalance - actualRevenue - otherRevenue + otherExpense + returnRevenue;
     }
 
     widgets.add(_buildPdfSubHeader('SỔ QUỸ', boldTtf));
     widgets.add(_buildPdfRow(isShiftReport ? 'Quỹ đầu ca' : 'Quỹ đầu kỳ', openingBalance, font: ttf));
     widgets.add(_buildPdfRow('Thu khác', data['totalOtherRevenue'], font: ttf));
     widgets.add(_buildPdfRow('Chi khác', data['totalOtherExpense'], font: ttf));
+
+    // [HIỆN TRẢ HÀNG Ở ĐÂY ĐỂ KHỚP CÔNG THỨC]
+    if (returnRevenue > 0) {
+      widgets.add(_buildPdfRow('Trả hàng (Chi)', returnRevenue, font: ttf, color: PdfColors.red));
+    }
+
     widgets.add(pw.SizedBox(height: 2));
     widgets.add(pw.Divider(height: 1, thickness: 0.5, borderStyle: pw.BorderStyle.dotted));
     widgets.add(pw.SizedBox(height: 2));
     widgets.add(_buildPdfRow(isShiftReport ? 'TỒN QUỸ CA' : 'TỒN QUỸ CUỐI KỲ', closingBalance, font: boldTtf));
+
     return widgets;
   }
 }

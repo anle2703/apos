@@ -81,7 +81,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       if (customer != null) {
         // 1. Lấy hóa đơn bán hàng
         final billsRaw = await _firestoreService.getBillsByCustomer(widget.customerId);
-        final bills = billsRaw.where((bill) => bill.status != 'cancelled').toList();
+        final bills = billsRaw.where((bill) =>
+        bill.status != 'cancelled' &&
+            bill.status != 'return'
+        ).toList();
 
         // 2. Lấy phiếu thu nợ thủ công
         final manualTxsSnapshot = await FirebaseFirestore.instance
