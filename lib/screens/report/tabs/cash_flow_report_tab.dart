@@ -309,7 +309,7 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
       final String codeUpper = bill.billCode.trim().toUpperCase();
 
       // 1. BILL TRẢ HÀNG (Mã bắt đầu bằng RT) -> CHI
-      if (codeUpper.startsWith('RT')) {
+      if (codeUpper.startsWith('TH')) {
         _allTransactions.add(UnifiedTransaction(
           id: bill.id,
           type: TransactionType.expense,

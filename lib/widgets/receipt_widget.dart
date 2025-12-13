@@ -12,11 +12,12 @@ class ReceiptWidget extends StatelessWidget {
   final Map<String, dynamic> summary;
   final String userName;
   final String tableName;
-  final bool showPrices; // Biến này quyết định tất cả việc hiện tiền
+  final bool showPrices;
   final bool isSimplifiedMode;
   final ReceiptTemplateModel? templateSettings;
   final String? qrData;
   final bool isRetailMode;
+  final bool isReturnBill;
 
   const ReceiptWidget({
     super.key,
@@ -31,6 +32,7 @@ class ReceiptWidget extends StatelessWidget {
     this.templateSettings,
     this.qrData,
     this.isRetailMode = false,
+    this.isReturnBill = false,
   });
 
   @override
@@ -42,10 +44,13 @@ class ReceiptWidget extends StatelessWidget {
 
     final bool isFinancialBill = showPrices;
 
+    final String? billCode = summary['billCode'] as String?;
     String displayTitle = title;
-    if (isFinancialBill) {
-      if (displayTitle.toLowerCase().contains('kiểm món') ||
-          displayTitle.isEmpty) {
+
+    if (isReturnBill) {
+      displayTitle = '$title - ${billCode ?? ""}';
+    } else if (isFinancialBill) {
+      if (displayTitle.toLowerCase().contains('kiểm món') || displayTitle.isEmpty) {
         displayTitle = 'TẠM TÍNH';
       }
     }
@@ -115,7 +120,6 @@ class ReceiptWidget extends StatelessWidget {
         ? Map<String, dynamic>.from(summary['customer'])
         : {};
     final String khName = customer['name'] ?? 'Khách lẻ';
-    final String? billCode = summary['billCode'] as String?;
     final String khPhone = customer['phone'] ?? '';
     final String khAddress = customer['guestAddress'] ?? '';
     final String? eInvoiceUrl = summary['eInvoiceFullUrl'] as String?;
@@ -125,9 +129,12 @@ class ReceiptWidget extends StatelessWidget {
     final bool isShipOrder = tableName.toLowerCase().contains('giao hàng') ||
         tableName.toLowerCase().contains('ship') ||
         (isRetailMode && tableName.isEmpty);
-
     final String? originalBillCode = summary['originalBillCode'] as String?;
-    String finalTitle = title;
+    String finalTitleStr = displayTitle;
+    if (!isReturnBill && tableName.isNotEmpty) {
+      finalTitleStr = '$displayTitle - $tableName';
+    }
+
     return Container(
       width: 550,
       color: Colors.white,
@@ -162,21 +169,22 @@ class ReceiptWidget extends StatelessWidget {
           const SizedBox(height: 16),
 
           // 2. TITLE
-          Text(
-              tableName.isNotEmpty
-                  ? '$finalTitle - $tableName'
-                  : finalTitle,
+          Text(finalTitleStr,
               textAlign: TextAlign.center,
               style: boldTextStyle.copyWith(fontSize: fsTitle)),
-          if (billCode != null && billCode.isNotEmpty)
+
+          // Ẩn Bill Code ở đây nếu là Trả hàng (vì đã đưa lên tiêu đề), hoặc hiển thị nếu là đơn thường
+          if (billCode != null && billCode.isNotEmpty && !isReturnBill)
             Text(billCode,
                 textAlign: TextAlign.center,
                 style: baseTextStyle.copyWith(fontSize: fsInfo)),
+
+          // Yêu cầu 2: Hóa đơn gốc
           if (originalBillCode != null && originalBillCode.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4.0),
               child: Text(
-                '(Đơn gốc: $originalBillCode)',
+                'Hóa đơn gốc: $originalBillCode', // Sửa từ "(Đơn gốc...)" thành "Hóa đơn gốc..."
                 textAlign: TextAlign.center,
                 style: italicTextStyle.copyWith(fontSize: fsInfo),
               ),
@@ -194,7 +202,7 @@ class ReceiptWidget extends StatelessWidget {
                 _buildInfoRow('ĐC:', khAddress, baseTextStyle.copyWith(fontSize: fsInfo)),
             ]
           ],
-          if (startTime != null && !isRetailMode)
+          if (startTime != null && !isRetailMode && !isReturnBill)
             _buildInfoRow('Giờ vào:', timeFormat.format(startTime),
                 baseTextStyle.copyWith(fontSize: fsInfo)),
           _buildInfoRow('Giờ in:', timeFormat.format(DateTime.now()),
@@ -221,13 +229,13 @@ class ReceiptWidget extends StatelessWidget {
                         style: boldTextStyle.copyWith(fontSize: fsItemName))),
                 Expanded(
                     flex: 6,
-                    child: Text('Tên món / DV',
+                    child: Text(isReturnBill ? 'Sản phẩm hoàn' : 'Tên sản phẩm',
                         style: boldTextStyle.copyWith(fontSize: fsItemName),
                         textAlign: TextAlign.center)),
                 Expanded(
                     flex: 4,
                     // Nếu là kiểm món thì hiện SL, nếu là bill tài chính thì hiện Thành tiền
-                    child: Text(isCheckDish ? 'SL' : 'Thành tiền',
+                    child: Text(isReturnBill ? 'Hoàn tiền' : (isCheckDish ? 'SL' : 'Thành tiền'),
                         textAlign: TextAlign.right,
                         style: boldTextStyle.copyWith(fontSize: fsItemName))),
               ],
@@ -521,34 +529,34 @@ class ReceiptWidget extends StatelessWidget {
           // 6. SUMMARY (Chỉ hiện nếu CÓ GIÁ TIỀN - isFinancialBill)
           if (isFinancialBill) ...[
             if (!isSimplifiedMode) ...[
-              _buildRow('Tổng cộng:', currencyFormat.format(subtotal),
+              _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(subtotal),
                   baseTextStyle.copyWith(fontSize: fsInfo)),
               if (settings.billShowTax && taxAmount > 0)
-                _buildRow('Thuế:', '+ ${currencyFormat.format(taxAmount)}',
+                _buildRow(isReturnBill ? 'Hoàn thuế:' : 'Thuế:', '+ ${currencyFormat.format(taxAmount)}',
                     baseTextStyle.copyWith(fontSize: fsInfo)),
               if (settings.billShowDiscount && discount > 0)
                 _buildRow(
-                    summary['discountName'] ?? 'Chiết khấu:',
+                    isReturnBill ? 'Hoàn chiết khấu:' : (summary['discountName'] ?? 'Chiết khấu:'),
                     '- ${currencyFormat.format(discount)}',
                     baseTextStyle.copyWith(fontSize: fsInfo)),
               if (voucherDiscount > 0)
                 _buildRow(
-                    'Voucher ($voucherCode):',
+                    isReturnBill ? 'Hoàn voucher:' : 'Voucher ($voucherCode):',
                     '- ${currencyFormat.format(voucherDiscount)}',
                     baseTextStyle.copyWith(fontSize: fsInfo)),
               if (pointsValue > 0)
                 _buildRow(
-                    'Điểm thưởng:',
+                    isReturnBill ? 'Hoàn điểm thưởng:' : 'Điểm thưởng:',
                     '- ${currencyFormat.format(pointsValue)}',
                     baseTextStyle.copyWith(fontSize: fsInfo)),
               if (settings.billShowSurcharge && surcharges.isNotEmpty)
                 ...surcharges.map((s) => _buildRow(
-                    '${s['name']}:',
+                    isReturnBill ? 'Hoàn phụ thu ${s['name']}:' : '${s['name']}:',
                     '+ ${currencyFormat.format((s['amount'] as num).toDouble())}',
                     baseTextStyle.copyWith(fontSize: fsInfo))),
             ],
             if (isSimplifiedMode)
-              _buildRow('Tổng cộng:', currencyFormat.format(subtotal),
+              _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(subtotal),
                   baseTextStyle.copyWith(fontSize: fsInfo)),
             const SizedBox(height: 12),
 
@@ -556,7 +564,7 @@ class ReceiptWidget extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('THÀNH TIỀN:',
+                Text(isReturnBill ? 'TỔNG HOÀN TIỀN:' : 'THÀNH TIỀN:',
                     style: boldTextStyle.copyWith(fontSize: fsTotal)),
                 Text(currencyFormat.format(totalPayable),
                     style: boldTextStyle.copyWith(fontSize: fsTotal + 4)),
@@ -567,12 +575,18 @@ class ReceiptWidget extends StatelessWidget {
             if (!isSimplifiedMode) ...[
               if (settings.billShowPaymentMethod && payments.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text('Phương thức thanh toán:',
+                Text(isReturnBill ? 'Phương thức hoàn:' : 'Phương thức thanh toán:',
                     style: baseTextStyle.copyWith(fontSize: fsInfo)),
                 ...payments.entries.map((entry) => _buildRow(
                     '- ${entry.key}:',
                     currencyFormat.format((entry.value as num).toDouble()),
                     baseTextStyle.copyWith(fontSize: fsInfo))),
+                if (isReturnBill && debtAmount > 0)
+                  _buildRow(
+                      '- Trừ vào dư nợ:',
+                      currencyFormat.format(debtAmount),
+                      baseTextStyle.copyWith(fontSize: fsInfo)
+                  ),
               ],
               if (changeAmount > 0)
                 _buildRow('Tiền thừa:', currencyFormat.format(changeAmount),

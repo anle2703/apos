@@ -1952,6 +1952,41 @@ class _OrderScreenState extends State<OrderScreen> {
       _cart.clear();
       _cart.addAll(mergedCart);
 
+      _manuallyDiscountedItems.clear();
+
+      for (var entry in _cart.entries) {
+        final item = entry.value;
+
+        // 1. Tính thử xem nếu chạy tự động thì ra bao nhiêu
+        final discountItem = _discountService.findBestDiscountForProduct(
+          product: item.product,
+          activeDiscounts: _activeDiscounts,
+          customer: _selectedCustomer,
+          checkTime: item.addedAt.toDate(),
+        );
+
+        double autoVal = 0;
+        String autoUnit = '%';
+
+        if (discountItem != null) {
+          autoVal = discountItem.value;
+          autoUnit = discountItem.isPercent ? '%' : 'VNĐ';
+        }
+
+        // 2. So sánh giá trị đang lưu trong DB (item.discountValue) với giá trị tự động (autoVal)
+        // Nếu khác nhau => Nghĩa là người dùng đã sửa tay => Add vào danh sách chặn
+        final double currentVal = item.discountValue ?? 0;
+        final String currentUnit = item.discountUnit ?? '%';
+
+        // So sánh có sai số nhỏ (cho số double)
+        final bool isValueDiff = (currentVal - autoVal).abs() > 0.001;
+        final bool isUnitDiff = currentUnit != autoUnit;
+
+        if (isValueDiff || isUnitDiff) {
+          _manuallyDiscountedItems.add(entry.key);
+        }
+      }
+
       // Bước 2: CHẠY TÍNH TOÁN NGẦM (Không gọi setState trong các hàm con này)
       _updateTimeBasedPrices(triggerSetState: false);
       _recalculateCartDiscounts(triggerSetState: false);
@@ -2822,8 +2857,6 @@ class _OrderScreenState extends State<OrderScreen> {
   void _handleCustomerSelection(CustomerModel? newCustomer) {
     if (_selectedCustomer?.id == newCustomer?.id) return;
     _selectedCustomer = newCustomer;
-
-    _manuallyDiscountedItems.clear();
 
     _recalculateCartDiscounts(triggerSetState: false);
 

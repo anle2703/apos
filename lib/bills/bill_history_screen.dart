@@ -1502,8 +1502,8 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       );
     }
 
-    final bool isReturnedBill = widget.bill.status == 'return' || widget.bill.tableName == 'TRẢ HÀNG';
-    final String receiptTitle = isReturnedBill ? 'PHIẾU TRẢ HÀNG' : 'HÓA ĐƠN';
+    final bool isReturnedBill = widget.bill.billCode.trim().toUpperCase().startsWith('TH');
+    final String receiptTitle = isReturnedBill ? 'TRẢ HÀNG' : 'HÓA ĐƠN';
     final Widget receiptWidget = ReceiptWidget(
       title: receiptTitle,
       storeInfo: widget.storeInfo,
@@ -1518,6 +1518,8 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       isSimplifiedMode: false,
       templateSettings: _templateSettings,
       qrData: qrDataString,
+      isRetailMode: isRetailBill,
+      isReturnBill: isReturnedBill,
     );
 
     return Dialog(
