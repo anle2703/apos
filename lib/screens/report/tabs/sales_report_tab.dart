@@ -740,12 +740,6 @@ class SalesReportTabState extends State<SalesReportTab> {
                     color: AppTheme.primaryColor),
                 _KpiCard(
                     width: cardWidth,
-                    title: 'Thuế',
-                    value: _totalTax,
-                    icon: Icons.percent,
-                    color: Colors.purple),
-                _KpiCard(
-                    width: cardWidth,
                     title: 'Trả Hàng',
                     value: _totalReturnRevenue,
                     icon: Icons.assignment_return_outlined,
@@ -762,8 +756,6 @@ class SalesReportTabState extends State<SalesReportTab> {
                     value: _totalDebt,
                     icon: Icons.receipt,
                     color: Colors.red),
-
-                // --- THÊM LẠI 2 CARD ---
                 _KpiCard(
                     width: cardWidth,
                     title: 'Tiền Mặt',
@@ -776,7 +768,12 @@ class SalesReportTabState extends State<SalesReportTab> {
                     value: _otherPayments,
                     icon: Icons.credit_card,
                     color: Colors.blue),
-                // --- KẾT THÚC THÊM CARD ---
+                _KpiCard(
+                    width: cardWidth,
+                    title: 'Thuế',
+                    value: _totalTax,
+                    icon: Icons.calculate,
+                    color: Colors.purple),
               ],
             );
           },

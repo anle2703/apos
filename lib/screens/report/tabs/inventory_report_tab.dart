@@ -890,17 +890,19 @@ class InventoryReportTabState extends State<InventoryReportTab> {
 
       Map<String, double> exportDeltas = {};
       for (final doc in billsSnapshot.docs) {
-        final items =
-            List<Map<String, dynamic>>.from(doc.data()['items'] ?? []);
+        final items = List<Map<String, dynamic>>.from(doc.data()['items'] ?? []);
         for (final itemMap in items) {
           _calculateExportDeductions(
               itemMap: itemMap,
               allProducts: allProductsMap,
               deductionsMap: exportDeltas);
-          final toppings =
-              List<Map<String, dynamic>>.from(itemMap['toppings'] ?? []);
-          final quantityOfMainProduct =
-              (itemMap['quantity'] as num?)?.toDouble() ?? 1.0;
+          final toppings = List<Map<String, dynamic>>.from(itemMap['toppings'] ?? []);
+          final mainQty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+          final mainReturned = (itemMap['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+          final quantityOfMainProduct = mainQty - mainReturned;
+
+          if (quantityOfMainProduct <= 0) continue;
+
           for (final toppingMap in toppings) {
             final totalToppingQuantity = quantityOfMainProduct *
                 ((toppingMap['quantity'] as num?)?.toDouble() ?? 1.0);
@@ -909,6 +911,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
               'quantity': totalToppingQuantity,
               'selectedUnit': toppingMap['selectedUnit'],
               'toppings': [],
+              'returnedQuantity': 0,
             };
             _calculateExportDeductions(
                 itemMap: toppingItemMapForDeduction,
@@ -954,7 +957,10 @@ class InventoryReportTabState extends State<InventoryReportTab> {
     final soldProduct = allProducts[productData['id']];
     if (soldProduct == null) return;
 
-    final quantitySold = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+    final qty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+    final returned = (itemMap['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+    final quantitySold = qty - returned;
+
     if (quantitySold <= 0) return;
 
     final type = soldProduct.productType;
@@ -1177,21 +1183,20 @@ class InventoryReportTabState extends State<InventoryReportTab> {
     required String targetUnitName,
     required Map<String, ProductModel> allProducts,
     required List<InventoryTransaction> transactions,
-    // bool isRecipeDeduction = false, // <-- XÓA DÒNG NÀY
-    String? parentProductName, // <-- THÊM DÒNG NÀY
+    String? parentProductName,
   }) {
     final productData = itemMap['product'] as Map<String, dynamic>?;
     if (productData == null) return;
     final soldProduct = allProducts[productData['id']];
     if (soldProduct == null) return;
 
-    // [THÊM] Lấy tên của sản phẩm hiện tại
     final String currentProductName = soldProduct.productName;
-
     final billData = billDoc.data() as Map<String, dynamic>;
-    final billCode =
-        billData['billCode'] ?? billDoc.id.split('_').last ?? 'N/A';
-    final quantitySold = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+    final billCode = billData['billCode'] ?? billDoc.id.split('_').last ?? 'N/A';
+    final qty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+    final returned = (itemMap['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+    final quantitySold = qty - returned;
+
     if (quantitySold <= 0) return;
 
     final type = soldProduct.productType;

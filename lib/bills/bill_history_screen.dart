@@ -260,7 +260,6 @@ class BillService {
     return _db
         .collection('bills')
         .where('originalBillId', isEqualTo: originalBillId)
-        .where('tableName', isEqualTo: 'TRẢ HÀNG') // Lọc thêm cho chắc
         .snapshots()
         .map((snap) => snap.docs.map((d) => BillModel.fromFirestore(d)).toList());
   }
@@ -987,6 +986,14 @@ class _BillCard extends StatelessWidget {
       statusLabel = "ĐÃ HỦY";
     }
 
+    // [FIX] Xác định giá trị hiển thị trên Card
+    // Nếu là đơn trả hàng (return) và có netDifference -> Hiển thị chênh lệch
+    // Nếu không -> Hiển thị totalPayable như cũ
+    double displayAmount = bill.totalPayable;
+    if (isReturned && bill.netDifference != null) {
+      displayAmount = bill.netDifference!;
+    }
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       elevation: 1.5,
@@ -1040,14 +1047,15 @@ class _BillCard extends StatelessWidget {
                               }),
                             ),
 
-                            // 2. Giá tiền (Bên phải)
+                            // 2. Giá tiền (Bên phải) - [ĐÃ SỬA]
                             Padding(
                               padding: const EdgeInsets.only(left: 8.0),
                               child: Text(
-                                '${formatNumber(bill.totalPayable)} đ',
+                                '${formatNumber(displayAmount)} đ', // Hiển thị số tiền chênh lệch nếu là đơn trả
                                 style: theme.textTheme.titleLarge?.copyWith(
                                   fontSize: 17,
-                                  color: statusColor,
+                                  // Nếu là số âm (hoàn tiền) hiển thị màu đỏ, dương (thu thêm) hoặc thường màu theo status
+                                  color: (isReturned && displayAmount < 0) ? Colors.red : statusColor,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -1058,7 +1066,6 @@ class _BillCard extends StatelessWidget {
                         const SizedBox(height: 4),
 
                         // --- HÀNG 2: KHÁCH HÀNG + NGÀY GIỜ (FULL WIDTH) ---
-                        // Đã đưa ra ngoài Row để không bị ép cột
                         Text(
                           '${bill.customerName ?? 'Khách lẻ'} • ${DateFormat('HH:mm dd/MM/yyyy').format(bill.createdAt)}',
                           style: theme.textTheme.bodyMedium
@@ -1375,77 +1382,26 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   }
 
   Widget _buildRelatedBillsLink() {
-    // 1. Nếu là Bill Gốc -> Tìm các đơn trả hàng
-    if (widget.bill.tableName != 'TRẢ HÀNG') {
-      return StreamBuilder<List<BillModel>>(
-        stream: BillService().getReturnBillsForOriginal(widget.bill.id),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink();
-
-          final returnBills = snapshot.data!;
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade200)
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Lịch sử trả hàng:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-                const SizedBox(height: 4),
-                ...returnBills.map((rb) => InkWell(
-                  onTap: () {
-                    // Đóng dialog hiện tại rồi mới mở cái mới
-                    Navigator.pop(context);
-                    showDialog(
-                      context: context,
-                      builder: (_) => BillReceiptDialog(bill: rb, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
-                    );
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.subdirectory_arrow_right, size: 16, color: Colors.red),
-                        const SizedBox(width: 4),
-                        Text("${rb.billCode} -${formatNumber(rb.totalPayable.abs())}đ",
-                            style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline, decorationColor: Colors.blue,)),
-                        const Spacer(),
-                        Text(DateFormat('HH:mm dd/MM/yyyy').format(rb.createdAt), style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                )),
-              ],
-            ),
-          );
-        },
-      );
-    }
-
-    // 2. Nếu là Bill Trả hàng -> Tìm về Bill Gốc
-    // Đã sửa lỗi: Kiểm tra mounted trước khi dùng context sau await
-    else if (widget.bill.originalBillId != null) {
+    // 1. NẾU LÀ ĐƠN CON (CÓ CHA) -> HIỆN NÚT VỀ CHA
+    if (widget.bill.originalBillId != null && widget.bill.originalBillId!.isNotEmpty) {
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: InkWell(
           onTap: () async {
+            if (!context.mounted) return;
+            // Lấy đơn gốc
             final original = await BillService().getOriginalBill(widget.bill.originalBillId!);
 
-            // [FIX LỖI ASYNC GAP] Kiểm tra mounted trước khi dùng context
-            if (!context.mounted) return;
-
-            if (original != null) {
-              Navigator.pop(context);
-              showDialog(
-                context: context,
-                builder: (_) => BillReceiptDialog(bill: original, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
-              );
-            } else {
-              ToastService().show(message: "Không tìm thấy hóa đơn gốc.", type: ToastType.warning);
+            if (context.mounted) {
+              if (original != null) {
+                Navigator.pop(context);
+                showDialog(
+                  context: context,
+                  builder: (_) => BillReceiptDialog(bill: original, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
+                );
+              } else {
+                ToastService().show(message: "Không tìm thấy hóa đơn gốc.", type: ToastType.warning);
+              }
             }
           },
           child: Container(
@@ -1468,7 +1424,54 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       );
     }
 
-    return const SizedBox.shrink();
+    // 2. NẾU LÀ ĐƠN GỐC (HOẶC ĐƠN BÌNH THƯỜNG) -> TÌM CON
+    // Logic: Cứ tìm xem có thằng nào trỏ tới mình không, nếu có thì hiện list
+    return StreamBuilder<List<BillModel>>(
+      stream: BillService().getReturnBillsForOriginal(widget.bill.id),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink();
+
+        final returnBills = snapshot.data!;
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.shade200)
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Lịch sử đổi/trả:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+              const SizedBox(height: 4),
+              ...returnBills.map((rb) => InkWell(
+                onTap: () {
+                  Navigator.pop(context);
+                  showDialog(
+                    context: context,
+                    builder: (_) => BillReceiptDialog(bill: rb, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.subdirectory_arrow_right, size: 16, color: Colors.red),
+                      const SizedBox(width: 4),
+                      Text("${rb.billCode} (${rb.tableName})",
+                          style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline, decorationColor: Colors.blue,)),
+                      const Spacer(),
+                      Text(DateFormat('HH:mm dd/MM').format(rb.createdAt), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+              )),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -1504,6 +1507,14 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
 
     final bool isReturnedBill = widget.bill.billCode.trim().toUpperCase().startsWith('TH');
     final String receiptTitle = isReturnedBill ? 'TRẢ HÀNG' : 'HÓA ĐƠN';
+
+    List<OrderItem>? exchangeItemsList;
+    if (widget.bill.exchangeItems != null && widget.bill.exchangeItems!.isNotEmpty) {
+      exchangeItemsList = widget.bill.exchangeItems!
+          .whereType<Map<String, dynamic>>()
+          .map((itemData) => OrderItem.fromMap(itemData))
+          .toList();
+    }
     final Widget receiptWidget = ReceiptWidget(
       title: receiptTitle,
       storeInfo: widget.storeInfo,
@@ -1520,6 +1531,8 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       qrData: qrDataString,
       isRetailMode: isRetailBill,
       isReturnBill: isReturnedBill,
+      exchangeItems: exchangeItemsList,
+      exchangeSummary: widget.bill.exchangeSummary,
     );
 
     return Dialog(

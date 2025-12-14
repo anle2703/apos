@@ -42,6 +42,13 @@ class BillModel {
   final String? originalBillId;
   final String? originalBillCode;
 
+  // [NEW] Các trường mới cho tính năng Đổi hàng
+  final List<dynamic>? exchangeItems;
+  final Map<String, dynamic>? exchangeSummary;
+  final double? exchangeSubtotal;
+  final double? exchangeTotalPayable;
+  final double? netDifference;
+
   BillModel({
     required this.id,
     required this.billCode,
@@ -80,6 +87,13 @@ class BillModel {
     this.guestAddress,
     this.originalBillId,
     this.originalBillCode,
+
+    // [NEW] Constructor update
+    this.exchangeItems,
+    this.exchangeSummary,
+    this.exchangeSubtotal,
+    this.exchangeTotalPayable,
+    this.netDifference,
   });
 
   factory BillModel.fromFirestore(DocumentSnapshot doc) {
@@ -151,6 +165,13 @@ class BillModel {
       guestAddress: data['guestAddress'] as String?,
       originalBillId: data['originalBillId'] as String?,
       originalBillCode: data['originalBillCode'] as String?,
+
+      // [NEW] Mapping fields từ Firestore
+      exchangeItems: data['exchangeItems'] as List<dynamic>?,
+      exchangeSummary: data['exchangeSummary'] as Map<String, dynamic>?,
+      exchangeSubtotal: (data['exchangeSubtotal'] as num?)?.toDouble(),
+      exchangeTotalPayable: (data['exchangeTotalPayable'] as num?)?.toDouble(),
+      netDifference: (data['netDifference'] as num?)?.toDouble(),
     );
   }
 }

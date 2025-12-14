@@ -18,6 +18,7 @@ import '../../widgets/app_dropdown.dart';
 import '../../models/payment_method_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/shift_service.dart';
+import 'package:omni_datetime_picker/omni_datetime_picker.dart';
 
 class ReturnService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -43,6 +44,7 @@ class ReturnService {
     required List<OrderItem> exchangeItems,
     required double returnTotalValue,
     required double exchangeTotalValue,
+    required double exchangeTaxValue,
     BillModel? originalBill,
     CustomerModel? customer,
     String? note,
@@ -55,45 +57,56 @@ class ReturnService {
     final reportId = '${storeId}_$todayStr';
     final dailyReportRef = _db.collection('daily_reports').doc(reportId);
 
-    // 1. XÁC ĐỊNH KỊCH BẢN TRẢ HÀNG
+    // --- 1. KHỞI TẠO CÁC BIẾN CHÊNH LỆCH (DELTA) ---
+    double deltaRevenue = 0;
+    double deltaProfit = 0;
+    double deltaTax = 0;
+    double deltaSurcharges = 0;
+    double deltaBillDiscount = 0;
+    double deltaVoucherDiscount = 0;
+    double deltaPointsValue = 0;
+    double deltaReturnRevenue = 0;
+    int deltaBillCount = 0;
+
+    final Map<String, double> productQtyChange = {};
+    final Map<String, double> productRevChange = {};
+
+    // --- 2. LẤY THÔNG TIN CA (SHIFT) ---
+    // [FIX LỖI shiftStartTime] Khai báo ngay từ đầu
+    Timestamp shiftStartTime = Timestamp.now();
+    if (currentShiftId != null) {
+      try {
+        final shiftDoc = await _db.collection('employee_shifts').doc(currentShiftId).get();
+        if (shiftDoc.exists) {
+          shiftStartTime = shiftDoc.data()?['startTime'] as Timestamp? ?? Timestamp.now();
+        }
+      } catch (_) {}
+    }
+
+    // --- 3. TÍNH TOÁN DATA TRẢ (RETURN) ---
     bool isCorrectionMode = false;
-    if (originalBill != null &&
-        originalBill.reportDateKey == todayStr &&
-        originalBill.shiftId == currentShiftId) {
+    if (originalBill != null && originalBill.reportDateKey == todayStr && originalBill.shiftId == currentShiftId) {
       isCorrectionMode = true;
     }
+    bool isFullReturn = (originalBill != null) ? _checkIfFullReturn(originalBill, returnItems) : false;
 
-    bool isFullReturn = false;
-    if (originalBill != null) {
-      isFullReturn = _checkIfFullReturn(originalBill, returnItems);
-    }
-
-    // --- TÍNH TOÁN DATA TRẢ ---
     double totalReturnSubtotal = 0;
     double totalReturnTax = 0;
-    double totalReturnItemDiscount = 0;
     double totalReturnProfit = 0;
     double totalReturnNetSubtotal = 0;
+
     double originalBillTotalDiscount = 0.0;
     if (originalBill != null) {
       double billDiscVal = (originalBill.discountType == 'VND')
           ? originalBill.discountInput
           : (originalBill.subtotal * originalBill.discountInput / 100);
-      originalBillTotalDiscount = billDiscVal +
-          originalBill.voucherDiscount +
-          originalBill.customerPointsValue;
+      originalBillTotalDiscount = billDiscVal + originalBill.voucherDiscount + originalBill.customerPointsValue;
     }
 
-    Map<String, double> currentReturnQtyMap = {};
     List<Map<String, dynamic>> returnItemsData = [];
-    final Map<String, dynamic> mainProductsMap = {};
 
-    final Map<String, dynamic> shiftProductsMap = {};
+    // --- A. DUYỆT DANH SÁCH TRẢ ---
     for (var item in returnItems) {
-      String key = item.lineId;
-      currentReturnQtyMap[key] = (currentReturnQtyMap[key] ?? 0) + item.quantity;
-
-      // 1. Lấy thông tin từ Bill gốc
       Map<String, dynamic>? originalItemData;
       if (originalBill != null) {
         try {
@@ -104,54 +117,61 @@ class ReturnService {
         } catch (_) {}
       }
 
-      // 2. Lấy Giá Gốc (Gross Price) để tính toán
       double originalSellPrice = item.product.sellPrice;
-      if (originalItemData != null && originalItemData['product'] != null) {
-        originalSellPrice = (originalItemData['product']['sellPrice'] as num?)?.toDouble() ?? item.product.sellPrice;
+
+      // 1. Kiểm tra nếu ĐVT khác ĐVT gốc, lấy giá từ additionalUnits
+      if (item.selectedUnit.isNotEmpty && item.selectedUnit != item.product.unit) {
+        final unitData = item.product.additionalUnits.firstWhereOrNull(
+                (u) => u['unitName'] == item.selectedUnit
+        );
+        if (unitData != null) {
+          originalSellPrice = (unitData['sellPrice'] as num?)?.toDouble() ?? originalSellPrice;
+        }
       }
 
-      // --- [PHẦN QUAN TRỌNG CẦN KHÔI PHỤC] ---
-      // 3. Tính lại GIẢM GIÁ từ dữ liệu gốc (để trừ báo cáo)
+      // 2. Nếu trả theo bill cũ, ưu tiên lấy giá 'price' thực tế đã bán (field price nằm ngoài product map)
+      if (originalItemData != null) {
+        if (originalItemData['price'] != null) {
+          originalSellPrice = (originalItemData['price'] as num).toDouble();
+        } else if (originalItemData['product'] != null) {
+          // Fallback nếu bill cũ cấu trúc khác
+          originalSellPrice = (originalItemData['product']['sellPrice'] as num?)?.toDouble() ?? originalSellPrice;
+        }
+      }
+
+      // b. Giá Topping (Lấy giá bán)
+      double toppingsPriceTotal = 0;
+      if (item.toppings.isNotEmpty) {
+        for (var t in item.toppings.entries) {
+          toppingsPriceTotal += (t.key.sellPrice * t.value);
+        }
+      }
+
+      // c. Giá Trọn gói (Gross)
+      double grossUnitPrice = originalSellPrice + toppingsPriceTotal;
+
+      // d. Chiết khấu
       double discountForReport = 0;
       if (originalItemData != null) {
         double dVal = (originalItemData['discountValue'] as num?)?.toDouble() ?? 0;
         String dUnit = originalItemData['discountUnit'] ?? '%';
-
-        // Lấy giá gốc tại thời điểm bán để tính %
-        double originalGrossForCalc = 0;
-        if (originalItemData['product'] != null) {
-          originalGrossForCalc = (originalItemData['product']['sellPrice'] as num?)?.toDouble() ?? item.product.sellPrice;
-        } else {
-          originalGrossForCalc = item.product.sellPrice;
-        }
-
-        if (dVal > 0) {
+        if (dVal != 0) {
           if (dUnit == '%') {
-            discountForReport = originalGrossForCalc * (dVal / 100);
+            discountForReport = grossUnitPrice * (dVal / 100);
           } else {
             discountForReport = dVal;
           }
         }
       }
 
-      // Tính tổng tiền giảm giá của dòng này
-      double itemTotalDiscountToReverse = (discountForReport * item.quantity).roundToDouble();
-
-      // [FIX LỖI]: Cộng dồn vào biến tổng để Report có dữ liệu trừ
-      totalReturnItemDiscount += itemTotalDiscountToReverse;
-      // ----------------------------------------
-
-      // 4. Tính giá NET (Để hiển thị UI và tính tiền hoàn)
-      double unitPriceNet = originalSellPrice - discountForReport;
-
-      // Tính Subtotal NET
+      // e. Giá Net & Subtotal
+      double unitPriceNet = grossUnitPrice - discountForReport;
       final double itemNetSubtotal = (unitPriceNet * item.quantity).roundToDouble();
 
-      // Cộng dồn các biến tổng (Dùng giá Net)
       totalReturnNetSubtotal += itemNetSubtotal;
       totalReturnSubtotal += itemNetSubtotal;
 
-      // ... (Phần tính giá vốn, lợi nhuận, thuế giữ nguyên như cũ) ...
+      // f. Giá Vốn
       double itemBaseCost = item.product.costPrice;
       if (originalItemData != null && originalItemData['product'] != null) {
         final p = originalItemData['product'] as Map<String, dynamic>;
@@ -172,6 +192,7 @@ class ReturnService {
       }
       final double itemTotalCost = ((itemBaseCost * item.quantity) + toppingsCostTotal).roundToDouble();
 
+      // g. Thuế
       double taxRate = 0.0;
       if (originalItemData != null && originalItemData['taxRate'] != null) {
         taxRate = (originalItemData['taxRate'] as num).toDouble();
@@ -192,123 +213,145 @@ class ReturnService {
       itemProfit = itemProfit.roundToDouble();
       totalReturnProfit += itemProfit;
 
+      // Lưu DB
       final Map<String, dynamic> itemMap = item.toMap();
+      itemMap['price'] = unitPriceNet; // Lưu giá Net để in bill đúng
       itemMap['subtotal'] = itemNetSubtotal;
       itemMap['taxAmount'] = itemTax;
+      if (originalItemData != null) {
+        itemMap['taxKey'] = originalItemData['taxKey'];
+        itemMap['taxRate'] = originalItemData['taxRate'];
+      }
       returnItemsData.add(itemMap);
 
-      // 5. Cập nhật chi tiết sản phẩm (Sửa sai)
       if (isCorrectionMode) {
         String pId = item.product.id;
-        double pQty = item.quantity;
-
-        mainProductsMap[pId] = {
-          'quantitySold': FieldValue.increment(-pQty),
-          'totalRevenue': FieldValue.increment(-itemNetSubtotal),
-          // [QUAN TRỌNG] Trừ discount chi tiết sản phẩm
-          'totalDiscount': FieldValue.increment(-itemTotalDiscountToReverse),
-        };
-
-        if (currentShiftId != null) {
-          shiftProductsMap[pId] = {
-            'quantitySold': FieldValue.increment(-pQty),
-            'totalRevenue': FieldValue.increment(-itemNetSubtotal),
-            'totalDiscount': FieldValue.increment(-itemTotalDiscountToReverse),
-          };
-        }
+        productQtyChange[pId] = (productQtyChange[pId] ?? 0) - item.quantity;
+        productRevChange[pId] = (productRevChange[pId] ?? 0) - itemNetSubtotal;
       }
     }
 
-    // --- 2. CHỐT SỐ LIỆU TỔNG ---
-    // --- 2. CHỐT SỐ LIỆU TỔNG ---
-    double returnTotalPayable = 0;
-    double returnSurcharge = 0;
-    List<Map<String, dynamic>> returnSurchargesList = [];
-    double returnBillDiscount = 0;
-    double returnVoucherDiscount = 0;
+    // --- B. TÍNH CÁC CHỈ SỐ BILL LEVEL (Surcharge, Discount...) ---
+    double ratio = 0.0;
+    double returnSurcharge = 0.0;
+    double returnBillDiscount = 0.0;
+    double returnVoucherDiscount = 0.0;
     double returnPointsValue = 0;
 
-    // [BỎ ĐOẠN IF (ISFULLRETURN) GÂY LỖI Ở ĐÂY]
-    // Chúng ta luôn tính theo tỷ lệ của số hàng đang trả lần này (kể cả là trả nốt món cuối)
+    // [FIX LỖI returnSurchargesList] Khai báo biến này
+    List<Map<String, dynamic>> returnSurchargesList = [];
 
-    double ratio = 0.0;
     if (originalBill != null && originalBill.subtotal > 0) {
-      // Tỷ lệ = Giá trị Net các món đang trả / Tổng Subtotal Bill gốc
       ratio = totalReturnNetSubtotal / originalBill.subtotal;
 
-      // Nếu vì làm tròn mà ratio > 1 thì chặn lại (dù hiếm khi xảy ra nếu tính đúng)
-      if (ratio > 1) ratio = 1;
-    }
-
-    if (originalBill != null) {
-      // Tính phụ thu hoàn lại theo tỷ lệ
+      // Tính lại Surcharge hoàn
       returnSurchargesList = originalBill.surcharges.map((s) {
         final Map<String, dynamic> newSurcharge = Map<String, dynamic>.from(s);
         if (newSurcharge['isPercent'] != true) {
-          // Tiền mặt -> Nhân tỷ lệ
           double oldAmount = (newSurcharge['amount'] as num?)?.toDouble() ?? 0.0;
           newSurcharge['amount'] = (oldAmount * ratio).roundToDouble();
         }
         return newSurcharge;
       }).toList();
 
-      double totalOriginalSurcharge =
-      originalBill.surcharges.fold(0.0, (prev, s) {
+      double totalOriginalSurcharge = originalBill.surcharges.fold(0.0, (prev, s) {
         double amt = (s['amount'] as num?)?.toDouble() ?? 0.0;
-        return prev +
-            (s['isPercent'] == true
-                ? (originalBill.subtotal * (amt / 100))
-                : amt);
+        return prev + (s['isPercent'] == true ? (originalBill.subtotal * (amt / 100)) : amt);
       });
       returnSurcharge = (totalOriginalSurcharge * ratio).roundToDouble();
 
-      // Tính Giảm giá hoàn lại theo tỷ lệ
       double billDiscVal = (originalBill.discountType == 'VND')
           ? originalBill.discountInput
           : (originalBill.subtotal * originalBill.discountInput / 100);
-
       returnBillDiscount = (billDiscVal * ratio).roundToDouble();
       returnVoucherDiscount = (originalBill.voucherDiscount * ratio).roundToDouble();
       returnPointsValue = (originalBill.customerPointsValue * ratio).roundToDouble();
     }
 
+    // [FIX LỖI returnTotalPayable] Tính toán biến này
     double totalBillLevelReductions = returnBillDiscount + returnVoucherDiscount + returnPointsValue;
-
-    // Công thức tính tổng cuối cùng cho lần trả này
-    returnTotalPayable = (totalReturnNetSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
+    double returnTotalPayable = (totalReturnNetSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
     returnTotalPayable = returnTotalPayable.roundToDouble();
 
-    // --- 3. XỬ LÝ CHÊNH LỆCH ---
-    final double netDifference = returnTotalPayable - exchangeTotalValue;
+
+    // --- C. XỬ LÝ DANH SÁCH ĐỔI (MUA MỚI) ---
+    double exchangeProfit = 0;
+    List<Map<String, dynamic>> exchangeItemsData = [];
+
+    for (var item in exchangeItems) {
+      double cost = item.product.costPrice;
+      double toppingsCost = 0;
+      for (var t in item.toppings.entries) {
+        toppingsCost += (t.key.costPrice * t.value);
+      }
+      double itemTotalCost = (cost * item.quantity) + (toppingsCost * item.quantity);
+      exchangeProfit += (item.subtotal - itemTotalCost);
+
+      exchangeItemsData.add(item.toMap());
+
+      String pId = item.product.id;
+      productQtyChange[pId] = (productQtyChange[pId] ?? 0) + item.quantity;
+      productRevChange[pId] = (productRevChange[pId] ?? 0) + item.subtotal;
+    }
+
+    // --- D. TÍNH DELTA TỔNG HỢP (UPDATE REPORT) ---
+    if (isCorrectionMode) {
+      deltaRevenue -= returnTotalPayable;
+      deltaProfit -= totalReturnProfit;
+      deltaTax -= totalReturnTax;
+      deltaSurcharges -= returnSurcharge;
+      deltaBillDiscount -= returnBillDiscount;
+      deltaVoucherDiscount -= returnVoucherDiscount;
+      deltaPointsValue -= returnPointsValue;
+
+      if (isFullReturn && exchangeTotalValue == 0) {
+        deltaBillCount -= 1;
+      }
+    } else {
+      deltaReturnRevenue += returnTotalPayable;
+    }
+
+    if (exchangeTotalValue > 0) {
+      deltaRevenue += exchangeTotalValue;
+      deltaProfit += exchangeProfit;
+      deltaTax += exchangeTaxValue;
+    }
+
+    // --- E. TÍNH TOÁN THANH TOÁN ---
+    final double netDifference = exchangeTotalValue - returnTotalPayable;
     double deductDebt = 0.0;
-    double refundCash = 0.0;
+    double cashTransaction = 0.0;
+    double currentDebt = originalBill?.debtAmount ?? 0.0;
 
     if (netDifference > 0) {
-      double currentDebt = originalBill?.debtAmount ?? 0.0;
+      cashTransaction = netDifference;
+    } else if (netDifference < 0) {
+      double refundAmt = netDifference.abs();
       if (currentDebt > 0) {
-        if (netDifference <= currentDebt) {
-          deductDebt = netDifference;
-          refundCash = 0;
+        if (refundAmt <= currentDebt) {
+          deductDebt = refundAmt;
+          cashTransaction = 0;
         } else {
           deductDebt = currentDebt;
-          refundCash = netDifference - currentDebt;
+          cashTransaction = -(refundAmt - currentDebt);
         }
       } else {
-        refundCash = netDifference;
+        cashTransaction = -refundAmt;
       }
     }
 
-    // --- 4. GHI DATABASE: BILL RT (SỐ DƯƠNG) ---
+    // --- F. TẠO BILL MỚI ---
     final returnCode = await generateCode(storeId, 'TH');
-    final returnBillRef =
-    _db.collection('bills').doc('${storeId}_$returnCode');
+    final returnBillRef = _db.collection('bills').doc('${storeId}_$returnCode');
+
+    String dynamicTableName = exchangeItems.isNotEmpty ? 'ĐỔI HÀNG' : 'TRẢ HÀNG';
 
     final returnBillData = {
       'storeId': storeId,
       'billCode': returnCode,
       'originalBillId': originalBill?.id,
       'originalBillCode': originalBill?.billCode,
-      'tableName': 'TRẢ HÀNG',
+      'tableName': dynamicTableName,
       'status': 'return',
       'customerName': customer?.name ?? originalBill?.customerName,
       'customerId': customer?.id ?? originalBill?.customerId,
@@ -321,437 +364,176 @@ class ReturnService {
       'totalProfit': totalReturnProfit,
       'taxAmount': totalReturnTax,
       'totalSurcharges': returnSurcharge,
-      'surcharges': returnSurchargesList,
+      'surcharges': returnSurchargesList, // [FIX] Đã có biến này
       'discount': returnBillDiscount,
-      'discountInput': returnBillDiscount,
-      'discountType': 'VND',
       'voucherDiscount': returnVoucherDiscount,
       'debtAmount': deductDebt,
-      'payments': refundCash > 0
-          ? {paymentMethodName ?? 'Tiền mặt': refundCash}
-          : {},
-      'note': note ?? 'Trả hàng',
+      'exchangeItems': exchangeItemsData,
+      'exchangeSubtotal': exchangeTotalValue,
+      'exchangeTotalPayable': exchangeTotalValue,
+      'exchangeSummary': {
+        'totalPayable': exchangeTotalValue,
+        'taxAmount': exchangeTaxValue,
+        'items': exchangeItemsData,
+      },
+      'netDifference': netDifference,
+      'payments': cashTransaction != 0 ? {paymentMethodName ?? 'Tiền mặt': cashTransaction} : {},
+      'note': note ?? 'Đổi trả hàng',
       'reportDateKey': todayStr,
       'shiftId': currentShiftId,
       'isCorrection': isCorrectionMode,
     };
     batch.set(returnBillRef, returnBillData);
 
-    // --- 5. CẬP NHẬT REPORT (SỬA LỖI OVERLAPPING PATHS) ---
+    // --- G & H. CẬP NHẬT REPORT & SHIFT (FIX LỖI UPDATE NESTED) ---
 
-    // A. LẤY THÔNG TIN CA LÀM VIỆC
-    Timestamp shiftStartTime = Timestamp.now();
-    if (currentShiftId != null) {
-      try {
-        final shiftDoc = await _db
-            .collection('employee_shifts')
-            .doc(currentShiftId)
-            .get();
-        if (shiftDoc.exists) {
-          shiftStartTime = shiftDoc.data()?['startTime'] as Timestamp? ??
-              Timestamp.now();
-        }
-      } catch (e) {
-        debugPrint("Lỗi lấy thông tin ca: $e");
-      }
-    }
-
-    // B. CHUẨN BỊ MAP UPDATE (DÙNG NESTED MAP ĐỂ TRÁNH LỖI)
-    // Map này sẽ được dùng cho batch.set(..., SetOptions(merge: true))
-
-    // 1. Dữ liệu tổng ngày
+    // 1. Chuẩn bị data cho các chỉ số cấp 1 (Level 1 Fields)
     final Map<String, dynamic> reportUpdates = {
       'returnCount': FieldValue.increment(1),
       'totalDebt': FieldValue.increment(-deductDebt),
     };
 
-    // 2. Map lồng nhau để lưu PaymentMethods (Ngày)
+    if (deltaRevenue != 0) reportUpdates['totalRevenue'] = FieldValue.increment(deltaRevenue);
+    if (deltaProfit != 0) reportUpdates['totalProfit'] = FieldValue.increment(deltaProfit);
+    if (deltaTax != 0) reportUpdates['totalTax'] = FieldValue.increment(deltaTax);
+    if (deltaSurcharges != 0) reportUpdates['totalSurcharges'] = FieldValue.increment(deltaSurcharges);
+    if (deltaBillDiscount != 0) reportUpdates['totalBillDiscount'] = FieldValue.increment(deltaBillDiscount);
+    if (deltaVoucherDiscount != 0) reportUpdates['totalVoucherDiscount'] = FieldValue.increment(deltaVoucherDiscount);
+    if (deltaPointsValue != 0) reportUpdates['totalPointsValue'] = FieldValue.increment(deltaPointsValue);
+    if (deltaReturnRevenue != 0) reportUpdates['totalReturnRevenue'] = FieldValue.increment(deltaReturnRevenue);
+    if (deltaBillCount != 0) reportUpdates['billCount'] = FieldValue.increment(deltaBillCount);
+
+    // Cập nhật Payment Methods (Cấp 1)
     final Map<String, dynamic> mainPaymentMethodsMap = {};
-    // 3. Map lồng nhau để lưu Products (Ngày)
-    // 4. Dữ liệu Ca (Shift)
-    final Map<String, dynamic> shiftData = {};
-    // 5. Map lồng nhau trong Ca
-    final Map<String, dynamic> shiftPaymentMethodsMap = {};
-
-
-    // Khởi tạo thông tin cơ bản cho Ca
-    if (currentShiftId != null && currentShiftId.isNotEmpty) {
-      shiftData['shiftId'] = currentShiftId;
-      shiftData['userId'] = currentUser.uid;
-      shiftData['userName'] = currentUser.name;
-      shiftData['startTime'] = shiftStartTime;
-      shiftData['status'] = 'open';
-      shiftData['returnCount'] = FieldValue.increment(1);
-      shiftData['totalDebt'] = FieldValue.increment(-deductDebt);
-    }
-
-    if (isCorrectionMode) {
-      // SCENARIO A: CÙNG CA/NGÀY -> Trừ trực tiếp doanh thu (Sửa sai)
-      reportUpdates['totalRevenue'] = FieldValue.increment(-returnTotalPayable);
-      reportUpdates['totalProfit'] = FieldValue.increment(-totalReturnProfit);
-      reportUpdates['totalTax'] = FieldValue.increment(-totalReturnTax);
-      reportUpdates['totalSurcharges'] = FieldValue.increment(-returnSurcharge);
-      reportUpdates['totalDiscount'] =
-          FieldValue.increment(-totalReturnItemDiscount);
-      reportUpdates['totalBillDiscount'] =
-          FieldValue.increment(-returnBillDiscount);
-      reportUpdates['totalVoucherDiscount'] =
-          FieldValue.increment(-returnVoucherDiscount);
-      reportUpdates['totalPointsValue'] =
-          FieldValue.increment(-returnPointsValue);
-
-      if (currentShiftId != null) {
-        shiftData['totalRevenue'] = FieldValue.increment(-returnTotalPayable);
-        shiftData['totalProfit'] = FieldValue.increment(-totalReturnProfit);
-        shiftData['totalTax'] = FieldValue.increment(-totalReturnTax);
-        shiftData['totalSurcharges'] = FieldValue.increment(-returnSurcharge);
-        shiftData['totalDiscount'] =
-            FieldValue.increment(-totalReturnItemDiscount);
-        shiftData['totalBillDiscount'] =
-            FieldValue.increment(-returnBillDiscount);
-        shiftData['totalVoucherDiscount'] =
-            FieldValue.increment(-returnVoucherDiscount);
-        shiftData['totalPointsValue'] =
-            FieldValue.increment(-returnPointsValue);
-      }
-
-      if (isFullReturn) {
-        reportUpdates['billCount'] = FieldValue.increment(-1);
-        if (currentShiftId != null) {
-          shiftData['billCount'] = FieldValue.increment(-1);
-        }
-      }
-
-      for (var item in returnItems) {
-        String key = item.lineId;
-        currentReturnQtyMap[key] = (currentReturnQtyMap[key] ?? 0) + item.quantity;
-
-        // 1. Lấy thông tin từ Bill gốc
-        Map<String, dynamic>? originalItemData;
-        if (originalBill != null) {
-          try {
-            originalItemData = originalBill.items.firstWhere((bi) {
-              if (bi['lineId'] != null) return bi['lineId'] == item.lineId;
-              return (bi['product'] as Map?)?['id'] == item.product.id;
-            }) as Map<String, dynamic>?;
-          } catch (_) {}
-        }
-
-        // 2. Lấy Giá Gốc (Gross Price) từ Bill gốc
-        double originalSellPrice = item.product.sellPrice;
-        if (originalItemData != null && originalItemData['product'] != null) {
-          originalSellPrice = (originalItemData['product']['sellPrice'] as num?)?.toDouble() ?? item.product.sellPrice;
-        }
-
-        // 3. Tính lại GIẢM GIÁ (để trừ báo cáo)
-        double discountForReport = 0;
-        if (originalItemData != null) {
-          double dVal = (originalItemData['discountValue'] as num?)?.toDouble() ?? 0;
-          String dUnit = originalItemData['discountUnit'] ?? '%';
-
-          // Lấy giá gốc từ bill cũ để tính %
-          double originalGrossForCalc = 0;
-          if (originalItemData['product'] != null) {
-            originalGrossForCalc = (originalItemData['product']['sellPrice'] as num?)?.toDouble() ?? item.product.sellPrice;
-          } else {
-            originalGrossForCalc = item.product.sellPrice;
-          }
-
-          if (dVal > 0) {
-            if (dUnit == '%') {
-              discountForReport = originalGrossForCalc * (dVal / 100);
-            } else {
-              discountForReport = dVal;
-            }
-          }
-        }
-
-        // --- [SỬA ĐOẠN NÀY] ---
-
-        // 1. Tính toán cho hiển thị (Giá Gốc)
-        // Lưu ý: itemSpecificDiscountAmt đã set = 0 ở các bước trước để hiển thị giá gốc
-        final double itemGrossSubtotal = (originalSellPrice * item.quantity).roundToDouble();
-        totalReturnSubtotal += itemGrossSubtotal; // Cộng dồn giá GỐC cho Bill
-
-        // 2. Tính toán cho Logic Tỷ lệ (Giá Net)
-        double unitPriceNet = originalSellPrice - discountForReport;
-        final double itemNetSubtotal = (unitPriceNet * item.quantity).roundToDouble();
-        totalReturnNetSubtotal += itemNetSubtotal; // [QUAN TRỌNG] Cộng dồn giá NET cho Ratio
-
-        // 3. Discount Report
-        double itemTotalDiscountToReverse = (discountForReport * item.quantity).roundToDouble();
-        totalReturnItemDiscount += itemTotalDiscountToReverse;
-
-        // 4. Tính lại DOANH THU THỰC TẾ (Net Price) để trừ báo cáo
-        // [FIX QUAN TRỌNG]: Lấy Giá Gốc - Giảm Giá = Giá Thực
-        double unitPricePostItemDiscount = originalSellPrice - discountForReport;
-
-        // Tổng doanh thu cần hoàn lại (để trừ totalRevenue)
-        final double itemSubtotal = (unitPricePostItemDiscount * item.quantity).roundToDouble();
-        totalReturnSubtotal += itemSubtotal;
-
-        double itemBaseCost = item.product.costPrice;
-        if (originalItemData != null && originalItemData['product'] != null) {
-          final p = originalItemData['product'] as Map<String, dynamic>;
-          if (p['costPrice'] != null) itemBaseCost = (p['costPrice'] as num).toDouble();
-        }
-        double toppingsCostTotal = 0;
-        final List<dynamic> toppingsList = (originalItemData != null && originalItemData['toppings'] is List)
-            ? originalItemData['toppings'] : item.toppings.entries.map((e) => {'costPrice': e.key.costPrice, 'quantity': e.value}).toList();
-        for (var t in toppingsList) {
-          if (t is Map) {
-            double tCost = (t['costPrice'] as num?)?.toDouble() ?? 0.0;
-            if (tCost == 0 && t['product'] is Map && t['product']['costPrice'] != null) {
-              tCost = (t['product']['costPrice'] as num).toDouble();
-            }
-            double tQty = (t['quantity'] as num?)?.toDouble() ?? 0.0;
-            toppingsCostTotal += (tCost * tQty * item.quantity);
-          }
-        }
-        final double itemTotalCost = ((itemBaseCost * item.quantity) + toppingsCostTotal).roundToDouble();
-
-        double taxRate = 0.0;
-        if (originalItemData != null && originalItemData['taxRate'] != null) {
-          taxRate = (originalItemData['taxRate'] as num).toDouble();
-        }
-        double itemTax = 0.0;
-        double allocatedDiscount = 0.0;
-        if (originalBill != null && originalBill.subtotal > 0) {
-          double itemRatio = itemSubtotal / originalBill.subtotal;
-          allocatedDiscount = (originalBillTotalDiscount * itemRatio).roundToDouble();
-          double taxableAmount = itemSubtotal - allocatedDiscount;
-          itemTax = (taxableAmount * taxRate).roundToDouble();
-        } else {
-          itemTax = (itemSubtotal * taxRate).roundToDouble();
-        }
-        totalReturnTax += itemTax;
-
-        double itemProfit = itemSubtotal - (itemTotalCost + allocatedDiscount);
-        itemProfit = itemProfit.roundToDouble();
-        totalReturnProfit += itemProfit;
-
-        final Map<String, dynamic> itemMap = item.toMap();
-        itemMap['subtotal'] = itemSubtotal;
-        itemMap['taxAmount'] = itemTax;
-        returnItemsData.add(itemMap);
-
-        // 5. Cập nhật chi tiết sản phẩm (nếu là sửa sai)
-        if (isCorrectionMode) {
-          String pId = item.product.id;
-          double pQty = item.quantity;
-
-          mainProductsMap[pId] = {
-            'quantitySold': FieldValue.increment(-pQty),
-            'totalRevenue': FieldValue.increment(-itemSubtotal), // Trừ đúng số tiền Net (31.500)
-            'totalDiscount': FieldValue.increment(-itemTotalDiscountToReverse), // Trừ đúng số tiền Giảm (3.500)
-          };
-
-          if (currentShiftId != null) {
-            shiftProductsMap[pId] = {
-              'quantitySold': FieldValue.increment(-pQty),
-              'totalRevenue': FieldValue.increment(-itemSubtotal),
-              'totalDiscount': FieldValue.increment(-itemTotalDiscountToReverse),
-            };
-          }
-        }
-      }
-    } else {
-      // SCENARIO B: KHÁC CA/NGÀY (Quy trình trả hàng chuẩn)
-      reportUpdates['totalReturnRevenue'] =
-          FieldValue.increment(returnTotalPayable);
-      reportUpdates['totalReturnProfit'] =
-          FieldValue.increment(totalReturnProfit);
-      reportUpdates['totalReturnTax'] =
-          FieldValue.increment(totalReturnTax);
-
-      if (currentShiftId != null) {
-        shiftData['totalReturnRevenue'] =
-            FieldValue.increment(returnTotalPayable);
-        shiftData['totalReturnProfit'] =
-            FieldValue.increment(totalReturnProfit);
-        shiftData['totalReturnTax'] =
-            FieldValue.increment(totalReturnTax);
-      }
-    }
-
-    // --- LOGIC TRỪ TIỀN MẶT ---
-    if (refundCash > 0) {
-      // Logic: Nếu không phải Sửa sai (hoặc kể cả sửa sai mà muốn trừ tiền),
-      // ta cần giảm totalCash để khớp két.
+    if (cashTransaction != 0) {
       final String method = paymentMethodName ?? 'Tiền mặt';
+      reportUpdates['totalCash'] = FieldValue.increment(cashTransaction);
+      mainPaymentMethodsMap[method] = FieldValue.increment(cashTransaction);
+    }
+    if (mainPaymentMethodsMap.isNotEmpty) reportUpdates['paymentMethods'] = mainPaymentMethodsMap;
 
-      reportUpdates['totalCash'] = FieldValue.increment(-refundCash);
-      mainPaymentMethodsMap[method] = FieldValue.increment(-refundCash);
+    // Cập nhật Shift Data (Cấp 1 của Shift)
+    if (currentShiftId != null) {
+      final Map<String, dynamic> shiftUpdates = {
+        // [FIX] Đưa shiftStartTime vào sử dụng để hết warning và đảm bảo data
+        'startTime': shiftStartTime,
+        'userId': currentUser.uid,
+        'status': 'open',
+        'returnCount': FieldValue.increment(1),
+        'totalDebt': FieldValue.increment(-deductDebt),
+      };
 
-      if (currentShiftId != null) {
-        shiftData['totalCash'] = FieldValue.increment(-refundCash);
-        shiftPaymentMethodsMap[method] = FieldValue.increment(-refundCash);
+      if (deltaRevenue != 0) shiftUpdates['totalRevenue'] = FieldValue.increment(deltaRevenue);
+      if (deltaProfit != 0) shiftUpdates['totalProfit'] = FieldValue.increment(deltaProfit);
+      if (deltaTax != 0) shiftUpdates['totalTax'] = FieldValue.increment(deltaTax);
+      if (deltaSurcharges != 0) shiftUpdates['totalSurcharges'] = FieldValue.increment(deltaSurcharges);
+      if (deltaBillDiscount != 0) shiftUpdates['totalBillDiscount'] = FieldValue.increment(deltaBillDiscount);
+      if (deltaVoucherDiscount != 0) shiftUpdates['totalVoucherDiscount'] = FieldValue.increment(deltaVoucherDiscount);
+      if (deltaPointsValue != 0) shiftUpdates['totalPointsValue'] = FieldValue.increment(deltaPointsValue);
+      if (deltaReturnRevenue != 0) shiftUpdates['totalReturnRevenue'] = FieldValue.increment(deltaReturnRevenue);
+      if (deltaBillCount != 0) shiftUpdates['billCount'] = FieldValue.increment(deltaBillCount);
+
+      if (cashTransaction != 0) {
+        shiftUpdates['totalCash'] = FieldValue.increment(cashTransaction);
+        final Map<String, dynamic> shiftPayMap = {};
+        shiftPayMap[paymentMethodName ?? 'Tiền mặt'] = FieldValue.increment(cashTransaction);
+        shiftUpdates['paymentMethods'] = shiftPayMap;
       }
+
+      // Gán vào reportUpdates dưới key 'shifts' (Merge object shift)
+      reportUpdates['shifts'] = {currentShiftId: shiftUpdates};
     }
 
-    // C. GHÉP CÁC MAP LỒNG NHAU VÀO REPORT UPDATES
-    if (mainPaymentMethodsMap.isNotEmpty) {
-      reportUpdates['paymentMethods'] = mainPaymentMethodsMap;
-    }
-    if (mainProductsMap.isNotEmpty) {
-      reportUpdates['products'] = mainProductsMap;
-    }
-
-    if (currentShiftId != null && currentShiftId.isNotEmpty) {
-      // Ghép con vào Shift
-      if (shiftPaymentMethodsMap.isNotEmpty) {
-        shiftData['paymentMethods'] = shiftPaymentMethodsMap;
-      }
-      if (shiftProductsMap.isNotEmpty) {
-        shiftData['products'] = shiftProductsMap;
-      }
-
-      // Ghép Shift vào Report (Dùng Map lồng nhau, KHÔNG DÙNG DOT KEY)
-      reportUpdates['shifts'] = {currentShiftId: shiftData};
-    }
-
-    // Thực hiện lệnh set với merge: true
+    // THỰC HIỆN BƯỚC 1: SET CÁC CHỈ SỐ CƠ BẢN VÀO DOC
     batch.set(dailyReportRef, reportUpdates, SetOptions(merge: true));
 
-    // --- 6. HOÀN KHO ---
-    await _updateStock(batch, returnItems, isReturn: true);
 
-    // --- 7. CẬP NHẬT BILL GỐC & KHÁCH HÀNG ---
-    // --- 7. CẬP NHẬT BILL GỐC & KHÁCH HÀNG (LOGIC ĐƠN GIẢN HÓA) ---
+    // 2. [FIX QUAN TRỌNG] CẬP NHẬT PRODUCTS (HÀNG BÁN CHẠY) BẰNG BATCH.UPDATE
+    if (productQtyChange.isNotEmpty) {
+      productQtyChange.forEach((pid, qty) {
+        if (qty != 0) {
+          final double rev = productRevChange[pid] ?? 0;
+
+          // --- [MỚI] TÌM THÔNG TIN SP ĐỂ GHI VÀO REPORT (TRÁNH LỖI MẤT TÊN) ---
+          OrderItem? refItem;
+          // Ưu tiên tìm trong list đổi (exchange) trước
+          refItem = exchangeItems.firstWhereOrNull((e) => e.product.id == pid);
+          // Nếu không có thì tìm trong list trả (return)
+          refItem ??= returnItems.firstWhereOrNull((e) => e.product.id == pid);
+
+          // Chuẩn bị data update cho Main Report
+          final Map<String, dynamic> mainProductUpdate = {
+            'products.$pid.quantitySold': FieldValue.increment(qty),
+            'products.$pid.totalRevenue': FieldValue.increment(rev),
+          };
+
+          // Nếu tìm thấy item, update thêm Name/Group để báo cáo hiển thị được
+          if (refItem != null) {
+            mainProductUpdate['products.$pid.productName'] = refItem.product.productName;
+            mainProductUpdate['products.$pid.productGroup'] = refItem.product.productGroup;
+            mainProductUpdate['products.$pid.productId'] = pid; // Ghi đè lại ID cho chắc chắn
+          }
+
+          // Update Main Report Products
+          batch.update(dailyReportRef, mainProductUpdate);
+
+          // Update Shift Report Products (Nếu có ca)
+          if (currentShiftId != null) {
+            final Map<String, dynamic> shiftProductUpdate = {
+              'shifts.$currentShiftId.products.$pid.quantitySold': FieldValue.increment(qty),
+              'shifts.$currentShiftId.products.$pid.totalRevenue': FieldValue.increment(rev),
+            };
+
+            // Tương tự: Update Name/Group cho báo cáo Ca
+            if (refItem != null) {
+              shiftProductUpdate['shifts.$currentShiftId.products.$pid.productName'] = refItem.product.productName;
+              shiftProductUpdate['shifts.$currentShiftId.products.$pid.productGroup'] = refItem.product.productGroup;
+              shiftProductUpdate['shifts.$currentShiftId.products.$pid.productId'] = pid;
+            }
+
+            batch.update(dailyReportRef, shiftProductUpdate);
+          }
+        }
+      });
+    }
+
+    // --- I. CẬP NHẬT KHO & BILL GỐC & KHÁCH HÀNG ---
+    await _updateStock(batch, returnItems, isReturn: true);
+    if (exchangeItems.isNotEmpty) {
+      await _updateStock(batch, exchangeItems, isReturn: false);
+    }
+
     if (originalBill != null) {
       final originalBillRef = _db.collection('bills').doc(originalBill.id);
       List<Map<String, dynamic>> updatedOriginalItems = [];
-
       for (var itemData in originalBill.items) {
-        // 1. Clone data để tránh lỗi tham chiếu bộ nhớ
         Map<String, dynamic> processingItem = Map<String, dynamic>.from(itemData is Map ? itemData : {});
-
         if (processingItem.isNotEmpty) {
           String billLineId = processingItem['lineId'] ?? '';
           String pId = (processingItem['product'] as Map?)?['id'] ?? '';
-
-          // 2. Tìm xem item này trong bill có nằm trong danh sách đang trả (returnItems) không?
-          // So khớp ưu tiên theo lineId, nếu không có thì theo productId
           final matchingReturnItem = returnItems.firstWhereOrNull((rItem) {
             if (billLineId.isNotEmpty && rItem.lineId == billLineId) return true;
             return rItem.product.id == pId;
           });
-
-          // 3. Nếu tìm thấy -> Cộng thẳng số lượng
           if (matchingReturnItem != null) {
             double currentReturnedInDb = (processingItem['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
             double returningNow = matchingReturnItem.quantity;
-
-            // Update = Đã trả trong DB + Đang trả lần này
             processingItem['returnedQuantity'] = currentReturnedInDb + returningNow;
           }
         }
         updatedOriginalItems.add(processingItem);
       }
-
       final Map<String, dynamic> billUpdates = {'items': updatedOriginalItems};
-
-      // Trừ nợ nếu có
-      if (deductDebt > 0) {
-        billUpdates['debtAmount'] = FieldValue.increment(-deductDebt);
-      }
-
+      if (deductDebt > 0) billUpdates['debtAmount'] = FieldValue.increment(-deductDebt);
       billUpdates['hasReturns'] = true;
       if (isFullReturn) billUpdates['status'] = 'return';
-
       batch.update(originalBillRef, billUpdates);
     }
 
     if (customer != null) {
-      int pointsToReverse = 0;
-      if (originalBill != null &&
-          originalBill.pointsEarned > 0 &&
-          originalBill.subtotal > 0) {
-        double totalOriginal = originalBill.subtotal;
-        double cumulativeReturnedValue = totalReturnSubtotal;
-        pointsToReverse = ((cumulativeReturnedValue / totalOriginal) *
-            originalBill.pointsEarned)
-            .floor();
-      }
-
       batch.update(_db.collection('customers').doc(customer.id), {
-        'totalSpent': FieldValue.increment(-returnTotalPayable),
+        'totalSpent': FieldValue.increment(exchangeTotalValue - returnTotalPayable),
         'debt': FieldValue.increment(-deductDebt),
-        'points': FieldValue.increment(-pointsToReverse),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }
-
-    await batch.commit();
-
-    // --- 9. TẠO BILL MUA ĐỔI ---
-    if (exchangeItems.isNotEmpty) {
-      await _createExchangeBillOnly(
-          storeId: storeId,
-          currentUser: currentUser,
-          exchangeItems: exchangeItems,
-          exchangeTotalValue: exchangeTotalValue,
-          refCode: returnCode,
-          customer: customer,
-          todayStr: todayStr,
-          paymentMethodName: paymentMethodName);
-    }
-  }
-
-  Future<void> _createExchangeBillOnly({
-    required String storeId,
-    required UserModel currentUser,
-    required List<OrderItem> exchangeItems,
-    required double exchangeTotalValue,
-    required String refCode,
-    required CustomerModel? customer,
-    required String todayStr,
-    String? paymentMethodName,
-  }) async {
-    final batch = _db.batch();
-    final salesCode = await generateCode(storeId, 'EX');
-    final salesBillRef = _db.collection('bills').doc('${storeId}_$salesCode');
-
-    final salesBillData = {
-      'storeId': storeId,
-      'billCode': salesCode,
-      'relatedReturnBillId': refCode,
-      'tableName': 'ĐỔI HÀNG',
-      'status': 'completed',
-      'customerName': customer?.name ?? 'Khách lẻ',
-      'customerPhone': customer?.phone,
-      'customerId': customer?.id,
-      'createdByName': currentUser.name,
-      'startTime': DateTime.now(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'items': exchangeItems.map((e) => e.toMap()).toList(),
-      'subtotal': exchangeTotalValue,
-      'totalPayable': exchangeTotalValue,
-      'totalProfit': 0,
-      'debtAmount': 0,
-      'payments': {paymentMethodName ?? 'Tiền mặt': exchangeTotalValue},
-      'note': 'Đổi từ đơn $refCode',
-      'reportDateKey': todayStr,
-    };
-    batch.set(salesBillRef, salesBillData);
-
-    await _updateStock(batch, exchangeItems, isReturn: false);
-
-    final dailyReportRef = _db.collection('daily_reports').doc('${storeId}_$todayStr');
-    final Map<String, dynamic> salesReportUpdates = {
-      'billCount': FieldValue.increment(1),
-      'totalRevenue': FieldValue.increment(exchangeTotalValue),
-      'totalCash': FieldValue.increment(exchangeTotalValue),
-    };
-    for (var item in exchangeItems) {
-      salesReportUpdates['products.${item.product.id}.quantitySold'] = FieldValue.increment(item.quantity);
-      salesReportUpdates['products.${item.product.id}.totalRevenue'] = FieldValue.increment(item.subtotal);
-    }
-    batch.update(dailyReportRef, salesReportUpdates);
-
-    if (customer != null) {
-      batch.update(_db.collection('customers').doc(customer.id), {
-        'totalSpent': FieldValue.increment(exchangeTotalValue),
         'updatedAt': FieldValue.serverTimestamp(),
       });
     }
@@ -760,27 +542,24 @@ class ReturnService {
   }
 
   bool _checkIfFullReturn(BillModel bill, List<OrderItem> returnItems) {
+    // ... (Giữ nguyên logic cũ) ...
     final billItems = bill.items.whereType<Map<String, dynamic>>().toList();
     if (returnItems.length != billItems.length) return false;
     for (var billItem in billItems) {
       final String? pId = (billItem['product'] as Map?)?['id'];
       if (pId == null) continue;
-
       final double qty = (billItem['quantity'] as num?)?.toDouble() ?? 0.0;
       final double returned = (billItem['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
-
       final double returningNow = returnItems
           .where((r) => r.product.id == pId)
           .fold(0.0, (tong, r) => tong + r.quantity);
-
-      if ((returned + returningNow) < (qty - 0.001)) {
-        return false;
-      }
+      if ((returned + returningNow) < (qty - 0.001)) return false;
     }
     return true;
   }
 
   Future<void> _updateStock(WriteBatch batch, List<OrderItem> items, {required bool isReturn}) async {
+    // ... (Giữ nguyên logic cũ) ...
     final Map<String, double> stockChanges = {};
     for (final item in items) {
       final product = item.product;
@@ -800,7 +579,7 @@ class ReturnService {
     }
     stockChanges.forEach((productId, qty) {
       final productRef = _db.collection('products').doc(productId);
-      final double finalQty = isReturn ? qty : -qty;
+      final double finalQty = isReturn ? qty : -qty; // Trả thì cộng (+), Mua đổi thì trừ (-)
       batch.update(productRef, {'stock': FieldValue.increment(finalQty)});
     });
   }
@@ -1010,34 +789,346 @@ class ReturnOrderScreen extends StatefulWidget {
   State<ReturnOrderScreen> createState() => _ReturnOrderScreenState();
 }
 
-class _ReturnOrderScreenState extends State<ReturnOrderScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
   final ReturnService _returnService = ReturnService();
+  final TextEditingController _searchController = TextEditingController();
+
+  List<BillModel> _foundBills = [];
+  bool _isLoading = false;
+
+  DateTime _startDate = DateTime.now().subtract(const Duration(days: 0));
+  DateTime _endDate = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // Set thời gian về đầu ngày và cuối ngày
+    final now = DateTime.now();
+    _startDate = DateTime(now.year, now.month, now.day, 0, 0, 0);
+    _endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
+    _searchBills(); // Tự động load đơn hôm nay
+  }
+
+  Future<void> _pickDateRange() async {
+    List<DateTime>? result = await showOmniDateTimeRangePicker(
+      context: context,
+      startInitialDate: _startDate,
+      startFirstDate: DateTime(2020),
+      startLastDate: DateTime.now().add(const Duration(days: 1)),
+      endInitialDate: _endDate,
+      endFirstDate: DateTime(2020),
+      endLastDate: DateTime.now().add(const Duration(days: 1)),
+      is24HourMode: true,
+      isShowSeconds: false,
+      minutesInterval: 1,
+      borderRadius: const BorderRadius.all(Radius.circular(16)),
+      constraints: const BoxConstraints(maxWidth: 350, maxHeight: 650),
+      transitionBuilder: (context, anim1, anim2, child) {
+        return FadeTransition(opacity: anim1.drive(Tween(begin: 0, end: 1)), child: child);
+      },
+      transitionDuration: const Duration(milliseconds: 200),
+      barrierDismissible: true,
+    );
+
+    if (result != null && result.length == 2) {
+      setState(() {
+        _startDate = result[0];
+        _endDate = result[1];
+      });
+      _searchBills();
+    }
+  }
+
+  Future<void> _searchBills() async {
+    setState(() => _isLoading = true);
+    try {
+      Query query = FirebaseFirestore.instance
+          .collection('bills')
+          .where('storeId', isEqualTo: widget.currentUser.storeId)
+          .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_startDate))
+          .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(_endDate));
+
+      final snapshot = await query.get();
+      List<BillModel> allBills = snapshot.docs.map((doc) => BillModel.fromFirestore(doc)).toList();
+
+      final keyword = _searchController.text.toLowerCase().trim();
+
+      // Sắp xếp mới nhất lên đầu
+      allBills.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      if (keyword.isNotEmpty) {
+        // [CASE 1] Có nhập từ khóa: Tìm tất cả (bao gồm cả TH nếu khớp từ khóa)
+        _foundBills = allBills.where((bill) {
+          return bill.billCode.toLowerCase().contains(keyword) ||
+              (bill.customerName ?? '').toLowerCase().contains(keyword) ||
+              (bill.customerPhone ?? '').contains(keyword);
+        }).toList();
+      } else {
+        // [CASE 2] Mới mở lên (keyword rỗng): ẨN các đơn bắt đầu bằng TH
+        _foundBills = allBills.where((bill) {
+          return !bill.billCode.toUpperCase().startsWith('TH');
+        }).toList();
+      }
+
+    } catch (e) {
+      ToastService().show(message: "Lỗi tìm kiếm: $e", type: ToastType.error);
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _onSelectBill(BillModel cachedBill) async {
+    setState(() => _isLoading = true);
+    BillModel? freshBill;
+
+    try {
+      final docSnapshot = await FirebaseFirestore.instance
+          .collection('bills')
+          .doc(cachedBill.id)
+          .get();
+
+      if (docSnapshot.exists) {
+        freshBill = BillModel.fromFirestore(docSnapshot);
+      } else {
+        ToastService().show(message: "Hóa đơn không tồn tại.", type: ToastType.error);
+        setState(() => _isLoading = false);
+        return;
+      }
+    } catch (e) {
+      ToastService().show(message: "Lỗi tải dữ liệu: $e", type: ToastType.error);
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    setState(() => _isLoading = false);
+
+    if (freshBill.status == 'cancelled') {
+      ToastService().show(message: "Không thể xử lý đơn đã hủy.", type: ToastType.warning);
+      return;
+    }
+    // Cho phép xem đơn đã return nhưng cảnh báo nếu hết hàng
+
+    // Logic lọc hàng còn lại
+    final List<OrderItem> billItems = [];
+    for (var itemData in freshBill.items) {
+      if (itemData is Map<String, dynamic>) {
+        final double originalQty = (itemData['quantity'] as num?)?.toDouble() ?? 0.0;
+        final double returnedQty = (itemData['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+        final double remaining = originalQty - returnedQty;
+
+        if (remaining > 0.001) {
+          billItems.add(OrderItem.fromMap(itemData).copyWith(quantity: remaining));
+        }
+      }
+    }
+
+    if (billItems.isEmpty) {
+      ToastService().show(message: "Hóa đơn này đã trả hết hàng.", type: ToastType.warning);
+      return;
+    }
+
+    CustomerModel? customer;
+    if (freshBill.customerId != null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('customers').doc(freshBill.customerId).get();
+        if (doc.exists) customer = CustomerModel.fromFirestore(doc);
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    final bool? result = await Navigator.of(context).push(MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: Text("Xử lý Đổi/Trả: ${freshBill!.billCode}")),
+          body: ExchangeProcessorWidget(
+            currentUser: widget.currentUser,
+            returnService: _returnService,
+            initialReturnItems: billItems,
+            originalBill: freshBill,
+            customer: customer,
+          ),
+        )
+    ));
+
+    if (result == true) {
+      _searchBills();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Dùng LayoutBuilder để check chiều rộng màn hình
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('Đổi Trả Hàng'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Theo Hóa Đơn Cũ'),
-            Tab(text: 'Đổi Trả Trực Tiếp'),
-          ],
-        ),
+        title: const Text('Tra Cứu & Đổi Trả Hàng'),
+        elevation: 0,
+        centerTitle: false,
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _ReturnByBillTab(currentUser: widget.currentUser, returnService: _returnService),
-          _DirectReturnTab(currentUser: widget.currentUser, returnService: _returnService),
+          // --- HEADER TÌM KIẾM RESPONSIVE ---
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))]
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Nếu chiều rộng < 600px (Mobile) thì dùng Column, ngược lại Row
+                bool isMobile = constraints.maxWidth < 600;
+
+                Widget searchInput = TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Tìm mã đơn (TH...), tên, SĐT...',
+                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+                  ),
+                  onSubmitted: (_) => _searchBills(),
+                );
+
+                Widget datePicker = InkWell(
+                  onTap: _pickDateRange,
+                  child: Container(
+                    height: 48,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center, // Canh giữa nội dung
+                      children: [
+                        const Icon(Icons.calendar_month, color: Colors.blue, size: 22),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          // [FIX] Hiển thị 1 dòng, chữ to hơn
+                          child: Text(
+                            "${DateFormat('dd/MM HH:mm').format(_startDate)}  ➔  ${DateFormat('dd/MM HH:mm').format(_endDate)}",
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.blue),
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: Colors.blue),
+                      ],
+                    ),
+                  ),
+                );
+
+                Widget searchButton = SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _searchBills,
+                    icon: const Icon(Icons.manage_search),
+                    label: const Text("TÌM KIẾM"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                );
+
+                if (isMobile) {
+                  // Giao diện Mobile: Xếp chồng dọc
+                  return Column(
+                    children: [
+                      searchInput,
+                      const SizedBox(height: 10),
+                      datePicker,
+                      const SizedBox(height: 10),
+                      searchButton
+                    ],
+                  );
+                } else {
+                  // Giao diện PC: Xếp hàng ngang
+                  return Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(flex: 6, child: searchInput),
+                          const SizedBox(width: 10),
+                          Expanded(flex: 4, child: datePicker),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      searchButton
+                    ],
+                  );
+                }
+              },
+            ),
+          ),
+
+          // --- DANH SÁCH KẾT QUẢ (Giữ nguyên logic list) ---
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _foundBills.isEmpty
+                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[300]), const SizedBox(height: 16), Text("Không tìm thấy hóa đơn nào", style: TextStyle(color: Colors.grey[600]))]))
+                : ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: _foundBills.length,
+              itemBuilder: (context, index) {
+                final bill = _foundBills[index];
+                final bool hasReturn = bill.items.any((i) => i is Map && (i['returnedQuantity'] ?? 0) > 0);
+                final bool isReturnBill = bill.billCode.startsWith("TH") || bill.status == 'return'; // Check cả mã TH
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: InkWell(
+                    onTap: () => _onSelectBill(bill),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 50, height: 50,
+                            decoration: BoxDecoration(
+                                color: isReturnBill ? Colors.purple.shade50 : (hasReturn ? Colors.orange.shade50 : Colors.green.shade50),
+                                shape: BoxShape.circle
+                            ),
+                            child: Icon(
+                                isReturnBill ? Icons.assignment_return : (hasReturn ? Icons.sync_problem : Icons.receipt_long),
+                                color: isReturnBill ? Colors.purple : (hasReturn ? Colors.orange : Colors.green)
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(bill.billCode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                const SizedBox(height: 4),
+                                Text(bill.customerName ?? 'Khách lẻ', style: TextStyle(color: Colors.grey[800], fontSize: 13)),
+                                const SizedBox(height: 2),
+                                Text(DateFormat('dd/MM HH:mm').format(bill.createdAt), style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          Text(formatNumber(bill.totalPayable), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.primaryColor)),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -1083,7 +1174,6 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
   final Map<String, String> _productTaxMap = {};
   List<ProductModel> _allProductsCache = [];
 
-  // PTTT cố định
   final List<String> _paymentMethods = ['Tiền mặt', 'Chuyển khoản'];
   String _selectedRefundMethod = 'Tiền mặt';
   bool _isLoadingMethods = false;
@@ -1569,6 +1659,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
         exchangeItems: _exchangeList,
         returnTotalValue: _dispTotalRefundAmount,
         exchangeTotalValue: _totalExchangeValue,
+        exchangeTaxValue: _dispExchangeTax,
         originalBill: widget.originalBill,
         customer: widget.customer,
         note: finalNote,
@@ -1631,6 +1722,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // 1. TÍNH TOÁN CÁC CON SỐ HIỂN THỊ TRƯỚC
     final double diff = _totalExchangeValue - _dispTotalRefundAmount;
     final double refundAmt = diff.abs();
     final double currentDebt = widget.originalBill?.debtAmount ?? 0.0;
@@ -1639,7 +1731,6 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
     Color diffColor = Colors.grey;
     bool showPaymentMethod = false;
 
-    // --- CHECK ĐỂ HIỂN THỊ UI ---
     if (diff > 0) {
       diffText = "KHÁCH TRẢ: ${formatNumber(diff)}";
       diffColor = Colors.green;
@@ -1647,19 +1738,16 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
     } else if (diff < 0) {
       if (currentDebt > 0) {
         if (refundAmt <= currentDebt) {
-          // Trừ hoàn toàn vào nợ -> Ẩn PTTT
           diffText = "TRỪ DƯ NỢ: ${formatNumber(refundAmt)}";
           diffColor = Colors.orange;
           showPaymentMethod = false;
         } else {
-          // Trừ nợ + Hoàn tiền mặt -> Hiện PTTT cho phần tiền mặt
           final cashReturn = refundAmt - currentDebt;
           diffText = "HOÀN: ${formatNumber(refundAmt)}\n(Tiền mặt: ${formatNumber(cashReturn)})";
           diffColor = Colors.red;
           showPaymentMethod = true;
         }
       } else {
-        // Không nợ -> Hoàn hết -> Hiện PTTT
         diffText = "HOÀN LẠI: ${formatNumber(refundAmt)}";
         diffColor = Colors.red;
         showPaymentMethod = true;
@@ -1670,237 +1758,309 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
       showPaymentMethod = false;
     }
 
-    return Column(
-      children: [
-        // BODY
-        Expanded(
-          child: Padding(
+    // 2. BẮT ĐẦU DỰNG GIAO DIỆN (RESPONSIVE)
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Nếu chiều rộng < 900px thì coi là Mobile/Tablet dọc -> Xếp dọc
+        final bool isMobile = constraints.maxWidth < 900;
+
+        // --- A. WIDGET DANH SÁCH TRẢ ---
+        final Widget returnListWidget = Container(
+          color: Colors.white,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(8),
+            itemCount: _returnList.length,
+            separatorBuilder: (_,__) => const Divider(height: 1, color: Colors.grey),
+            itemBuilder: (context, index) {
+              final item = _returnList[index];
+              final double discountVal = item.discountValue ?? 0;
+
+              // 1. Xử lý chuỗi Tăng/Giảm giá
+              String discountStr = "";
+              Color discountColor = Colors.grey[700]!;
+
+              if (discountVal != 0) {
+                String val = item.discountUnit == '%' ? "${formatNumber(discountVal.abs())}%" : formatNumber(discountVal.abs());
+                String sign = discountVal > 0 ? "-" : "+";
+                discountStr = " [$sign$val]";
+              }
+
+              // 2. Xử lý chuỗi Topping
+              String toppingStr = "";
+              if (item.toppings.isNotEmpty) {
+                toppingStr = item.toppings.entries.map((e) {
+                  return "${e.key.productName} (${formatNumber(e.value)} x ${formatNumber(e.key.sellPrice)})";
+                }).join(', ');
+              }
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // HÀNG 1: Tên + (ĐVT) + [Giá tăng giảm]
+                    RichText(
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      text: TextSpan(
+                          style: const TextStyle(fontSize: 13, color: Colors.black),
+                          children: [
+                            TextSpan(
+                                text: item.product.productName,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
+                            ),
+                            if (item.selectedUnit.isNotEmpty)
+                              TextSpan(
+                                  text: " (${item.selectedUnit})",
+                                  style: TextStyle(color: Colors.grey[700])
+                              ),
+                            if (discountStr.isNotEmpty)
+                              TextSpan(
+                                  text: discountStr,
+                                  style: TextStyle(color: discountColor)
+                              ),
+                          ]
+                      ),
+                    ),
+
+                    // HÀNG 2: Topping (nếu có)
+                    if (toppingStr.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2, bottom: 2),
+                        child: Text(
+                          "+ $toppingStr",
+                          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+
+                    const SizedBox(height: 6), // Khoảng cách giữa tên/topping và dòng tính tiền
+
+                    // HÀNG 3: Đơn giá   [- SL +]   Thành tiền
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween, // Căn đều 3 thành phần
+                      children: [
+                        // 3.1 Đơn giá
+                        Text(
+                            formatNumber(item.price),
+                            style: const TextStyle(fontSize: 13, color: Colors.grey)
+                        ),
+
+                        // 3.2 Cụm nút tăng giảm (Nằm giữa)
+                        Container(
+                          height: 30, // Chiều cao nhỏ gọn
+                          decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade300),
+                              borderRadius: BorderRadius.circular(12),
+                              color: Colors.grey.shade50
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.remove, size: 14, color: Colors.red),
+                                onPressed: () => _updateReturnItemQty(index, -1),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 40),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              Container(
+                                  constraints: const BoxConstraints(minWidth: 25),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                      formatNumber(item.quantity),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)
+                                  )
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.add, size: 14, color: Colors.green),
+                                onPressed: () => _updateReturnItemQty(index, 1),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 40),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 3.3 Thành tiền
+                        Text(
+                            formatNumber(item.subtotal),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 14)
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+
+        final Widget returnCard = Card(
+          clipBehavior: Clip.antiAlias,
+          elevation: 2,
+          child: Column(
+            children: [
+              _buildCardHeader("HÀNG TRẢ LẠI (Nhập kho)", Colors.red.shade50, Colors.red),
+
+              // [FIX LỖI MẤT CARD TRÊN DESKTOP]
+              // Nếu Mobile: Dùng SizedBox cố định chiều cao.
+              // Nếu Desktop: Dùng Expanded để giãn hết chiều cao còn lại.
+              isMobile
+                  ? SizedBox(height: 300, child: returnListWidget)
+                  : Expanded(child: returnListWidget),
+
+              _buildReturnSummaryPanel(),
+            ],
+          ),
+        );
+
+        // --- B. WIDGET DANH SÁCH ĐỔI ---
+        final Widget exchangeListWidget = Container(
+          color: Colors.white,
+          child: _exchangeList.isEmpty
+              ? const Center(child: Text("Chưa chọn sản phẩm đổi", style: TextStyle(color: Colors.grey)))
+              : ListView.separated(
+            padding: const EdgeInsets.all(8),
+            itemCount: _exchangeList.length,
+            separatorBuilder: (_,__) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final item = _exchangeList[index];
+              return ExchangeItemCard(
+                item: item, index: index, taxDisplay: _getTaxDisplayString(item.product),
+                onUpdate: (newItem) { setState(() => _exchangeList[index] = newItem); _dispExchangeTax = _calculateExchangeTaxValue(); },
+                onRemove: () { setState(() => _exchangeList.removeAt(index)); _dispExchangeTax = _calculateExchangeTaxValue(); },
+                onTap: () => _editExchangeItem(index),
+              );
+            },
+          ),
+        );
+
+        final Widget exchangeCard = Card(
+          clipBehavior: Clip.antiAlias,
+          elevation: 2,
+          child: Column(
+            children: [
+              _buildCardHeader("HÀNG ĐỔI / MUA MỚI", Colors.green.shade50, Colors.green,
+                  action: ElevatedButton.icon(
+                    onPressed: _pickExchangeProducts,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text("Thêm món"),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.green, elevation: 0, visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+                  )
+              ),
+
+              // [FIX LỖI MẤT CARD TRÊN DESKTOP] Tương tự như trên
+              isMobile
+                  ? SizedBox(height: 300, child: exchangeListWidget)
+                  : Expanded(child: exchangeListWidget),
+
+              Container(
+                padding: const EdgeInsets.all(12), color: Colors.green.shade50.withValues(alpha: 0.3),
+                child: Column(children: [
+                  if (_dispExchangeTax > 0) _buildSummaryRow("Thuế (Hàng đổi):", _dispExchangeTax),
+                  _buildSummaryRow("TỔNG MUA MỚI:", _totalExchangeValue, isBold: true, color: Colors.green),
+                ]),
+              )
+            ],
+          ),
+        );
+
+        // --- C. GỘP LAYOUT (CHÍNH) ---
+        Widget bodyContent;
+        if (isMobile) {
+          // MOBILE: Xếp dọc (ReturnCard -> ExchangeCard)
+          bodyContent = SingleChildScrollView(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              children: [
+                returnCard,
+                const SizedBox(height: 12),
+                exchangeCard,
+              ],
+            ),
+          );
+        } else {
+          // DESKTOP: Xếp ngang (ReturnCard [4] - ExchangeCard [6])
+          // Lưu ý: returnCard và exchangeCard đã có Expanded bên trong nên sẽ tự fill chiều cao của Row
+          bodyContent = Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // CỘT TRÁI: HÀNG TRẢ
-                Expanded(
-                  flex: 4,
-                  child: Card(
-                    clipBehavior: Clip.antiAlias,
-                    elevation: 2,
-                    child: Column(
-                      children: [
-                        _buildCardHeader("HÀNG TRẢ LẠI (Nhập kho)", Colors.red.shade50, Colors.red),
-                        Expanded(
-                          child: Container(
-                            color: Colors.white,
-                            child: ListView.separated(
-                              padding: const EdgeInsets.all(8),
-                              itemCount: _returnList.length,
-                              separatorBuilder: (_,__) => const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final item = _returnList[index];
-                                final taxStr = _getTaxDisplayString(item.product);
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 6),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            // [FIX UI 1] Tên + Thuế
-                                            Text.rich(TextSpan(children: [
-                                              TextSpan(text: item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                              if(taxStr.isNotEmpty) TextSpan(text: ' $taxStr', style: const TextStyle(fontSize: 11, color: Colors.blue)),
-                                            ])),
-
-                                            // [FIX UI 2] Danh sách Topping
-                                            if (item.toppings.isNotEmpty)
-                                              Padding(
-                                                padding: const EdgeInsets.symmetric(vertical: 2),
-                                                child: Text(
-                                                  "+ ${item.toppings.keys.map((p) => p.productName).join(', ')}",
-                                                  style: TextStyle(fontSize: 11, color: Colors.orange.shade800, fontStyle: FontStyle.italic),
-                                                ),
-                                              ),
-
-                                            Text("${formatNumber(item.price)} đ", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                                          ],
-                                        ),
-                                      ),
-                                      Container(
-                                        width: 120, height: 35,
-                                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            IconButton(
-                                              icon: const Icon(Icons.remove, size: 16, color: Colors.red),
-                                              onPressed: () => _updateReturnItemQty(index, -1),
-                                              padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 35),
-                                            ),
-                                            Text(formatNumber(item.quantity), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                            IconButton(
-                                              icon: const Icon(Icons.add, size: 16, color: Colors.green),
-                                              onPressed: () => _updateReturnItemQty(index, 1),
-                                              padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 35),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      SizedBox(
-                                        width: 75,
-                                        child: Text(formatNumber(item.subtotal), textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                      )
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        _buildReturnSummaryPanel(),
-                      ],
-                    ),
-                  ),
-                ),
-
+                Expanded(flex: 4, child: returnCard),
                 const SizedBox(width: 8),
+                Expanded(flex: 6, child: exchangeCard),
+              ],
+            ),
+          );
+        }
 
-                // CỘT PHẢI
-                Expanded(
-                  flex: 6,
-                  child: Card(
-                    clipBehavior: Clip.antiAlias,
-                    elevation: 2,
-                    child: Column(
+        // --- D. CẤU TRÚC CUỐI CÙNG (BODY + FOOTER) ---
+        return Column(
+          children: [
+            Expanded(child: bodyContent),
+
+            // FOOTER: Ghi chú & Nút Hoàn tất
+            Card(
+              elevation: 4, margin: const EdgeInsets.all(8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildCardHeader("HÀNG ĐỔI / MUA MỚI", Colors.green.shade50, Colors.green,
-                            action: ElevatedButton.icon(
-                              onPressed: _pickExchangeProducts,
-                              icon: const Icon(Icons.add, size: 16),
-                              label: const Text("Thêm món"),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.green, elevation: 0, visualDensity: VisualDensity.compact),
-                            )
-                        ),
                         Expanded(
-                          child: Container(
-                            color: Colors.white,
-                            child: _exchangeList.isEmpty
-                                ? const Center(child: Text("Chưa chọn sản phẩm đổi", style: TextStyle(color: Colors.grey)))
-                                : ListView.separated(
-                              padding: const EdgeInsets.all(8),
-                              itemCount: _exchangeList.length,
-                              separatorBuilder: (_,__) => const SizedBox(height: 8),
-                              itemBuilder: (context, index) {
-                                final item = _exchangeList[index];
-                                final taxStr = _getTaxDisplayString(item.product);
-                                return ExchangeItemCard(
-                                  item: item,
-                                  index: index,
-                                  taxDisplay: taxStr,
-                                  onUpdate: (newItem) { setState(() => _exchangeList[index] = newItem); _dispExchangeTax = _calculateExchangeTaxValue(); },
-                                  onRemove: () { setState(() => _exchangeList.removeAt(index)); _dispExchangeTax = _calculateExchangeTaxValue(); },
-                                  onTap: () => _editExchangeItem(index),
-                                );
-                              },
+                          flex: 2,
+                          child: TextField(
+                              controller: _noteCtrl,
+                              decoration: const InputDecoration(labelText: "Ghi chú đơn", border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12))
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        if (showPaymentMethod)
+                          Expanded(
+                            flex: 1,
+                            child: InputDecorator(
+                              decoration: const InputDecoration(labelText: "Hoàn tiền qua", border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _selectedRefundMethod,
+                                  isDense: true, isExpanded: true,
+                                  items: _isLoadingMethods
+                                      ? [const DropdownMenuItem(value: 'Tiền mặt', child: Text("Đang tải..."))]
+                                      : _paymentMethods.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)))).toList(),
+                                  onChanged: (val) { if (val != null) setState(() => _selectedRefundMethod = val); },
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          color: Colors.green.shade50.withValues(alpha: 0.3),
-                          child: Column(
-                            children: [
-                              if (_dispExchangeTax > 0) _buildSummaryRow("Thuế (Hàng đổi):", _dispExchangeTax),
-                              _buildSummaryRow("TỔNG MUA MỚI:", _totalExchangeValue, isBold: true, color: Colors.green),
-                            ],
-                          ),
-                        )
                       ],
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // FOOTER
-        Card(
-          elevation: 4,
-          margin: const EdgeInsets.all(8),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                          controller: _noteCtrl,
-                          decoration: const InputDecoration(
-                              labelText: "Ghi chú đơn",
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)
-                          )
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
-                    if (showPaymentMethod)
-                      Expanded(
-                        flex: 1,
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                              labelText: "Hoàn tiền qua",
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _selectedRefundMethod,
-                              isDense: true,
-                              isExpanded: true,
-                              // [FIX] PTTT lấy từ DB
-                              items: _isLoadingMethods
-                                  ? [const DropdownMenuItem(value: 'Tiền mặt', child: Text("Đang tải..."))]
-                                  : _paymentMethods.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)))).toList(),
-                              onChanged: (val) { if (val != null) setState(() => _selectedRefundMethod = val); },
-                            ),
-                          ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(diffText, style: TextStyle(fontSize: isMobile ? 18 : 20, fontWeight: FontWeight.bold, color: diffColor))),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+                          onPressed: _isProcessing ? null : _submitTransaction,
+                          child: _isProcessing
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Text("HOÀN TẤT", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
-                      ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(diffText, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: diffColor)),
-
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
-                      onPressed: _isProcessing ? null : _submitTransaction,
-                      child: _isProcessing
-                          ? const SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                      )
-                          : const Text("HOÀN TẤT", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-        )
-      ],
+              ),
+            )
+          ],
+        );
+      },
     );
   }
 }
