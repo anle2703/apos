@@ -172,24 +172,36 @@ class ReturnService {
       totalReturnSubtotal += itemNetSubtotal;
 
       // f. Giá Vốn
-      double itemBaseCost = item.product.costPrice;
-      if (originalItemData != null && originalItemData['product'] != null) {
-        final p = originalItemData['product'] as Map<String, dynamic>;
-        if (p['costPrice'] != null) itemBaseCost = (p['costPrice'] as num).toDouble();
+      double itemBaseCost = item.product.costPrice; // Mặc định lấy giá vốn gốc
+      String currentUnit = item.selectedUnit;
+      if (currentUnit.isNotEmpty && currentUnit != item.product.unit) {
+        final additionalUnitData = item.product.additionalUnits.firstWhereOrNull(
+                (u) => u['unitName'] == currentUnit
+        );
+        if (additionalUnitData != null && additionalUnitData['costPrice'] != null) {
+          itemBaseCost = (additionalUnitData['costPrice'] as num).toDouble();
+        }
       }
+
       double toppingsCostTotal = 0;
       final List<dynamic> toppingsList = (originalItemData != null && originalItemData['toppings'] is List)
           ? originalItemData['toppings'] : item.toppings.entries.map((e) => {'costPrice': e.key.costPrice, 'quantity': e.value}).toList();
+
       for (var t in toppingsList) {
         if (t is Map) {
-          double tCost = (t['costPrice'] as num?)?.toDouble() ?? 0.0;
-          if (tCost == 0 && t['product'] is Map && t['product']['costPrice'] != null) {
+          double tCost = 0;
+          if (t['product'] is Map && t['product']['costPrice'] != null) {
             tCost = (t['product']['costPrice'] as num).toDouble();
+          } else {
+            tCost = (t['costPrice'] as num?)?.toDouble() ?? 0.0;
           }
+
           double tQty = (t['quantity'] as num?)?.toDouble() ?? 0.0;
           toppingsCostTotal += (tCost * tQty * item.quantity);
         }
       }
+
+      // Tổng giá vốn cuối cùng
       final double itemTotalCost = ((itemBaseCost * item.quantity) + toppingsCostTotal).roundToDouble();
 
       // g. Thuế
@@ -232,47 +244,87 @@ class ReturnService {
     }
 
     // --- B. TÍNH CÁC CHỈ SỐ BILL LEVEL (Surcharge, Discount...) ---
+    double returnTotalPayable = 0.0;
     double ratio = 0.0;
     double returnSurcharge = 0.0;
     double returnBillDiscount = 0.0;
     double returnVoucherDiscount = 0.0;
     double returnPointsValue = 0;
-
-    // [FIX LỖI returnSurchargesList] Khai báo biến này
     List<Map<String, dynamic>> returnSurchargesList = [];
 
-    if (originalBill != null && originalBill.subtotal > 0) {
-      ratio = totalReturnNetSubtotal / originalBill.subtotal;
+    // 1. Kiểm tra điều kiện "Trả hết sạch ngay lần đầu"
+    // Điều kiện A: Bill gốc chưa từng có lịch sử trả hàng
+    bool isFreshBill = true;
+    if (originalBill != null) {
+      isFreshBill = !originalBill.items.any((i) => (i is Map && (i['returnedQuantity'] ?? 0) > 0));
+    }
 
-      // Tính lại Surcharge hoàn
-      returnSurchargesList = originalBill.surcharges.map((s) {
-        final Map<String, dynamic> newSurcharge = Map<String, dynamic>.from(s);
-        if (newSurcharge['isPercent'] != true) {
-          double oldAmount = (newSurcharge['amount'] as num?)?.toDouble() ?? 0.0;
-          newSurcharge['amount'] = (oldAmount * ratio).roundToDouble();
-        }
-        return newSurcharge;
-      }).toList();
+    // Điều kiện B: Tổng tiền hàng trả lần này == Tổng tiền hàng gốc
+    bool isReturningAllValue = false;
+    if (originalBill != null) {
+      isReturningAllValue = (totalReturnSubtotal - originalBill.subtotal).abs() < 100;
+    }
 
-      double totalOriginalSurcharge = originalBill.surcharges.fold(0.0, (prev, s) {
+    // QUYẾT ĐỊNH LOGIC
+    if (originalBill != null && isFreshBill && isReturningAllValue) {
+      // === CASE 1: TRẢ HẾT 1 LẦN (COPY SỐ LIỆU) ===
+      // Copy nguyên xi để đảm bảo khớp 100% doanh thu/lợi nhuận đã ghi nhận
+      isFullReturn = true;
+
+      returnTotalPayable = originalBill.totalPayable;
+      totalReturnProfit = originalBill.totalProfit;
+      totalReturnTax = originalBill.taxAmount;
+
+      // Tính tổng phụ thu từ list (vì model không có field total)
+      returnSurcharge = originalBill.surcharges.fold(0.0, (prev, s) {
         double amt = (s['amount'] as num?)?.toDouble() ?? 0.0;
         return prev + (s['isPercent'] == true ? (originalBill.subtotal * (amt / 100)) : amt);
       });
-      returnSurcharge = (totalOriginalSurcharge * ratio).roundToDouble();
+      returnSurchargesList = List<Map<String, dynamic>>.from(originalBill.surcharges);
 
-      double billDiscVal = (originalBill.discountType == 'VND')
-          ? originalBill.discountInput
-          : (originalBill.subtotal * originalBill.discountInput / 100);
-      returnBillDiscount = (billDiscVal * ratio).roundToDouble();
-      returnVoucherDiscount = (originalBill.voucherDiscount * ratio).roundToDouble();
-      returnPointsValue = (originalBill.customerPointsValue * ratio).roundToDouble();
+      returnBillDiscount = originalBill.discount;
+      returnVoucherDiscount = originalBill.voucherDiscount;
+      returnPointsValue = originalBill.customerPointsValue;
+
+    } else {
+      // === CASE 2: TRẢ 1 PHẦN HOẶC TRẢ NỐT PHẦN CÒN LẠI (TÍNH TOÁN) ===
+
+      // Check kỹ xem đã trả hết các món chưa (để set status 'return')
+      isFullReturn = (originalBill != null) ? _checkIfFullReturn(originalBill, returnItems) : false;
+
+      if (originalBill != null && originalBill.subtotal > 0) {
+        ratio = totalReturnSubtotal / originalBill.subtotal;
+
+        // Tính Surcharge theo tỷ lệ
+        returnSurchargesList = originalBill.surcharges.map((s) {
+          final Map<String, dynamic> newSurcharge = Map<String, dynamic>.from(s);
+          if (newSurcharge['isPercent'] != true) {
+            double oldAmount = (newSurcharge['amount'] as num?)?.toDouble() ?? 0.0;
+            newSurcharge['amount'] = (oldAmount * ratio).roundToDouble();
+          }
+          return newSurcharge;
+        }).toList();
+
+        double totalOriginalSurcharge = originalBill.surcharges.fold(0.0, (prev, s) {
+          double amt = (s['amount'] as num?)?.toDouble() ?? 0.0;
+          return prev + (s['isPercent'] == true ? (originalBill.subtotal * (amt / 100)) : amt);
+        });
+        returnSurcharge = (totalOriginalSurcharge * ratio).roundToDouble();
+
+        // Tính Discount theo tỷ lệ
+        double billDiscVal = (originalBill.discountType == 'VND')
+            ? originalBill.discountInput
+            : (originalBill.subtotal * originalBill.discountInput / 100);
+        returnBillDiscount = (billDiscVal * ratio).roundToDouble();
+        returnVoucherDiscount = (originalBill.voucherDiscount * ratio).roundToDouble();
+        returnPointsValue = (originalBill.customerPointsValue * ratio).roundToDouble();
+      }
+
+      // Tính tổng tiền phải trả (Công thức tính toán)
+      double totalBillLevelReductions = returnBillDiscount + returnVoucherDiscount + returnPointsValue;
+      double calculatedPayable = (totalReturnNetSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
+      returnTotalPayable = calculatedPayable.roundToDouble();
     }
-
-    // [FIX LỖI returnTotalPayable] Tính toán biến này
-    double totalBillLevelReductions = returnBillDiscount + returnVoucherDiscount + returnPointsValue;
-    double returnTotalPayable = (totalReturnNetSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
-    returnTotalPayable = returnTotalPayable.roundToDouble();
-
 
     // --- C. XỬ LÝ DANH SÁCH ĐỔI (MUA MỚI) ---
     double exchangeProfit = 0;
@@ -542,24 +594,46 @@ class ReturnService {
   }
 
   bool _checkIfFullReturn(BillModel bill, List<OrderItem> returnItems) {
-    // ... (Giữ nguyên logic cũ) ...
+    // Lấy danh sách item từ bill gốc (bỏ qua các item lỗi/null)
     final billItems = bill.items.whereType<Map<String, dynamic>>().toList();
-    if (returnItems.length != billItems.length) return false;
+
     for (var billItem in billItems) {
       final String? pId = (billItem['product'] as Map?)?['id'];
+      final String? lineId = billItem['lineId']; // Key quan trọng để phân biệt dòng
+
       if (pId == null) continue;
+
+      // 1. Lấy số lượng MUA và số lượng ĐÃ TRẢ (trong DB)
       final double qty = (billItem['quantity'] as num?)?.toDouble() ?? 0.0;
-      final double returned = (billItem['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
-      final double returningNow = returnItems
-          .where((r) => r.product.id == pId)
-          .fold(0.0, (tong, r) => tong + r.quantity);
-      if ((returned + returningNow) < (qty - 0.001)) return false;
+      final double returnedInDb = (billItem['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+
+      // 2. Tìm xem món này khách có TRẢ THÊM lần này không?
+      double returningNow = 0.0;
+
+      final matchingItem = returnItems.firstWhereOrNull((r) {
+        // Ưu tiên so khớp bằng Line ID (Chính xác 100%)
+        if (lineId != null && r.lineId == lineId) return true;
+        // Fallback: So khớp bằng Product ID (Cho các bill cũ chưa có Line ID)
+        return r.product.id == pId;
+      });
+
+      if (matchingItem != null) {
+        returningNow = matchingItem.quantity;
+      }
+
+      // 3. Kiểm tra tổng thể
+      // Nếu (Đã trả cũ + Đang trả mới) < (Tổng mua) => Chưa trả hết món này
+      // Chỉ cần 1 món chưa trả hết => Bill chưa Full Return
+      if ((returnedInDb + returningNow) < (qty - 0.001)) {
+        return false;
+      }
     }
+
+    // Chạy hết vòng lặp mà không bị false => Tất cả món đều đã trả đủ
     return true;
   }
 
   Future<void> _updateStock(WriteBatch batch, List<OrderItem> items, {required bool isReturn}) async {
-    // ... (Giữ nguyên logic cũ) ...
     final Map<String, double> stockChanges = {};
     for (final item in items) {
       final product = item.product;
@@ -576,10 +650,34 @@ class ReturnService {
       } else {
         stockChanges[product.id] = (stockChanges[product.id] ?? 0) + quantity;
       }
+
+      if (item.toppings.isNotEmpty) {
+        item.toppings.forEach((toppingProduct, toppingQtyPerUnit) {
+          final double totalToppingQty = toppingQtyPerUnit * quantity;
+
+          if (totalToppingQty > 0) {
+            if ((toppingProduct.productType == 'Thành phẩm/Combo' || toppingProduct.productType == 'Topping/Bán kèm') &&
+                toppingProduct.compiledMaterials.isNotEmpty) {
+
+              for (final material in toppingProduct.compiledMaterials) {
+                final materialId = material['productId'] as String?;
+                final materialQty = (material['quantity'] as num?)?.toDouble() ?? 0.0;
+
+                if (materialId != null && materialQty > 0) {
+                  stockChanges[materialId] = (stockChanges[materialId] ?? 0) + (materialQty * totalToppingQty);
+                }
+              }
+            } else {
+              stockChanges[toppingProduct.id] = (stockChanges[toppingProduct.id] ?? 0) + totalToppingQty;
+            }
+          }
+        });
+      }
     }
+
     stockChanges.forEach((productId, qty) {
       final productRef = _db.collection('products').doc(productId);
-      final double finalQty = isReturn ? qty : -qty; // Trả thì cộng (+), Mua đổi thì trừ (-)
+      final double finalQty = isReturn ? qty : -qty;
       batch.update(productRef, {'stock': FieldValue.increment(finalQty)});
     });
   }

@@ -2907,39 +2907,67 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   double _calculateTotalProfit() {
-    // 1. Tính TỔNG GIÁ VỐN (Total COGS)
     double totalCost = 0.0;
 
     for (final itemMap in widget.order.items) {
-      final product = itemMap['product'] as Map<String, dynamic>? ?? {};
+      // 1. Ép kiểu Product an toàn
+      final product = itemMap['product'] is Map
+          ? Map<String, dynamic>.from(itemMap['product'])
+          : <String, dynamic>{};
 
-      // Giá vốn nhập trong danh mục (Với DV giờ thì đây là Chi phí/Giờ)
-      final double costPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
+      // Giá vốn mặc định (Cơ bản)
+      double itemCostPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
+
+      // 2. Xác định tên ĐVT đang chọn (Xử lý cả trường hợp String và Map)
+      String? unitName;
+      final dynamic rawSelectedUnit = itemMap['selectedUnit'];
+
+      if (rawSelectedUnit is Map) {
+        unitName = rawSelectedUnit['unitName'] as String?;
+        if (rawSelectedUnit['costPrice'] != null) {
+          itemCostPrice = (rawSelectedUnit['costPrice'] as num).toDouble();
+        }
+      } else if (rawSelectedUnit is String) {
+        unitName = rawSelectedUnit;
+      }
+
+      // 3. [SỬA LỖI] Dùng vòng lặp for để tìm giá vốn an toàn
+      // Thay thế cho firstWhere bị lỗi return null
+      if (unitName != null && unitName != product['unit']) {
+        final additionalUnits = product['additionalUnits'];
+        if (additionalUnits is List) {
+          for (final u in additionalUnits) {
+            // Kiểm tra item có phải Map và khớp tên ĐVT không
+            if (u is Map && u['unitName'] == unitName) {
+              if (u['costPrice'] != null) {
+                // Cập nhật giá vốn tìm thấy
+                itemCostPrice = (u['costPrice'] as num).toDouble();
+              }
+              break; // Tìm thấy rồi thì thoát vòng lặp ngay
+            }
+          }
+        }
+      }
 
       final isTimeBased = product['serviceSetup']?['isTimeBased'] == true;
       double mainQuantity = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-      if (isTimeBased) {
-        // [SỬA LẠI LOGIC TÍNH GIÁ VỐN DỊCH VỤ TÍNH GIỜ]
-        // Công thức: Chi phí = (Giá vốn 1 giờ / 60) * Tổng số phút sử dụng
 
+      if (isTimeBased) {
         double totalMinutes = 0;
         final priceBreakdown = itemMap['priceBreakdown'];
 
         if (priceBreakdown is List) {
           for (final block in priceBreakdown) {
-            // Kiểm tra kiểu dữ liệu để lấy số phút an toàn
             if (block is Map) {
               totalMinutes += (block['minutes'] as num?)?.toDouble() ?? 0;
             } else if (block is TimeBlock) {
-              // Trường hợp itemMap giữ object TimeBlock (hiếm nhưng có thể xảy ra)
               totalMinutes += block.minutes.toDouble();
             }
           }
         }
-        // Tính chi phí hoạt động dựa trên thời gian thực tế
-        totalCost += (costPrice / 60.0) * totalMinutes;
+        totalCost += (itemCostPrice / 60.0) * totalMinutes;
       } else {
-        totalCost += costPrice * mainQuantity;
+        totalCost += itemCostPrice * mainQuantity;
       }
 
       // B. [MỚI] TÍNH GIÁ VỐN TOPPING / HÀNG BÁN KÈM
