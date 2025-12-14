@@ -883,29 +883,68 @@ class InventoryReportTabState extends State<InventoryReportTab> {
       final billsSnapshot = await db
           .collection('bills')
           .where('storeId', isEqualTo: storeId)
-          .where('status', isEqualTo: 'completed')
+          .where('status', whereIn: ['completed', 'return']) // [FIX] Lấy cả bill 'return' (đổi trả)
           .where('createdAt', isGreaterThanOrEqualTo: _startDate)
           .where('createdAt', isLessThanOrEqualTo: _endDate)
           .get();
 
       Map<String, double> exportDeltas = {};
       for (final doc in billsSnapshot.docs) {
-        final items = List<Map<String, dynamic>>.from(doc.data()['items'] ?? []);
-        for (final itemMap in items) {
-          _calculateExportDeductions(
-              itemMap: itemMap,
-              allProducts: allProductsMap,
-              deductionsMap: exportDeltas);
-          final toppings = List<Map<String, dynamic>>.from(itemMap['toppings'] ?? []);
-          final mainQty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
-          final mainReturned = (itemMap['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
-          final quantityOfMainProduct = mainQty - mainReturned;
+        final data = doc.data(); // Lấy data ra biến
+        final String status = data['status'] ?? 'completed';
 
+        // --- PHẦN A: XỬ LÝ 'items' (Chỉ áp dụng cho đơn Bán hàng - Completed) ---
+        if (status == 'completed') {
+          final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
+          for (final itemMap in items) {
+            // Logic cũ giữ nguyên
+            _calculateExportDeductions(
+                itemMap: itemMap,
+                allProducts: allProductsMap,
+                deductionsMap: exportDeltas);
+
+            // Xử lý Topping của hàng bán
+            final toppings = List<Map<String, dynamic>>.from(itemMap['toppings'] ?? []);
+            final mainQty = (itemMap['quantity'] as num?)?.toDouble() ?? 0.0;
+            final mainReturned = (itemMap['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+            final quantityOfMainProduct = mainQty - mainReturned;
+
+            if (quantityOfMainProduct <= 0) continue;
+
+            for (final toppingMap in toppings) {
+              final totalToppingQuantity = quantityOfMainProduct *
+                  ((toppingMap['quantity'] as num?)?.toDouble() ?? 1.0);
+              final toppingItemMapForDeduction = {
+                'product': toppingMap['product'],
+                'quantity': totalToppingQuantity,
+                'selectedUnit': toppingMap['selectedUnit'],
+                'toppings': [],
+                'returnedQuantity': 0,
+              };
+              _calculateExportDeductions(
+                  itemMap: toppingItemMapForDeduction,
+                  allProducts: allProductsMap,
+                  deductionsMap: exportDeltas);
+            }
+          }
+        }
+        final exchangeItems = List<Map<String, dynamic>>.from(data['exchangeItems'] ?? []);
+        for (final exItemMap in exchangeItems) {
+          // Tính toán trừ kho cho sản phẩm chính
+          _calculateExportDeductions(
+              itemMap: exItemMap,
+              allProducts: allProductsMap,
+              deductionsMap: exportDeltas
+          );
+
+          final toppings = List<Map<String, dynamic>>.from(exItemMap['toppings'] ?? []);
+          final quantityOfMainProduct = (exItemMap['quantity'] as num?)?.toDouble() ?? 0.0;
           if (quantityOfMainProduct <= 0) continue;
 
           for (final toppingMap in toppings) {
-            final totalToppingQuantity = quantityOfMainProduct *
-                ((toppingMap['quantity'] as num?)?.toDouble() ?? 1.0);
+            final toppingQtyPerUnit = (toppingMap['quantity'] as num?)?.toDouble() ?? 1.0;
+            final totalToppingQuantity = quantityOfMainProduct * toppingQtyPerUnit;
+
             final toppingItemMapForDeduction = {
               'product': toppingMap['product'],
               'quantity': totalToppingQuantity,
@@ -916,7 +955,8 @@ class InventoryReportTabState extends State<InventoryReportTab> {
             _calculateExportDeductions(
                 itemMap: toppingItemMapForDeduction,
                 allProducts: allProductsMap,
-                deductionsMap: exportDeltas);
+                deductionsMap: exportDeltas
+            );
           }
         }
       }
@@ -1114,26 +1154,29 @@ class InventoryReportTabState extends State<InventoryReportTab> {
       final billsSnapshot = await db
           .collection('bills')
           .where('storeId', isEqualTo: storeId)
-          .where('status',
-          isEqualTo: 'completed') // Đảm bảo chỉ lấy bill đã hoàn thành
+          .where('status', whereIn: ['completed', 'return'])
           .where('createdAt', isGreaterThanOrEqualTo: _startDate)
           .where('createdAt', isLessThanOrEqualTo: _endDate)
           .get();
 
       for (final doc in billsSnapshot.docs) {
-        final itemsInBill =
-        List<Map<String, dynamic>>.from(doc.data()['items'] ?? []);
-        for (final itemMap in itemsInBill) {
-          // Gọi hàm tìm kiếm cho sản phẩm chính
-          _findExportTransactionsInItem(
-            itemMap: itemMap,
-            billDoc: doc,
-            targetProductId: productId, // <--- ĐÃ SỬA LỖI
-            targetUnitName: unitName, // <--- ĐÃ SỬA LỖI
-            allProducts: allProductsMap,
-            transactions: fetchedTransactions,
-            parentProductName: null,
-          );
+        final data = doc.data(); // Chú ý: data phải là Map<String, dynamic>
+        final String status = data['status'] ?? 'completed';
+
+        // --- A. XỬ LÝ HÀNG BÁN (Chỉ khi status là completed) ---
+        if (status == 'completed') {
+          final itemsInBill = List<Map<String, dynamic>>.from(data['items'] ?? []);
+          for (final itemMap in itemsInBill) {
+            // Logic cũ: Tìm sản phẩm chính
+            _findExportTransactionsInItem(
+              itemMap: itemMap,
+              billDoc: doc,
+              targetProductId: productId,
+              targetUnitName: unitName,
+              allProducts: allProductsMap,
+              transactions: fetchedTransactions,
+              parentProductName: null,
+            );
 
           // Gọi hàm tìm kiếm cho từng topping
           final toppings =
@@ -1157,6 +1200,48 @@ class InventoryReportTabState extends State<InventoryReportTab> {
               allProducts: allProductsMap,
               transactions: fetchedTransactions,
               parentProductName: null,
+            );
+          }
+        }
+        }
+
+        // B. [THÊM MỚI] XỬ LÝ EXCHANGE ITEMS (Đổi hàng)
+        final exchangeItems = List<Map<String, dynamic>>.from(data['exchangeItems'] ?? []);
+        for (final exItemMap in exchangeItems) {
+          // 1. Tìm trong sản phẩm chính
+          _findExportTransactionsInItem(
+            itemMap: exItemMap,
+            billDoc: doc,
+            targetProductId: productId,
+            targetUnitName: unitName,
+            allProducts: allProductsMap,
+            transactions: fetchedTransactions,
+            parentProductName: null,
+            customReference: 'Xuất đổi hàng', // Để phân biệt với bán thường
+          );
+
+          // Gọi hàm tìm kiếm cho Topping đổi
+          final toppings = List<Map<String, dynamic>>.from(exItemMap['toppings'] ?? []);
+          final quantityOfMainProduct = (exItemMap['quantity'] as num?)?.toDouble() ?? 1.0;
+          for (final toppingMap in toppings) {
+            final toppingQtyPerUnit = (toppingMap['quantity'] as num?)?.toDouble() ?? 1.0;
+            final totalToppingQuantity = quantityOfMainProduct * toppingQtyPerUnit;
+
+            final toppingItemMapForDeduction = {
+              'product': toppingMap['product'],
+              'quantity': totalToppingQuantity,
+              'selectedUnit': toppingMap['selectedUnit'],
+              'toppings': [],
+            };
+            _findExportTransactionsInItem(
+              itemMap: toppingItemMapForDeduction,
+              billDoc: doc,
+              targetProductId: productId,
+              targetUnitName: unitName,
+              allProducts: allProductsMap,
+              transactions: fetchedTransactions,
+              parentProductName: null,
+              customReference: 'Xuất đổi (Topping)',
             );
           }
         }
@@ -1184,6 +1269,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
     required Map<String, ProductModel> allProducts,
     required List<InventoryTransaction> transactions,
     String? parentProductName,
+    String? customReference,
   }) {
     final productData = itemMap['product'] as Map<String, dynamic>?;
     if (productData == null) return;
@@ -1229,12 +1315,13 @@ class InventoryReportTabState extends State<InventoryReportTab> {
         }
 
         // [SỬA ĐỔI LOGIC THAM CHIẾU]
-        final String reference;
-        if (parentProductName != null) {
-          // Nếu có cha, hiển thị tên cha (ví dụ: "Thạch Phomai")
+        String reference;
+        if (customReference != null) {
+          reference = customReference;
+          if (parentProductName != null) reference += " ($parentProductName)";
+        } else if (parentProductName != null) {
           reference = parentProductName;
         } else {
-          // Nếu không có cha, đây là sản phẩm bán trực tiếp
           reference = 'Trừ tồn bán hàng';
         }
 
@@ -1244,7 +1331,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
           date: (billData['createdAt'] as Timestamp).toDate(),
           quantity: quantityToDeduct,
           code: billCode,
-          reference: reference, // <-- Sử dụng tham chiếu mới
+          reference: reference,
         ));
       }
     }
@@ -1263,7 +1350,6 @@ class InventoryReportTabState extends State<InventoryReportTab> {
           'selectedUnit': recipeItem['selectedUnit'] as String?,
         };
 
-        // Gọi đệ quy và truyền TÊN SẢN PHẨM HIỆN TẠI (cha) xuống
         _findExportTransactionsInItem(
           itemMap: ingredientItemMap,
           billDoc: billDoc,
@@ -1271,8 +1357,8 @@ class InventoryReportTabState extends State<InventoryReportTab> {
           targetUnitName: targetUnitName,
           allProducts: allProducts,
           transactions: transactions,
-          // isRecipeDeduction: true, // <-- XÓA DÒNG NÀY
-          parentProductName: currentProductName, // <-- THÊM DÒNG NÀY
+          customReference: customReference,
+          parentProductName: currentProductName,
         );
       }
     }
