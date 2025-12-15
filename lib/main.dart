@@ -17,13 +17,45 @@ import 'screens/auth_gate.dart';
 import 'theme/app_theme.dart';
 import 'widgets/toast_manager.dart';
 import 'dart:io';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 final PrintingService globalPrintingService =
 PrintingService(tableName: '', userName: '');
 
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+FlutterLocalNotificationsPlugin();
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  debugPrint("Handling a background message: ${message.messageId}");
+}
+
+Future<void> _createNotificationChannel() async {
+  if (Platform.isAndroid) {
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'high_importance_channel_v4', // ID Kênh V4
+      'Thông báo thanh toán', // Tên hiển thị trong Cài đặt
+      description: 'Thông báo khi có đơn hàng mới',
+      importance: Importance.max, // Bắt buộc Max để có popup
+      playSound: true,
+    );
+
+    await flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  await _createNotificationChannel();
 
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     await FirebaseAppCheck.instance.activate(

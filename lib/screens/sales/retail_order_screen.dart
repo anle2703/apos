@@ -37,6 +37,7 @@ import '../../models/quick_note_model.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'web_order_list_screen.dart';
+import '/screens/sales/return_order_screen.dart';
 
 class RetailTab {
   String id;
@@ -498,6 +499,10 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     for (final entry in _currentTab!.items.entries) {
       var item = entry.value;
 
+      if (item.note != null && item.note!.contains("Tặng kèm")) {
+        updates[entry.key] = item;
+        continue; // Bỏ qua toàn bộ logic bên dưới cho món này
+      }
       // 1. [MỚI] CẬP NHẬT GIÁ GỐC TỪ MENU (Nếu chủ quán vừa đổi giá bán)
       // Tìm sản phẩm mới nhất trong danh sách đã tải
       final latestProduct = _menuProducts.firstWhereOrNull((p) => p.id == item.product.id);
@@ -514,12 +519,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
           );
           hasChanges = true;
         }
-      }
-
-      // Bỏ qua món quà tặng (để logic BuyXGetY tự xử lý)
-      if (item.note != null && item.note!.contains("Tặng kèm")) {
-        updates[entry.key] = item;
-        continue;
       }
 
       // 2. TÍNH LẠI GIẢM GIÁ (Dựa trên giá gốc mới & chương trình KM hiện tại)
@@ -742,6 +741,12 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       });
       // Báo cho popup cập nhật
       _cartUpdateController.add(null);
+      _session.saveSessionToLocal(); // Lưu lại cache trống
+
+      // [THÊM ĐOẠN NÀY] Nếu là Mobile -> Đóng giỏ hàng ngay lập tức
+      if (!isDesktop && mounted) {
+        Navigator.of(context).pop();
+      }
       ToastService().show(message: "Đã xóa giỏ hàng", type: ToastType.success);
     }
   }
@@ -805,20 +810,37 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   }
 
   void _closeTab(String id) {
-    setState(() {
-      _session.tabs.removeWhere((t) => t.id == id);
+    // 1. CẬP NHẬT DỮ LIỆU
+    _session.tabs.removeWhere((t) => t.id == id);
 
-      if (_session.tabs.isEmpty) {
-        // [SỬA] Gọi hàm không tham số để nó tự sinh "Đơn hàng 1" chuẩn xác
-        _addNewTab();
-      } else {
-        if (_session.activeTabId == id) {
-          _session.activeTabId = _session.tabs.last.id;
-        }
+    if (_session.tabs.isEmpty) {
+      final String newId = 'tab_${DateTime.now().microsecondsSinceEpoch}';
+      final String name = _generateUniqueDefaultName();
+      final newTab = RetailTab(id: newId, name: name);
+      _session.tabs.add(newTab);
+      _session.activeTabId = newId;
+    } else {
+      if (_session.activeTabId == id) {
+        _session.activeTabId = _session.tabs.last.id;
       }
-      _isPaymentView = false;
-    });
+    }
+
+    // 2. LƯU CACHE
     _session.saveSessionToLocal();
+
+    // 3. CẬP NHẬT GIAO DIỆN (Thêm dòng này để fix lỗi Mobile không xóa giỏ)
+    _cartUpdateController.add(null);
+
+    if (mounted) {
+      setState(() {
+        _isPaymentView = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_session.tabs.isNotEmpty) {
+          _scrollToTab(_session.activeTabId);
+        }
+      });
+    }
   }
 
   void _updateTabCustomer(CustomerModel? customer) {
@@ -1573,6 +1595,9 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     // [QUAN TRỌNG] Chạy lại logic sau khi xóa
     _applyBuyXGetYLogic();
     _session.saveSessionToLocal();
+    if (_currentTab!.items.isEmpty && !isDesktop && mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   OrderModel _createOrderFromTab(RetailTab tab) {
@@ -1668,57 +1693,49 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     _checkPaymentResult(result, tab);
   }
 
-  void _checkPaymentResult(dynamic result, RetailTab tab) async { // Thêm từ khóa async
-
+  void _checkPaymentResult(dynamic result, RetailTab tab) async {
     // TRƯỜNG HỢP 1: THANH TOÁN THÀNH CÔNG
     if (result == true || result is PaymentResult) {
 
-      // --- [BẮT ĐẦU LOGIC CẬP NHẬT TRẠNG THÁI WEB ORDER] ---
-      String? webOrderIdToUpdate;
-
-      // 1. Kiểm tra nếu là đơn Ship Retail (ID đơn saved trùng với ID web_order)
-      // Điều kiện: Có cloudOrderId và không phải là đơn Booking (vì Booking có tiền tố riêng)
-      if (tab.cloudOrderId != null && !tab.cloudOrderId!.startsWith('booking_')) {
-        webOrderIdToUpdate = tab.cloudOrderId;
+      // A. XÓA ĐƠN TRÊN CLOUD (Fix lỗi không xóa đơn)
+      // Điều kiện đúng: Chỉ cần ID không phải là tab tạm (bắt đầu bằng 'tab_')
+      // Bỏ điều kiện chặn 'retail_' đi vì đơn lưu có ID là 'retail_saved_...'
+      if (tab.cloudOrderId != null && !tab.cloudOrderId!.startsWith('tab_')) {
+        try {
+          await FirebaseFirestore.instance.collection('orders').doc(tab.cloudOrderId).delete();
+          debugPrint(">>> [CLEANUP] Đã xóa đơn lưu trên Cloud: ${tab.cloudOrderId}");
+        } catch (e) {
+          debugPrint(">>> [CLEANUP ERROR] Lỗi xóa đơn lưu: $e");
+        }
       }
 
-      // 2. Kiểm tra nếu là đơn Đặt lịch Retail (ID đơn saved = booking_WEB_ORDER_ID)
-      else if (tab.cloudOrderId != null && tab.cloudOrderId!.startsWith('booking_')) {
-        webOrderIdToUpdate = tab.cloudOrderId!.replaceFirst('booking_', '');
-      }
-
-      // 3. Thực hiện cập nhật lên Firebase
-      if (webOrderIdToUpdate != null) {
+      // B. CẬP NHẬT WEB ORDER (Booking)
+      if (tab.cloudOrderId != null && tab.cloudOrderId!.startsWith('booking_')) {
+        String webOrderId = tab.cloudOrderId!.replaceFirst('booking_', '');
         try {
           await FirebaseFirestore.instance
               .collection('web_orders')
-              .doc(webOrderIdToUpdate)
+              .doc(webOrderId)
               .update({
-            'status': 'completed', // Đổi trạng thái sang hoàn tất (Màu xám)
+            'status': 'completed',
             'completedAt': FieldValue.serverTimestamp(),
           });
-
-          debugPrint(">>> Đã đồng bộ trạng thái Web Order: $webOrderIdToUpdate -> completed");
-        } catch (e) {
-          // Lỗi này có thể xảy ra nếu đơn này là đơn thường (không phải web order), cứ bỏ qua
-          debugPrint(">>> Không phải Web Order hoặc lỗi cập nhật: $e");
-        }
+        } catch (_) {}
       }
-      // --- [KẾT THÚC LOGIC] ---
 
-      // Các xử lý giao diện cũ giữ nguyên
+      // 1. Đóng Tab & Lưu Cache
       _closeTab(tab.id);
-      if (mounted) setState(() => _isPaymentView = false);
-      ToastService().show(message: "Thanh toán thành công!", type: ToastType.success);
-    }
 
-    // TRƯỜNG HỢP 2: HỦY THANH TOÁN
-    else if (result == null || result == false) {
-      // Không làm gì
-    }
-    // TRƯỜNG HỢP 3: PaymentState
-    else if (result is PaymentState) {
-      // Không làm gì
+      // 2. [QUAN TRỌNG] Đóng sạch các cửa sổ để về màn hình chính
+      if (mounted) {
+        if (!isDesktop) {
+          // Lệnh này sẽ đóng cả PaymentScreen (nếu còn) VÀ BottomSheet giỏ hàng
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+
+        setState(() => _isPaymentView = false);
+        ToastService().show(message: "Thanh toán thành công!", type: ToastType.success);
+      }
     }
   }
 
@@ -1952,7 +1969,17 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
             // 1. NẾU LÀ MOBILE -> Hiện Ô Đơn Hàng TRƯỚC (Bên trái)
             if (!isDesktop) ...[
               mobileOrderSelectorWidget,
-              const SizedBox(width: 8),
+              IconButton(
+                icon: Icon(Icons.assignment_return_outlined,
+                    color: AppTheme.primaryColor),
+                tooltip: "Đổi / Trả hàng",
+                onPressed: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                      builder: (ctx) => ReturnOrderScreen(
+                        currentUser: widget.currentUser,
+                      )));
+                },
+              ),
             ],
 
             // 3. HIỂN THỊ TAB NGANG (Chỉ Desktop - Giữ nguyên)
@@ -2113,9 +2140,18 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                           borderRadius: BorderRadius.circular(8))),
                 ),
               ),
-              const SizedBox(width: 12),
+              IconButton(
+                icon: Icon(Icons.assignment_return_outlined,
+                    color: AppTheme.primaryColor, size: 30),
+                tooltip: "Đổi / Trả hàng",
+                onPressed: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                      builder: (ctx) => ReturnOrderScreen(
+                        currentUser: widget.currentUser,
+                      )));
+                },
+              ),
               webOrdersWidget,
-              const SizedBox(width: 8),
               savedOrdersWidget,
               const SizedBox(width: 8),
               SizedBox(width: 300, child: _buildSearchBar()),
@@ -2450,6 +2486,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       }
     }
     bool isLockedCustomer = isBooking || isWebOrder;
+    bool isSpecialOrder = isBooking || isWebOrder;
 
     // 2. [CHUẨN BỊ DỮ LIỆU HIỂN THỊ]
     final customer = tab.customer;
@@ -2516,7 +2553,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                 ),
 
                 // [SỬA ĐỔI: GIAO DIỆN WRAP LINH HOẠT GIỐNG ORDER SCREEN]
-                if (hasInfo)
+                if (isSpecialOrder && hasInfo)
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
                     child: Container(

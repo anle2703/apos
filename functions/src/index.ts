@@ -2,8 +2,11 @@
 
 import {
   onDocumentCreated,
+  onDocumentWritten,
   FirestoreEvent,
   QueryDocumentSnapshot,
+  DocumentSnapshot,
+  Change,
 } from "firebase-functions/v2/firestore";
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
@@ -647,3 +650,106 @@ export const aggregateManualTransactionsV2 = onDocumentCreated("manual_cash_tran
       console.error(`[ManualTx] LỖI ${txId}:`, error);
     }
   });
+
+// ============================================================================
+// HÀM 3: GỬI THÔNG BÁO KHI THANH TOÁN (MẶC ĐỊNH - KHÔNG CẦN FILE MP3)
+// ============================================================================
+export const sendPaymentNotification = onDocumentWritten("bills/{billId}",
+  async (event: FirestoreEvent<Change<DocumentSnapshot> | undefined>) => {
+    console.log(`--- [START] Trigger sendPaymentNotification cho bill: ${event.params.billId} ---`);
+    
+    if (!event.data) return;
+
+    const billDoc = event.data.after;
+    const billData = billDoc.data();
+
+    // 1. Kiểm tra điều kiện
+    if (!billData || billData.status !== "completed") return;
+
+    // Tránh gửi lặp
+    const billDocBefore = event.data.before;
+    const billDataBefore = billDocBefore.data();
+    if (billDataBefore && billDataBefore.status === "completed") {
+      return;
+    }
+
+    // 2. Lấy thông tin
+    const storeId = billData.storeId;
+    const tableName = billData.tableName || "Mang đi";
+    const totalPayable = billData.totalPayable || 0;
+    
+    // Lấy tên thu ngân và thời gian
+    const cashierName = billData.paidByName || billData.createdByName || "Nhân viên";
+    const paymentTimestamp = billData.paidAt || billData.createdAt;
+    let timeString = "";
+    
+    try {
+      if (paymentTimestamp && typeof paymentTimestamp.toDate === 'function') {
+         timeString = moment(paymentTimestamp.toDate()).tz("Asia/Ho_Chi_Minh").format("HH:mm DD/MM");
+      } else {
+         timeString = moment().tz("Asia/Ho_Chi_Minh").format("HH:mm DD/MM");
+      }
+    } catch (e) {
+      timeString = moment().tz("Asia/Ho_Chi_Minh").format("HH:mm");
+    }
+
+    const formattedMoney = new Intl.NumberFormat('vi-VN').format(totalPayable);
+
+    try {
+      // 3. Tìm User
+      const usersSnap = await db.collection("users")
+        .where("storeId", "==", storeId)
+        .where("receivePaymentNotification", "==", true)
+        .get();
+
+      if (usersSnap.empty) return;
+
+      const tokens: string[] = [];
+      usersSnap.forEach((doc) => {
+        const userData = doc.data();
+        if (userData.fcmTokens && Array.isArray(userData.fcmTokens)) {
+          tokens.push(...userData.fcmTokens);
+        }
+      });
+
+      if (tokens.length === 0) return;
+      const uniqueTokens = [...new Set(tokens)];
+
+      // 4. Gửi thông báo (Dùng âm thanh mặc định)
+      const message = {
+        notification: {
+          title: `💰 + ${formattedMoney} đ`,
+          body: `${tableName} - TN: ${cashierName} - Lúc: ${timeString}`,
+        },
+        android: {
+          notification: {
+            channelId: 'high_importance_channel_v4',
+            sound: 'default',
+            priority: 'high' as 'high', 
+            visibility: 'public' as 'public',
+          }
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+              contentAvailable: true,
+            }
+          }
+        },
+        data: {
+          click_action: 'FLUTTER_NOTIFICATION_CLICK',
+          type: 'new_bill',
+          billId: event.params.billId,
+        },
+        tokens: uniqueTokens,
+      };
+
+      await admin.messaging().sendEachForMulticast(message);
+      console.log(`[Notification] Đã gửi cho ${cashierName} lúc ${timeString}`);
+
+    } catch (error) {
+      console.error("[Notification] Lỗi:", error);
+    }
+  }
+);

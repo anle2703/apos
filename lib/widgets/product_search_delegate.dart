@@ -462,8 +462,8 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                 formatNumber(product.sellPrice),
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: AppTheme.primaryColor,
-                    fontSize: 15
+                    color: Colors.grey.shade700,
+                    fontSize: 14
                 ),
               ),
 

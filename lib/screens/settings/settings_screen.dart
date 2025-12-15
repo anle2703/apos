@@ -23,6 +23,8 @@ import 'label_setup_screen.dart';
 import '../../services/native_printer_service.dart';
 import '../../services/print_queue_service.dart';
 import 'receipt_setup_screen.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SettingsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -55,7 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notifyKitchenAfterPayment = false;
   bool _allowProvisionalBill = false;
   bool _promptForCash = true;
-
+  bool _receivePaymentNotification = false;
   bool get isDesktop =>
       !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
   bool _printLabelOnKitchen = false;
@@ -147,7 +149,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final settingsId = ownerUid;
     try {
       final s = await _settingsService.watchStoreSettings(settingsId).first;
-
       if (mounted) {
         setState(() {
           _printBillAfterPayment = s.printBillAfterPayment;
@@ -187,6 +188,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
 
+    try {
+      final userSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(ownerUid)
+          .get();
+
+      if (userSnapshot.exists && mounted) {
+        final data = userSnapshot.data() as Map<String, dynamic>;
+        setState(() {
+          _receivePaymentNotification = data['receivePaymentNotification'] ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải trạng thái thông báo: $e");
+    }
+
     final jsonString = prefs.getString('printer_assignments');
     if (jsonString != null) {
       final List<dynamic> jsonList = jsonDecode(jsonString);
@@ -219,7 +236,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'storeName': _storeNameController.text.trim(),
         'storePhone': _storePhoneController.text.trim(),
         'storeAddress': _storeAddressController.text.trim(),
+        'receivePaymentNotification': _receivePaymentNotification,
       };
+
+      if (_receivePaymentNotification) {
+        // 1. Xin quyền thông báo (quan trọng cho iOS và Android 13+)
+        FirebaseMessaging messaging = FirebaseMessaging.instance;
+        NotificationSettings settings = await messaging.requestPermission(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+
+        if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+          // 2. Lấy Token thiết bị hiện tại
+          String? token = await messaging.getToken();
+          if (token != null) {
+            // 3. Dùng arrayUnion để thêm token vào danh sách (giúp đăng nhập nhiều máy cùng lúc đều nhận được)
+            userUpdateData['fcmTokens'] = FieldValue.arrayUnion([token]);
+          }
+        } else {
+          // Người dùng từ chối cấp quyền -> Tắt switch
+          setState(() => _receivePaymentNotification = false);
+          userUpdateData['receivePaymentNotification'] = false;
+          ToastService().show(message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.", type: ToastType.warning);
+        }
+      } else {
+        // Nếu tắt chức năng -> Xóa token của máy này khỏi danh sách để không làm phiền
+        String? token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          userUpdateData['fcmTokens'] = FieldValue.arrayRemove([token]);
+        }
+      }
 
       if (_isThisDeviceTheServer) {
         userUpdateData['serverListenMode'] = _serverListenModeOnDevice;
@@ -593,6 +641,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('Thiết lập chung'),
+        SwitchListTile(
+          title: const Text('Nhận thông báo khi có đơn thanh toán'),
+          subtitle: const Text('Gửi thông báo đến thiết bị này khi nhân viên hoàn tất đơn hàng.'),
+          value: _receivePaymentNotification,
+          onChanged: (bool value) => setState(() => _receivePaymentNotification = value),
+          secondary: const Icon(Icons.notifications_active_outlined),
+        ),
         SwitchListTile(
           title: const Text('Yêu cầu thu ngân phải xác nhận mệnh giá tiền mặt'),
           value: _promptForCash,

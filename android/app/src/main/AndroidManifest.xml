@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.app_4cash"> <uses-feature android:name="android.hardware.usb.host" />
+    package="com.example.app_4cash">
+    <uses-feature android:name="android.hardware.usb.host" />
     <uses-permission android:name="android.permission.USB_PERMISSION" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" required="false" />
@@ -8,6 +9,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/> 
 
     <application
         android:label="app_4cash"
@@ -38,6 +40,9 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+	<meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="high_importance_channel_v4" />
     </application>
     <queries>
         <intent>

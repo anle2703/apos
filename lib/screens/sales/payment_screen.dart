@@ -1357,7 +1357,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       // 3. Đóng màn hình
       if (mounted && Navigator.canPop(context)) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.of(context).pop(result);
       }
 
       // 4. Lưu dữ liệu chạy ngầm (Kèm preCreatedEInvoiceResult để không tạo lại)
@@ -1521,62 +1521,62 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     final firestore = FirestoreService();
 
     try {
-      // 1. Cập nhật Order (SỬA ĐỔI QUAN TRỌNG)
-      // Thay vì updateOrder (chỉ update), ta dùng set với merge: true để an toàn cho đơn bán lẻ chưa tồn tại
-      final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.order.id);
+      // 1. Cập nhật Order (SỬA ĐỔI: CHỈ LƯU NẾU KHÔNG PHẢI BÁN LẺ)
+      if (!widget.isRetailMode) {
+        final orderRef = FirebaseFirestore.instance.collection('orders').doc(widget.order.id);
 
-      await orderRef.set({
-        'status': 'paid',
-        'billId': newBillId,
-        'paidAt': FieldValue.serverTimestamp(),
-        'paidByUid': widget.currentUser.uid,
-        'paidByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
-        'finalAmount': _totalPayable,
-        'debtAmount': _debtAmount,
-        'items': billItems,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'version': widget.order.version + 1,
+        await orderRef.set({
+          'status': 'paid',
+          'billId': newBillId,
+          'paidAt': FieldValue.serverTimestamp(),
+          'paidByUid': widget.currentUser.uid,
+          'paidByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
+          'finalAmount': _totalPayable,
+          'debtAmount': _debtAmount,
+          'items': billItems,
+          'updatedAt': FieldValue.serverTimestamp(),
+          'version': widget.order.version + 1,
+          'storeId': widget.order.storeId,
+          'tableName': widget.order.tableName,
+          'totalAmount': widget.order.totalAmount,
+          'createdAt': widget.order.createdAt ?? FieldValue.serverTimestamp(),
+          'createdByUid': widget.order.createdByUid,
+          'createdByName': widget.order.createdByName,
+          'customerId': widget.order.customerId,
+          'customerName': widget.order.customerName,
+          'customerPhone': widget.order.customerPhone,
+        }, SetOptions(merge: true));
+      }
 
-        // Các trường cần thiết để tạo mới nếu chưa có
-        'storeId': widget.order.storeId,
-        'tableName': widget.order.tableName,
-        'totalAmount': widget.order.totalAmount,
-        'createdAt': widget.order.createdAt ?? FieldValue.serverTimestamp(),
-        'createdByUid': widget.order.createdByUid,
-        'createdByName': widget.order.createdByName,
-        'customerId': widget.order.customerId,
-        'customerName': widget.order.customerName,
-        'customerPhone': widget.order.customerPhone,
-      }, SetOptions(merge: true));
-
-      // 2. Lưu Bill vào Firestore
-      // Nếu đã có kết quả HĐĐT từ trước (được truyền vào), cập nhật luôn vào billData
+      // 2. Lưu Bill vào Firestore (Vẫn giữ nguyên để có lịch sử hóa đơn/doanh thu)
       if (preCreatedEInvoiceResult != null) {
         billData['eInvoiceInfo'] = preCreatedEInvoiceResult.toJson();
       }
 
       await firestore.setBill(newBillId, billData);
 
-      // 3. Dọn dẹp bàn & Web Order
-      await firestore.unlinkMergedTables(widget.order.tableId);
-      final String webOrderId = widget.order.id;
-      final String expectedTableId = 'ship_$webOrderId';
-      if (widget.order.tableId == expectedTableId) {
-        try {
-          await FirebaseFirestore.instance
-              .collection('web_orders')
-              .doc(webOrderId)
-              .update({
-            'status': 'Đã hoàn tất',
-            'completedAt': FieldValue.serverTimestamp(),
-            'completedBy':
-            widget.currentUser.name ?? widget.currentUser.phoneNumber,
-          });
-          await firestore.deleteTable(widget.order.tableId);
-        } catch (_) {}
+      // 3. Dọn dẹp bàn & Web Order (Chỉ chạy nếu không phải Retail hoặc có logic bàn)
+      if (!widget.isRetailMode) {
+        await firestore.unlinkMergedTables(widget.order.tableId);
+        final String webOrderId = widget.order.id;
+        final String expectedTableId = 'ship_$webOrderId';
+        if (widget.order.tableId == expectedTableId) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('web_orders')
+                .doc(webOrderId)
+                .update({
+              'status': 'Đã hoàn tất',
+              'completedAt': FieldValue.serverTimestamp(),
+              'completedBy':
+              widget.currentUser.name ?? widget.currentUser.phoneNumber,
+            });
+            await firestore.deleteTable(widget.order.tableId);
+          } catch (_) {}
+        }
       }
 
-      // 4. Trừ kho (Inventory)
+      // 4. Trừ kho (Inventory) - VẪN GIỮ NGUYÊN để trừ tồn kho
       try {
         await InventoryService()
             .processStockDeductionForOrder(billItems, widget.order.storeId);
@@ -1584,7 +1584,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         debugPrint("Background Inventory Error: $e");
       }
 
-      // 5. Cập nhật Voucher & Điểm
+      // 5. Cập nhật Voucher & Điểm - VẪN GIỮ NGUYÊN
       if (_appliedVoucher != null && _appliedVoucher!.quantity != null) {
         firestore.updateVoucher(_appliedVoucher!.id, {
           'quantity': FieldValue.increment(-1),
@@ -1614,8 +1614,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         }
       }
 
-      // 6. Xuất Hóa đơn điện tử (Logic Mới)
-      // Chỉ tạo mới nếu chưa có kết quả (tức là preCreatedEInvoiceResult là null)
+      // 6. Xuất Hóa đơn điện tử (Logic Mới) - VẪN GIỮ NGUYÊN
       if (_autoIssueEInvoice && preCreatedEInvoiceResult == null) {
         try {
           final eResult = await _eInvoiceService.createInvoice(

@@ -26,7 +26,9 @@ import 'tax_management_screen.dart';
 import 'sales/retail_order_screen.dart';
 import '../products/labels/product_label_print_screen.dart';
 import '../services/shift_service.dart';
-
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -54,11 +56,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canEditTax = false;
   bool _isShowingTypePicker = false;
   bool _canViewContacts = false;
+  final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
     super.initState();
     _initializationFuture = _initializeUserAndSettings();
+    _setupNotificationSystem();
   }
 
   @override
@@ -66,6 +70,93 @@ class _HomeScreenState extends State<HomeScreen> {
     PrintQueueService().dispose();
     _userStatusSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _setupNotificationSystem() async {
+    debugPrint(">>> [DEBUG] BẮT ĐẦU CÀI ĐẶT HỆ THỐNG THÔNG BÁO (V4)...");
+
+    // Kiểm tra User trước
+    if (_currentUser == null) return;
+
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    // 1. Xin quyền (Bắt buộc cho Android 13+)
+    NotificationSettings settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+      debugPrint('>>> [DEBUG] Người dùng từ chối quyền thông báo!');
+      return;
+    }
+
+    // 2. Khởi tạo Local Notification
+    const AndroidInitializationSettings initializationSettingsAndroid =
+    AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+    );
+
+    await _localNotificationsPlugin.initialize(initializationSettings);
+
+    // 3. [LOGIC ĐÃ SỬA] Cập nhật Token cho CHÍNH TÀI KHOẢN ĐANG ĐĂNG NHẬP
+    try {
+      // Dùng uid của người đang đăng nhập, không dùng ownerUid
+      final currentUserUid = _currentUser!.uid;
+
+      // Đọc cấu hình của chính user này
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUserUid).get();
+
+      // Kiểm tra xem user này có bật nhận thông báo không
+      final bool isEnabled = userDoc.data()?['receivePaymentNotification'] ?? false;
+
+      if (isEnabled) {
+        String? token = await messaging.getToken();
+        debugPrint(">>> [DEBUG] Token thiết bị: $token");
+
+        if (token != null) {
+          // Sử dụng arrayUnion: Chỉ thêm nếu Token CHƯA TỒN TẠI
+          // Giúp đảm bảo mảng fcmTokens luôn chứa các token duy nhất
+          await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
+            'fcmTokens': FieldValue.arrayUnion([token])
+          });
+          debugPrint(">>> [DEBUG] Đã đồng bộ Token vào tài khoản $currentUserUid.");
+        }
+      }
+    } catch (e) {
+      debugPrint(">>> [DEBUG] Lỗi đồng bộ Token: $e");
+    }
+
+    // 4. LẮNG NGHE SỰ KIỆN KHI APP ĐANG MỞ (FOREGROUND)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint(">>> [DEBUG] TIN NHẮN ĐẾN KHI APP MỞ: ${message.notification?.title}");
+
+      RemoteNotification? notification = message.notification;
+      AndroidNotification? android = message.notification?.android;
+
+      if (notification != null && android != null) {
+        _localNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              'high_importance_channel_v4',
+              'Thông báo thanh toán',
+              channelDescription: 'Thông báo khi có đơn hàng mới',
+              importance: Importance.max,
+              priority: Priority.high,
+              playSound: true,
+              visibility: NotificationVisibility.public,
+              icon: '@mipmap/ic_launcher',
+            ),
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _initializeUserAndSettings() async {
@@ -240,7 +331,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onItemTapped(int index) {
-    // [MỚI] Kiểm tra quyền truy cập Tab "Đơn hàng" (Index = 2)
     if (index == 1) {
       if (_currentUser?.role == 'order') {
         ToastService().show(

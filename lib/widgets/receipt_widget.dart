@@ -251,7 +251,7 @@ class ReceiptWidget extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              Text("Thuế (Hàng đổi): ", style: baseTextStyle.copyWith(fontSize: fsInfo)),
+                              Text("Thuế: ", style: baseTextStyle.copyWith(fontSize: fsInfo)),
                               Text(currencyFormat.format(exTax), style: baseTextStyle.copyWith(fontSize: fsInfo)),
                             ],
                           ),
@@ -263,7 +263,7 @@ class ReceiptWidget extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Text("Giá trị mua: ", style: baseTextStyle.copyWith(fontSize: fsInfo)),
+                      Text("Giá trị đổi: ", style: baseTextStyle.copyWith(fontSize: fsInfo)),
                       Text(currencyFormat.format(exchangeTotalPayable), style: boldTextStyle.copyWith(fontSize: fsInfo, color: Colors.green)),
                     ],
                   ),
