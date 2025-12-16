@@ -50,6 +50,7 @@ class ReturnService {
     String? note,
     String? paymentMethodName,
     String? currentShiftId,
+    double earnRate = 0.0,
   }) async {
     final batch = _db.batch();
     final now = DateTime.now();
@@ -66,6 +67,12 @@ class ReturnService {
     double deltaVoucherDiscount = 0;
     double deltaPointsValue = 0;
     double deltaReturnRevenue = 0;
+    double deltaReturnProfit = 0;
+    double deltaReturnTax = 0;
+    double deltaReturnBillDiscount = 0;
+    double deltaReturnVoucherDiscount = 0;
+    double deltaReturnPointsValue = 0;
+    double deltaReturnSurcharges = 0;
     int deltaBillCount = 0;
 
     final Map<String, double> productQtyChange = {};
@@ -251,7 +258,7 @@ class ReturnService {
     double returnVoucherDiscount = 0.0;
     double returnPointsValue = 0;
     List<Map<String, dynamic>> returnSurchargesList = [];
-
+    int pointsToRetrieve = 0;
     // 1. Kiểm tra điều kiện "Trả hết sạch ngay lần đầu"
     // Điều kiện A: Bill gốc chưa từng có lịch sử trả hàng
     bool isFreshBill = true;
@@ -268,8 +275,8 @@ class ReturnService {
     // QUYẾT ĐỊNH LOGIC
     if (originalBill != null && isFreshBill && isReturningAllValue) {
       // === CASE 1: TRẢ HẾT 1 LẦN (COPY SỐ LIỆU) ===
-      // Copy nguyên xi để đảm bảo khớp 100% doanh thu/lợi nhuận đã ghi nhận
       isFullReturn = true;
+      ratio = 1.0;
 
       returnTotalPayable = originalBill.totalPayable;
       totalReturnProfit = originalBill.totalProfit;
@@ -289,13 +296,66 @@ class ReturnService {
     } else {
       // === CASE 2: TRẢ 1 PHẦN HOẶC TRẢ NỐT PHẦN CÒN LẠI (TÍNH TOÁN) ===
 
-      // Check kỹ xem đã trả hết các món chưa (để set status 'return')
+      // Check xem đã trả hết món chưa
       isFullReturn = (originalBill != null) ? _checkIfFullReturn(originalBill, returnItems) : false;
 
-      if (originalBill != null && originalBill.subtotal > 0) {
-        ratio = totalReturnSubtotal / originalBill.subtotal;
+      // Khai báo biến (để tránh lỗi Undefined name)
+      double totalOriginalSurcharge = 0.0;
+      double billDiscVal = 0.0;
 
-        // Tính Surcharge theo tỷ lệ
+      // 1. Tính toán các giá trị gốc
+      if (originalBill != null) {
+        // Tính tổng phụ thu gốc
+        totalOriginalSurcharge = originalBill.surcharges.fold(0.0, (prev, s) {
+          double amt = (s['amount'] as num?)?.toDouble() ?? 0.0;
+          return prev + (s['isPercent'] == true ? (originalBill.subtotal * (amt / 100)) : amt);
+        });
+
+        // Tính giá trị giảm giá gốc (không bao gồm voucher/point để tính riêng)
+        billDiscVal = (originalBill.discountType == 'VND')
+            ? originalBill.discountInput
+            : (originalBill.subtotal * originalBill.discountInput / 100);
+      }
+
+      // 2. Xử lý Logic Tính Tỷ Lệ (Ratio)
+      if (originalBill != null && originalBill.subtotal > 0) {
+
+        if (isFullReturn) {
+          // --- LOGIC TRẢ HẾT (FINAL RETURN - SWEEPER) ---
+          // Công thức: Còn lại bao nhiêu trả bấy nhiêu để tránh lệch số làm tròn
+
+          // A. Tính Tổng Subtotal ĐÃ TRẢ trong quá khứ
+          double pastReturnedSubtotal = 0.0;
+
+          for (var itemData in originalBill.items) {
+            if (itemData is Map<String, dynamic>) {
+              double qOriginal = (itemData['quantity'] as num?)?.toDouble() ?? 1.0;
+              double qReturnedPast = (itemData['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+
+              if (qReturnedPast > 0 && qOriginal > 0) {
+                double itemSubtotal = (itemData['subtotal'] as num?)?.toDouble() ?? 0.0;
+                // Tính giá trị tương ứng phần đã trả
+                double pastItemVal = (itemSubtotal / qOriginal) * qReturnedPast;
+                pastReturnedSubtotal += pastItemVal;
+              }
+            }
+          }
+
+          // B. Tính Subtotal CÒN LẠI (Chính là subtotal của lần trả này)
+          // (Tổng gốc - Đã trả quá khứ = Còn lại thực tế)
+          double remainingSubtotal = originalBill.subtotal - pastReturnedSubtotal;
+
+          // C. Tính tỷ lệ dựa trên phần CÒN LẠI
+          ratio = remainingSubtotal / originalBill.subtotal;
+
+        } else {
+          // --- LOGIC TRẢ 1 PHẦN ---
+          ratio = totalReturnSubtotal / originalBill.subtotal;
+        }
+
+        // 3. Áp dụng Tỷ lệ (Ratio) để tính các chỉ số khác
+
+        // Tính Phụ thu trả lại
         returnSurchargesList = originalBill.surcharges.map((s) {
           final Map<String, dynamic> newSurcharge = Map<String, dynamic>.from(s);
           if (newSurcharge['isPercent'] != true) {
@@ -305,25 +365,49 @@ class ReturnService {
           return newSurcharge;
         }).toList();
 
-        double totalOriginalSurcharge = originalBill.surcharges.fold(0.0, (prev, s) {
-          double amt = (s['amount'] as num?)?.toDouble() ?? 0.0;
-          return prev + (s['isPercent'] == true ? (originalBill.subtotal * (amt / 100)) : amt);
-        });
         returnSurcharge = (totalOriginalSurcharge * ratio).roundToDouble();
 
-        // Tính Discount theo tỷ lệ
-        double billDiscVal = (originalBill.discountType == 'VND')
-            ? originalBill.discountInput
-            : (originalBill.subtotal * originalBill.discountInput / 100);
+        // Tính Giảm giá trả lại
         returnBillDiscount = (billDiscVal * ratio).roundToDouble();
         returnVoucherDiscount = (originalBill.voucherDiscount * ratio).roundToDouble();
         returnPointsValue = (originalBill.customerPointsValue * ratio).roundToDouble();
+
+        // Tính Thuế & Lợi nhuận trả lại
+        totalReturnTax = (originalBill.taxAmount * ratio).roundToDouble();
+        totalReturnProfit = (originalBill.totalProfit * ratio).roundToDouble();
       }
 
-      // Tính tổng tiền phải trả (Công thức tính toán)
+      // 4. Tính tổng tiền phải hoàn
       double totalBillLevelReductions = returnBillDiscount + returnVoucherDiscount + returnPointsValue;
-      double calculatedPayable = (totalReturnNetSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
+
+      // Đồng bộ Subtotal hiển thị cuối cùng
+      double finalCalculationSubtotal = totalReturnNetSubtotal;
+
+      // [FIX] Đã xóa "&& originalBill != null" vì isFullReturn=true đã đảm bảo bill tồn tại
+      if (isFullReturn) {
+        // Dùng dấu ! để khẳng định chắc chắn không null (nếu IDE bắt bẻ)
+        finalCalculationSubtotal = originalBill.subtotal * ratio;
+      }
+
+      double calculatedPayable = (finalCalculationSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
       returnTotalPayable = calculatedPayable.roundToDouble();
+    }
+
+    if (originalBill != null && originalBill.pointsEarned > 0) {
+      if (isFullReturn) {
+        // [FIX ERROR 1] Truy cập trực tiếp originalBill.returnedPoints thay vì dùng toMap()
+        double pastReturnedPoints = originalBill.returnedPoints;
+
+        // [FIX ERROR 2] Thêm .round() để chuyển kết quả từ double sang int
+        pointsToRetrieve = (originalBill.pointsEarned - pastReturnedPoints).round();
+
+        // Safety: Đảm bảo không trừ âm
+        if (pointsToRetrieve < 0) pointsToRetrieve = 0;
+
+      } else {
+        // Logic cũ cho trả 1 phần
+        pointsToRetrieve = (originalBill.pointsEarned * ratio).round();
+      }
     }
 
     // --- C. XỬ LÝ DANH SÁCH ĐỔI (MUA MỚI) ---
@@ -351,6 +435,7 @@ class ReturnService {
       deltaRevenue -= returnTotalPayable;
       deltaProfit -= totalReturnProfit;
       deltaTax -= totalReturnTax;
+
       deltaSurcharges -= returnSurcharge;
       deltaBillDiscount -= returnBillDiscount;
       deltaVoucherDiscount -= returnVoucherDiscount;
@@ -361,6 +446,12 @@ class ReturnService {
       }
     } else {
       deltaReturnRevenue += returnTotalPayable;
+      deltaReturnProfit += totalReturnProfit;
+      deltaReturnTax += totalReturnTax;
+      deltaReturnBillDiscount += returnBillDiscount;
+      deltaReturnVoucherDiscount += returnVoucherDiscount;
+      deltaReturnPointsValue += returnPointsValue;
+      deltaReturnSurcharges += returnSurcharge;
     }
 
     if (exchangeTotalValue > 0) {
@@ -392,6 +483,11 @@ class ReturnService {
       }
     }
 
+    int pointsFromExchange = 0;
+    if (exchangeTotalValue > 0 && customer != null && earnRate > 0) {
+      pointsFromExchange = (exchangeTotalValue / earnRate).floor();
+    }
+
     // --- F. TẠO BILL MỚI ---
     final returnCode = await generateCode(storeId, 'TH');
     final returnBillRef = _db.collection('bills').doc('${storeId}_$returnCode');
@@ -402,6 +498,15 @@ class ReturnService {
       'storeId': storeId,
       'billCode': returnCode,
       'originalBillId': originalBill?.id,
+      'deductedDebt': deductDebt,
+      'deductedPoints': pointsToRetrieve,
+      'returnProfit': totalReturnProfit,
+      'pointsEarned': pointsFromExchange,
+      'returnTax': totalReturnTax,
+      'returnBillDiscount': returnBillDiscount,
+      'returnVoucherDiscount': returnVoucherDiscount,
+      'returnSurcharge': returnSurcharge,
+      'returnPointsValue': returnPointsValue,
       'originalBillCode': originalBill?.billCode,
       'tableName': dynamicTableName,
       'status': 'return',
@@ -416,7 +521,7 @@ class ReturnService {
       'totalProfit': totalReturnProfit,
       'taxAmount': totalReturnTax,
       'totalSurcharges': returnSurcharge,
-      'surcharges': returnSurchargesList, // [FIX] Đã có biến này
+      'surcharges': returnSurchargesList,
       'discount': returnBillDiscount,
       'voucherDiscount': returnVoucherDiscount,
       'debtAmount': deductDebt,
@@ -437,7 +542,7 @@ class ReturnService {
     };
     batch.set(returnBillRef, returnBillData);
 
-    // --- G & H. CẬP NHẬT REPORT & SHIFT (FIX LỖI UPDATE NESTED) ---
+    // --- G. UPDATE REPORT ---
 
     // 1. Chuẩn bị data cho các chỉ số cấp 1 (Level 1 Fields)
     final Map<String, dynamic> reportUpdates = {
@@ -453,6 +558,12 @@ class ReturnService {
     if (deltaVoucherDiscount != 0) reportUpdates['totalVoucherDiscount'] = FieldValue.increment(deltaVoucherDiscount);
     if (deltaPointsValue != 0) reportUpdates['totalPointsValue'] = FieldValue.increment(deltaPointsValue);
     if (deltaReturnRevenue != 0) reportUpdates['totalReturnRevenue'] = FieldValue.increment(deltaReturnRevenue);
+    if (deltaReturnProfit != 0) {reportUpdates['totalReturnProfit'] = FieldValue.increment(deltaReturnProfit);}
+    if (deltaReturnTax != 0) {reportUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);}
+    if (deltaReturnBillDiscount != 0) reportUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);
+    if (deltaReturnVoucherDiscount != 0) reportUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
+    if (deltaReturnSurcharges != 0) {reportUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);}
+    if (deltaReturnPointsValue != 0) {reportUpdates['totalReturnPointsValue'] = FieldValue.increment(deltaReturnPointsValue);}
     if (deltaBillCount != 0) reportUpdates['billCount'] = FieldValue.increment(deltaBillCount);
 
     // Cập nhật Payment Methods (Cấp 1)
@@ -483,6 +594,12 @@ class ReturnService {
       if (deltaVoucherDiscount != 0) shiftUpdates['totalVoucherDiscount'] = FieldValue.increment(deltaVoucherDiscount);
       if (deltaPointsValue != 0) shiftUpdates['totalPointsValue'] = FieldValue.increment(deltaPointsValue);
       if (deltaReturnRevenue != 0) shiftUpdates['totalReturnRevenue'] = FieldValue.increment(deltaReturnRevenue);
+      if (deltaReturnProfit != 0) {shiftUpdates['totalReturnProfit'] = FieldValue.increment(deltaReturnProfit);}
+      if (deltaReturnTax != 0) {shiftUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);}
+      if (deltaReturnBillDiscount != 0) shiftUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);
+      if (deltaReturnVoucherDiscount != 0) shiftUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
+      if (deltaReturnSurcharges != 0) {shiftUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);}
+      if (deltaReturnPointsValue != 0) {shiftUpdates['totalReturnPointsValue'] = FieldValue.increment(deltaReturnPointsValue);}
       if (deltaBillCount != 0) shiftUpdates['billCount'] = FieldValue.increment(deltaBillCount);
 
       if (cashTransaction != 0) {
@@ -498,7 +615,6 @@ class ReturnService {
 
     // THỰC HIỆN BƯỚC 1: SET CÁC CHỈ SỐ CƠ BẢN VÀO DOC
     batch.set(dailyReportRef, reportUpdates, SetOptions(merge: true));
-
 
     // 2. [FIX QUAN TRỌNG] CẬP NHẬT PRODUCTS (HÀNG BÁN CHẠY) BẰNG BATCH.UPDATE
     if (productQtyChange.isNotEmpty) {
@@ -579,16 +695,310 @@ class ReturnService {
       if (deductDebt > 0) billUpdates['debtAmount'] = FieldValue.increment(-deductDebt);
       billUpdates['hasReturns'] = true;
       if (isFullReturn) billUpdates['status'] = 'return';
+      if (pointsToRetrieve > 0) {
+        billUpdates['returnedPoints'] = FieldValue.increment(pointsToRetrieve);
+      }
       batch.update(originalBillRef, billUpdates);
     }
 
+    // --- H. UPDATE CUSTOMER ---
     if (customer != null) {
+      int netPointChange = pointsFromExchange - pointsToRetrieve;
       batch.update(_db.collection('customers').doc(customer.id), {
         'totalSpent': FieldValue.increment(exchangeTotalValue - returnTotalPayable),
         'debt': FieldValue.increment(-deductDebt),
+        'points': FieldValue.increment(netPointChange),
         'updatedAt': FieldValue.serverTimestamp(),
       });
     }
+
+    await batch.commit();
+  }
+
+  Future<void> cancelReturnOrder({
+    required String returnBillId,
+    required UserModel currentUser,
+    required String reason,
+  }) async {
+    final batch = _db.batch();
+
+    // 1. LẤY DỮ LIỆU BILL TRẢ HÀNG
+    final returnBillDoc = await _db.collection('bills').doc(returnBillId).get();
+    if (!returnBillDoc.exists) throw Exception("Đơn trả hàng không tồn tại");
+
+    final data = returnBillDoc.data()!;
+    if (data['status'] == 'cancelled') throw Exception("Đơn này đã bị hủy trước đó");
+
+    // Lấy thông tin định danh
+    final String storeId = data['storeId'];
+    final String? originalBillId = data['originalBillId'];
+    final String? customerId = data['customerId'];
+    final String reportDateKey = data['reportDateKey'];
+    final String? shiftId = data['shiftId'];
+    final bool isCorrection = data['isCorrection'] ?? false;
+    bool shouldRestoreBillCount = false;
+
+    // Parse các số liệu tài chính
+    final double returnTotalPayable = (data['totalPayable'] as num?)?.toDouble() ?? 0.0;
+
+    // [FIX] Lấy thông tin thanh toán của bill trả hàng để hoàn lại
+    final Map<String, dynamic> returnPayments = data['payments'] as Map<String, dynamic>? ?? {};
+
+    // Lấy Items
+    final List<dynamic> rawReturnItems = data['items'] ?? [];
+    final List<OrderItem> returnItems = rawReturnItems.map((e) => OrderItem.fromMap(e)).toList();
+
+    final List<dynamic> rawExchangeItems = data['exchangeItems'] ?? [];
+    final List<OrderItem> exchangeItems = rawExchangeItems.map((e) => OrderItem.fromMap(e)).toList();
+    final double exchangeTotalPayable = (data['exchangeTotalPayable'] as num?)?.toDouble() ?? 0.0;
+
+    // Các chỉ số Return
+    final double rProfit = (data['returnProfit'] as num?)?.toDouble() ?? 0.0;
+    final double rTax = (data['returnTax'] as num?)?.toDouble() ?? 0.0;
+    final double rSurcharge = (data['returnSurcharge'] as num?)?.toDouble() ?? 0.0;
+    final double rBillDisc = (data['returnBillDiscount'] as num?)?.toDouble() ?? 0.0;
+    final double rVoucherDisc = (data['returnVoucherDiscount'] as num?)?.toDouble() ?? 0.0;
+    final double rPointsVal = (data['returnPointsValue'] as num?)?.toDouble() ?? 0.0;
+
+    // Các chỉ số Khách hàng
+    final double deductedDebt = (data['deductedDebt'] as num?)?.toDouble() ?? 0.0;
+    final int deductedPoints = (data['deductedPoints'] as num?)?.toInt() ?? 0;
+
+    // --- 2. XỬ LÝ KHO ---
+    if (returnItems.isNotEmpty) {
+      await _updateStock(batch, returnItems, isReturn: false);
+    }
+    if (exchangeItems.isNotEmpty) {
+      await _updateStock(batch, exchangeItems, isReturn: true);
+    }
+
+    // --- 3. REVERT BILL GỐC ---
+    if (originalBillId != null) {
+      final originalBillRef = _db.collection('bills').doc(originalBillId);
+      final originalBillDoc = await originalBillRef.get();
+
+      if (originalBillDoc.exists) {
+        final originalData = originalBillDoc.data()!;
+        if (isCorrection && (exchangeItems.isEmpty || exchangeTotalPayable == 0)) {
+          if (originalData['status'] == 'return') {
+            shouldRestoreBillCount = true;
+          }
+        }
+
+        final List<dynamic> rawOriginalItems = List.from(originalData['items'] ?? []);
+        List<Map<String, dynamic>> updatedOriginalItems = [];
+        bool stillHasReturns = false;
+
+        for (var itemData in rawOriginalItems) {
+          Map<String, dynamic> processingItem = Map<String, dynamic>.from(itemData is Map ? itemData : {});
+          if (processingItem.isNotEmpty) {
+            String billLineId = processingItem['lineId'] ?? '';
+            String pId = (processingItem['product'] as Map?)?['id'] ?? '';
+
+            final matchingReturnItem = returnItems.firstWhereOrNull((rItem) {
+              if (billLineId.isNotEmpty && rItem.lineId == billLineId) return true;
+              return rItem.product.id == pId;
+            });
+
+            if (matchingReturnItem != null) {
+              double currentReturned = (processingItem['returnedQuantity'] as num?)?.toDouble() ?? 0.0;
+              double newReturned = currentReturned - matchingReturnItem.quantity;
+              processingItem['returnedQuantity'] = newReturned < 0 ? 0 : newReturned;
+            }
+            if ((processingItem['returnedQuantity'] ?? 0) > 0) stillHasReturns = true;
+          }
+          updatedOriginalItems.add(processingItem);
+        }
+
+        final Map<String, dynamic> updateOriginalBillData = {
+          'items': updatedOriginalItems,
+          'hasReturns': stillHasReturns,
+          if (deductedDebt > 0) 'debtAmount': FieldValue.increment(deductedDebt),
+        };
+
+        // 2. Kiểm tra logic sửa status (Nếu bill gốc đang là 'return' thì đưa về 'completed')
+        if (originalData['status'] == 'return') {
+          updateOriginalBillData['status'] = 'completed';
+        }
+
+        if (deductedPoints > 0) {
+          updateOriginalBillData['returnedPoints'] = FieldValue.increment(-deductedPoints);
+        }
+
+        // 3. Thực hiện update 1 lần duy nhất
+        batch.update(originalBillRef, updateOriginalBillData);
+      }
+    }
+
+    // --- 4. REVERT KHÁCH HÀNG ---
+    if (customerId != null) {
+      final double netSpentChange = exchangeTotalPayable - returnTotalPayable;
+      batch.update(_db.collection('customers').doc(customerId), {
+        'totalSpent': FieldValue.increment(-netSpentChange),
+        'debt': FieldValue.increment(deductedDebt),
+        'points': FieldValue.increment(deductedPoints),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // --- 5. REVERT BÁO CÁO (REPORT & SHIFT) ---
+
+    // A. Exchange Data
+    double exRevenue = exchangeTotalPayable;
+    double exProfit = 0.0;
+    double exTax = 0.0;
+
+    for (var item in exchangeItems) {
+      double cost = item.product.costPrice;
+      double toppingsCost = 0;
+      for (var t in item.toppings.entries) {
+        toppingsCost += (t.key.costPrice * t.value);
+      }
+      double itemTotalCost = (cost * item.quantity) + (toppingsCost * item.quantity);
+      exProfit += (item.subtotal - itemTotalCost);
+    }
+    for (var itemMap in rawExchangeItems) {
+      if (itemMap is Map) exTax += (itemMap['taxAmount'] as num?)?.toDouble() ?? 0.0;
+    }
+
+    // B. Chuẩn bị Map Update
+    final Map<String, dynamic> revertReportData = {
+      'returnCount': FieldValue.increment(-1),
+      'totalDebt': FieldValue.increment(deductedDebt),
+    };
+
+    if (shouldRestoreBillCount) {
+      revertReportData['billCount'] = FieldValue.increment(1);
+    }
+
+    double deltaRevenue = -exRevenue;
+    double deltaProfit = -exProfit;
+    double deltaTax = -exTax;
+
+    if (isCorrection) {
+      // Cùng ngày: Cộng ngược lại vào Doanh thu chính
+      deltaRevenue += returnTotalPayable;
+      deltaProfit += rProfit;
+      deltaTax += rTax;
+
+      revertReportData['totalSurcharges'] = FieldValue.increment(rSurcharge);
+      revertReportData['totalBillDiscount'] = FieldValue.increment(rBillDisc);
+      revertReportData['totalVoucherDiscount'] = FieldValue.increment(rVoucherDisc);
+      revertReportData['totalPointsValue'] = FieldValue.increment(rPointsVal);
+
+    } else {
+      // Khác ngày: Trừ đi khỏi Doanh thu trả
+      revertReportData['totalReturnRevenue'] = FieldValue.increment(-returnTotalPayable);
+      revertReportData['totalReturnProfit'] = FieldValue.increment(-rProfit);
+      revertReportData['totalReturnTax'] = FieldValue.increment(-rTax);
+
+      revertReportData['totalReturnSurcharges'] = FieldValue.increment(-rSurcharge);
+      revertReportData['totalReturnBillDiscount'] = FieldValue.increment(-rBillDisc);
+      revertReportData['totalReturnVoucherDiscount'] = FieldValue.increment(-rVoucherDisc);
+      revertReportData['totalReturnPointsValue'] = FieldValue.increment(-rPointsVal);
+    }
+
+    if (deltaRevenue != 0) revertReportData['totalRevenue'] = FieldValue.increment(deltaRevenue);
+    if (deltaProfit != 0) revertReportData['totalProfit'] = FieldValue.increment(deltaProfit);
+    if (deltaTax != 0) revertReportData['totalTax'] = FieldValue.increment(deltaTax);
+
+    // [FIX QUAN TRỌNG] Hoàn lại dòng tiền (Tiền mặt/Chuyển khoản)
+    // Bill trả hàng lưu số ÂM (ví dụ: Tiền mặt: -101562) -> Khi hủy, ta trừ đi số âm này (tức là cộng lại)
+    returnPayments.forEach((method, amount) {
+      final double val = (amount as num).toDouble();
+      if (val != 0) {
+        // Cập nhật breakdown phương thức thanh toán
+        revertReportData['paymentMethods.$method'] = FieldValue.increment(-val);
+
+        // Cập nhật tổng Tiền mặt hoặc Khác
+        if (method == 'Tiền mặt') {
+          revertReportData['totalCash'] = FieldValue.increment(-val);
+        } else {
+          revertReportData['totalOtherPayments'] = FieldValue.increment(-val);
+        }
+      }
+    });
+
+    // Update Firestore
+    final String fullReportId = '${storeId}_$reportDateKey';
+    final reportRef = _db.collection('daily_reports').doc(fullReportId);
+
+    batch.update(reportRef, revertReportData);
+
+    if (shiftId != null) {
+      final Map<String, dynamic> revertShiftData = {};
+
+      // Map các trường cơ bản
+      revertReportData.forEach((key, value) {
+        // Bỏ qua các key lồng nhau (paymentMethods.ABC) để xử lý riêng
+        if (!key.contains('.')) {
+          revertShiftData['shifts.$shiftId.$key'] = value;
+        }
+      });
+
+      // [FIX] Map lại paymentMethods lồng nhau cho Shift
+      returnPayments.forEach((method, amount) {
+        final double val = (amount as num).toDouble();
+        if (val != 0) {
+          revertShiftData['shifts.$shiftId.paymentMethods.$method'] = FieldValue.increment(-val);
+        }
+      });
+
+      batch.update(reportRef, revertShiftData);
+    }
+
+    // --- C. Revert Hàng Bán Chạy (Products Report) ---
+    final Map<String, double> productQtyRevert = {};
+    final Map<String, double> productRevRevert = {};
+
+    // 1. Revert Exchange (Hàng đổi/Mua mới):
+    for (var item in exchangeItems) {
+      String pid = item.product.id;
+      productQtyRevert[pid] = (productQtyRevert[pid] ?? 0) - item.quantity;
+      productRevRevert[pid] = (productRevRevert[pid] ?? 0) - item.subtotal;
+    }
+
+    // 2. Revert Return (Hàng trả):
+    if (isCorrection) {
+      for (var item in returnItems) {
+        String pid = item.product.id;
+        productQtyRevert[pid] = (productQtyRevert[pid] ?? 0) + item.quantity;
+        productRevRevert[pid] = (productRevRevert[pid] ?? 0) + item.subtotal;
+      }
+    }
+
+    // Thực hiện Update vào DB
+    if (productQtyRevert.isNotEmpty) {
+      final reportRef = _db.collection('daily_reports').doc(fullReportId);
+
+      productQtyRevert.forEach((pid, qty) {
+        if (qty != 0) {
+          double rev = productRevRevert[pid] ?? 0;
+
+          // Update Report Ngày
+          batch.update(reportRef, {
+            'products.$pid.quantitySold': FieldValue.increment(qty),
+            'products.$pid.totalRevenue': FieldValue.increment(rev),
+          });
+
+          // Update Report Ca
+          if (shiftId != null) {
+            batch.update(reportRef, {
+              'shifts.$shiftId.products.$pid.quantitySold': FieldValue.increment(qty),
+              'shifts.$shiftId.products.$pid.totalRevenue': FieldValue.increment(rev),
+            });
+          }
+        }
+      });
+    }
+
+    // --- 6. CẬP NHẬT TRẠNG THÁI BILL ---
+    batch.update(_db.collection('bills').doc(returnBillId), {
+      'status': 'cancelled',
+      'cancelReason': reason,
+      'cancelledBy': currentUser.uid,
+      'cancelledAt': FieldValue.serverTimestamp(),
+    });
 
     await batch.commit();
   }
@@ -781,7 +1191,7 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
 
       Navigator.of(context).push(MaterialPageRoute(
           builder: (context) => Scaffold(
-            appBar: AppBar(title: Text("Xử lý Đổi/Trả: ${widget.originalBill.billCode}")),
+            appBar: AppBar(title: Text("Đổi/Trả: ${widget.originalBill.billCode}")),
             body: ExchangeProcessorWidget(
               currentUser: widget.currentUser,
               returnService: widget.returnService,
@@ -1060,7 +1470,7 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text('Tra Cứu & Đổi Trả Hàng'),
+        title: const Text('Đổi Trả'),
         elevation: 0,
         centerTitle: false,
       ),
@@ -1267,6 +1677,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
   double _dispTotalRefundAmount = 0;
   bool _isProcessing = false;
   double _dispExchangeTax = 0;
+  double _earnRate = 0.0;
 
   Map<String, dynamic>? _storeTaxSettings;
   final Map<String, String> _productTaxMap = {};
@@ -1298,10 +1709,24 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
     _loadTaxSettings();
     _loadPaymentMethods();
     _preloadAllProducts();
-
+    _loadPointSettings();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _calculateDetailedReturnValues();
     });
+  }
+
+  Future<void> _loadPointSettings() async {
+    try {
+      final pointsData = await _firestoreService.loadPointsSettings(widget.currentUser.storeId);
+      if (mounted) {
+        setState(() {
+          _earnRate = (pointsData['earnRate'] as num?)?.toDouble() ?? 0.0;
+        });
+        debugPrint(">>> Tỷ lệ tích điểm: $_earnRate");
+      }
+    } catch (e) {
+      debugPrint("Lỗi tải cấu hình điểm: $e");
+    }
   }
 
   Future<void> _loadCurrentShift() async {
@@ -1763,6 +2188,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
         note: finalNote,
         paymentMethodName: _selectedRefundMethod,
         currentShiftId: _currentShiftId,
+        earnRate: _earnRate,
       );
 
       ToastService().show(message: "Giao dịch thành công!", type: ToastType.success);
@@ -1812,7 +2238,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           if (_dispReturnSurcharge > 0) _buildSummaryRow("Hoàn phụ thu:", _dispReturnSurcharge),
           if (_dispReturnTax > 0) _buildSummaryRow("Hoàn thuế:", _dispReturnTax),
           const Divider(),
-          _buildSummaryRow("GIÁ TRỊ HOÀN LẠI:", _dispTotalRefundAmount, isBold: true, color: Colors.red),
+          _buildSummaryRow("GIÁ TRỊ HOÀN:", _dispTotalRefundAmount, isBold: true, color: Colors.red),
         ],
       ),
     );
@@ -2001,7 +2427,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           elevation: 2,
           child: Column(
             children: [
-              _buildCardHeader("HÀNG TRẢ LẠI (Nhập kho)", Colors.red.shade50, Colors.red),
+              _buildCardHeader("SẢN PHẨM TRẢ", Colors.red.shade50, Colors.red),
 
               // [FIX LỖI MẤT CARD TRÊN DESKTOP]
               // Nếu Mobile: Dùng SizedBox cố định chiều cao.
@@ -2041,7 +2467,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           elevation: 2,
           child: Column(
             children: [
-              _buildCardHeader("HÀNG ĐỔI / MUA MỚI", Colors.green.shade50, Colors.green,
+              _buildCardHeader("SẢN PHẨM ĐỔI", Colors.green.shade50, Colors.green,
                   action: ElevatedButton.icon(
                     onPressed: _pickExchangeProducts,
                     icon: const Icon(Icons.add, size: 16),
@@ -2058,8 +2484,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
               Container(
                 padding: const EdgeInsets.all(12), color: Colors.green.shade50.withValues(alpha: 0.3),
                 child: Column(children: [
-                  if (_dispExchangeTax > 0) _buildSummaryRow("Thuế (Hàng đổi):", _dispExchangeTax),
-                  _buildSummaryRow("TỔNG MUA MỚI:", _totalExchangeValue, isBold: true, color: Colors.green),
+                  if (_dispExchangeTax > 0) _buildSummaryRow("Thuế:", _dispExchangeTax),
+                  _buildSummaryRow("GIÁ TRỊ ĐỔI:", _totalExchangeValue, isBold: true, color: Colors.green),
                 ]),
               )
             ],

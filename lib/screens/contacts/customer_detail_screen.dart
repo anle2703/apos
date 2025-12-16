@@ -82,8 +82,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         // 1. Lấy hóa đơn bán hàng
         final billsRaw = await _firestoreService.getBillsByCustomer(widget.customerId);
         final bills = billsRaw.where((bill) =>
-        bill.status != 'cancelled' &&
-            bill.status != 'return'
+        bill.status != 'cancelled'
         ).toList();
 
         // 2. Lấy phiếu thu nợ thủ công
@@ -415,13 +414,83 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
   Widget _buildBillCard(CustomerTransaction tx) {
     final bill = tx.transaction as BillModel;
+    final bool isCancelled = bill.status == 'cancelled';
+
+    // [SỬA LỖI QUAN TRỌNG]
+    // Chỉ coi là phiếu trả/đổi hàng khi mã bắt đầu bằng "TH"
+    // Bỏ điều kiện check status == 'return' để tránh nhầm bill gốc đã trả hết
+    final bool isReturnReceipt = bill.billCode.toUpperCase().startsWith('TH');
+
+    // Bill gốc đã trả hàng (để hiện nhãn phụ "ĐÃ TRẢ HÀNG")
+    final bool isOriginalBillReturned = !isReturnReceipt && bill.status == 'return';
+
+    // --- 1. TÍNH TOÁN SỐ TIỀN HIỂN THỊ ---
+    double displayAmount = bill.totalPayable;
+    Color amountColor = Colors.black;
+    String prefixMoney = '';
+
+    if (isCancelled) {
+      amountColor = Colors.grey;
+    } else if (isReturnReceipt) {
+      // === LOGIC CHO PHIẾU TRẢ/ĐỔI (TH...) ===
+      // Ưu tiên dùng netDifference (Chênh lệch). Nếu null -> Mặc định là âm (Hoàn tiền)
+      if (bill.netDifference != null) {
+        displayAmount = bill.netDifference!;
+      } else {
+        displayAmount = -bill.totalPayable;
+      }
+
+      if (displayAmount > 0) {
+        amountColor = AppTheme.primaryColor; // Khách trả thêm
+        prefixMoney = '+';
+      } else if (displayAmount < 0) {
+        amountColor = Colors.red; // Hoàn tiền
+        // Số âm có sẵn dấu trừ
+      } else {
+        amountColor = Colors.grey.shade700; // Hòa vốn
+      }
+    } else {
+      // === LOGIC CHO BILL BÁN GỐC (HD...) ===
+      // Luôn hiện số dương màu cam/xanh
+      if (bill.debtAmount > 0) {
+        amountColor = Colors.orange;
+      } else {
+        amountColor = AppTheme.primaryColor;
+      }
+    }
+
+    // --- 2. TÍNH TOÁN ĐIỂM (Dùng deductedPoints) ---
+    double netPointChange = 0.0;
+
+    if (isReturnReceipt) {
+      // Công thức: Điểm kiếm được (từ hàng đổi) - Điểm bị thu hồi (từ hàng trả)
+      // deductedPoints cần được thêm vào BillModel như đã hướng dẫn trước đó
+      netPointChange = bill.pointsEarned - bill.deductedPoints;
+    } else {
+      // Đơn bán thường: Chỉ có cộng điểm
+      netPointChange = bill.pointsEarned;
+    }
+
+    // Kiểm tra có dữ liệu điểm để hiển thị không
+    bool hasPointData = false;
+    if (isReturnReceipt) {
+      // Với đơn trả: Hiện khi có chênh lệch điểm HOẶC có dùng điểm
+      hasPointData = (netPointChange.abs() > 0) || (bill.customerPointsUsed > 0);
+    } else {
+      // Với đơn bán: Hiện khi có tích điểm HOẶC dùng điểm
+      hasPointData = (bill.pointsEarned > 0) || (bill.customerPointsUsed > 0);
+    }
+
+    // Kiểm tra dữ liệu nợ (Để ẩn/hiện dòng nợ)
+    final bool hasDebtData = (tx.openingDebt.abs() > 0.001) ||
+        (bill.debtAmount.abs() > 0.001) ||
+        (tx.closingDebt.abs() > 0.001);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: () {
-          _showBillDetailDialog(bill)
-              .then((_) => _loadAllData());
+          _showBillDetailDialog(bill).then((_) => _loadAllData());
         },
         borderRadius: BorderRadius.circular(8),
         child: Padding(
@@ -429,28 +498,38 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- HÀNG 1: MÃ HĐ / TỔNG TIỀN ---
+              // --- HÀNG 1: MÃ BILL & SỐ TIỀN ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
                     bill.billCode,
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 16),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      // Bill trả (TH) màu Tím, Bill gốc (HD) màu Chính
+                      color: isReturnReceipt ? Colors.red : AppTheme.primaryColor,
+                      fontSize: 16,
+                    ),
                   ),
                   Text(
-                    '${formatNumber(bill.totalPayable)} đ',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 16),
+                    '$prefixMoney${formatNumber(displayAmount)} đ',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: amountColor,
+                      fontSize: 16,
+                    ),
                   ),
                 ],
               ),
-              // --- HÀNG 2: NGƯỜI TẠO / NGÀY GIỜ ---
+
+              // --- HÀNG 2: NGƯỜI TẠO & NGÀY GIỜ ---
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
                     child: Row(
                       children: [
-                        Icon(Icons.person_outline, size: 16, color: Colors.black),
+                        const Icon(Icons.person_outline, size: 16, color: Colors.black),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -468,33 +547,52 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   ),
                 ],
               ),
-              // --- CÔNG NỢ ---
-              const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
-              _buildDebtRow('Nợ đầu kỳ:', tx.openingDebt),
-              _buildDebtRow('Phát sinh:', (tx.transaction as BillModel).debtAmount, isChange: true),
-              _buildDebtRow('Nợ cuối kỳ:', tx.closingDebt, isFinal: true),
 
-              // --- BỔ SUNG LẠI CODE HIỂN THỊ ĐIỂM ---
-              if (bill.pointsEarned > 0 || bill.customerPointsUsed > 0) ...[
-                const Divider(height: 2, thickness: 0.5, color: Colors.grey,),
-                if (bill.pointsEarned > 0)
-                  _buildPointsRow(
-                      label: 'Điểm thưởng cộng:',
-                      value: bill.pointsEarned,
-                      color: Colors.green,
-                      prefix: '+'
+              // Nhãn phụ cho Bill gốc đã trả hàng
+              if (isOriginalBillReturned)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    "ĐÃ TRẢ HÀNG",
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
                   ),
-                if (bill.customerPointsUsed > 0) ...[
-                  SizedBox(height: bill.pointsEarned > 0 ? 4 : 0),
+                ),
+
+              // --- HÀNG 3: CÔNG NỢ ---
+              if (hasDebtData) ...[
+                const Divider(height: 12, thickness: 0.5, color: Colors.grey),
+                _buildDebtRow('Nợ đầu kỳ:', tx.openingDebt),
+                _buildDebtRow('Phát sinh:', bill.debtAmount, isChange: true),
+                _buildDebtRow('Nợ cuối kỳ:', tx.closingDebt, isFinal: true),
+              ],
+
+              // --- HÀNG 4: ĐIỂM THƯỞNG ---
+              if (hasPointData) ...[
+                if (!hasDebtData)
+                  const Divider(height: 12, thickness: 0.5, color: Colors.grey)
+                else
+                  const SizedBox(height: 4),
+
+                // Hiển thị điểm tích lũy / chênh lệch
+                if (netPointChange != 0)
                   _buildPointsRow(
-                      label: 'Điểm thưởng sử dụng:',
-                      value: bill.customerPointsUsed,
-                      color: Colors.red,
-                      prefix: '-'
+                    label: isReturnReceipt ? 'Thay đổi điểm:' : 'Điểm tích lũy:',
+                    value: netPointChange.abs(),
+                    color: netPointChange > 0 ? Colors.green : Colors.red,
+                    prefix: netPointChange > 0 ? '+' : '-',
+                  ),
+
+                // Hiển thị điểm đã sử dụng
+                if (bill.customerPointsUsed > 0) ...[
+                  SizedBox(height: netPointChange != 0 ? 4 : 0),
+                  _buildPointsRow(
+                    label: 'Điểm sử dụng:',
+                    value: bill.customerPointsUsed,
+                    color: Colors.red,
+                    prefix: '-',
                   ),
                 ]
               ],
-              // --- KẾT THÚC BỔ SUNG ---
             ],
           ),
         ),

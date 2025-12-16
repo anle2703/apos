@@ -304,26 +304,50 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
 
     for (final doc in billDocs) {
       final bill = BillModel.fromFirestore(doc);
-      final double actualCashAmount = bill.totalPayable - bill.debtAmount;
+      // Lấy Net Difference nếu có (đây là số tiền thực tế giao dịch của đơn đổi trả)
+      double actualCashAmount = bill.netDifference ?? (bill.totalPayable - bill.debtAmount);
+
       if (actualCashAmount.abs() < 0.001) continue;
+
       final String codeUpper = bill.billCode.trim().toUpperCase();
 
-      // 1. BILL TRẢ HÀNG (Mã bắt đầu bằng RT) -> CHI
-      if (codeUpper.startsWith('TH')) {
-        _allTransactions.add(UnifiedTransaction(
-          id: bill.id,
-          type: TransactionType.expense,
-          source: TransactionSource.bill,
-          date: bill.createdAt,
-          code: bill.billCode,
-          amount: actualCashAmount, // Số dương
-          description: 'Hoàn tiền trả hàng',
-          user: bill.createdByName ?? 'N/A',
-          partnerName: bill.customerName ?? 'Khách lẻ',
-          status: 'completed',
-          cancelledBy: null,
-        ));
-        totalExp += actualCashAmount;
+      // 1. XỬ LÝ BILL TRẢ HÀNG / ĐỔI HÀNG (Mã TH hoặc status return)
+      if (codeUpper.startsWith('TH') || bill.status == 'return') {
+
+        if (actualCashAmount > 0) {
+          // KHÁCH TRẢ THÊM TIỀN -> Ghi nhận là THU
+          _allTransactions.add(UnifiedTransaction(
+            id: bill.id,
+            type: TransactionType.revenue, // <--- THU
+            source: TransactionSource.bill,
+            date: bill.createdAt,
+            code: bill.billCode,
+            amount: actualCashAmount,
+            description: 'Thu thêm đổi hàng',
+            user: bill.createdByName ?? 'N/A',
+            partnerName: bill.customerName ?? 'Khách lẻ',
+            status: 'completed',
+            cancelledBy: null,
+          ));
+          totalRev += actualCashAmount;
+
+        } else {
+          // CỬA HÀNG HOÀN TIỀN (Số âm) -> Ghi nhận là CHI (Lấy trị tuyệt đối)
+          _allTransactions.add(UnifiedTransaction(
+            id: bill.id,
+            type: TransactionType.expense, // <--- CHI
+            source: TransactionSource.bill,
+            date: bill.createdAt,
+            code: bill.billCode,
+            amount: actualCashAmount.abs(), // Lấy số dương
+            description: 'Hoàn tiền trả hàng',
+            user: bill.createdByName ?? 'N/A',
+            partnerName: bill.customerName ?? 'Khách lẻ',
+            status: 'completed',
+            cancelledBy: null,
+          ));
+          totalExp += actualCashAmount.abs();
+        }
       }
 
       // 2. BILL BÁN HÀNG (Mã KHÔNG phải RT, và không bị Hủy) -> THU

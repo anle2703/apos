@@ -240,7 +240,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       };
 
       if (_receivePaymentNotification) {
-        // 1. Xin quyền thông báo (quan trọng cho iOS và Android 13+)
+        // 1. Xin quyền thông báo
         FirebaseMessaging messaging = FirebaseMessaging.instance;
         NotificationSettings settings = await messaging.requestPermission(
           alert: true,
@@ -252,21 +252,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // 2. Lấy Token thiết bị hiện tại
           String? token = await messaging.getToken();
           if (token != null) {
-            // 3. Dùng arrayUnion để thêm token vào danh sách (giúp đăng nhập nhiều máy cùng lúc đều nhận được)
-            userUpdateData['fcmTokens'] = FieldValue.arrayUnion([token]);
+            // [CHANGE] Lưu dạng String thay vì Array
+            userUpdateData['fcmTokens'] = token;
           }
         } else {
           // Người dùng từ chối cấp quyền -> Tắt switch
           setState(() => _receivePaymentNotification = false);
           userUpdateData['receivePaymentNotification'] = false;
+          // [CHANGE] Xóa token bằng cách gán chuỗi rỗng hoặc null
+          userUpdateData['fcmTokens'] = "";
           ToastService().show(message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.", type: ToastType.warning);
         }
       } else {
-        // Nếu tắt chức năng -> Xóa token của máy này khỏi danh sách để không làm phiền
-        String? token = await FirebaseMessaging.instance.getToken();
-        if (token != null) {
-          userUpdateData['fcmTokens'] = FieldValue.arrayRemove([token]);
-        }
+        // [CHANGE] Nếu tắt chức năng -> Xóa token (gán rỗng)
+        userUpdateData['fcmTokens'] = "";
       }
 
       if (_isThisDeviceTheServer) {

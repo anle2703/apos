@@ -27,6 +27,7 @@ import 'dart:async';
 import '../models/store_settings_model.dart';
 import '../services/settings_service.dart';
 import '../widgets/vietqr_generator.dart';
+import '../screens/sales/return_order_screen.dart';
 
 enum TimeRange {
   today,
@@ -1294,7 +1295,16 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
     if (confirmed != true) return;
 
     try {
-      await BillService().cancelBillAndReverseTransactions(widget.bill, widget.currentUser.storeId);
+      if (widget.bill.billCode.toUpperCase().startsWith('TH')) {
+        await ReturnService().cancelReturnOrder(
+          returnBillId: widget.bill.id,
+          currentUser: widget.currentUser,
+          reason: "Hủy thủ công từ lịch sử",
+        );
+      } else {
+        await BillService().cancelBillAndReverseTransactions(widget.bill, widget.currentUser.storeId);
+      }
+
       ToastService().show(message: "Hóa đơn đã được hủy và hoàn tác", type: ToastType.success);
       if (context.mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -1382,29 +1392,34 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   }
 
   Widget _buildRelatedBillsLink() {
-    // 1. NẾU LÀ ĐƠN CON (CÓ CHA) -> HIỆN NÚT VỀ CHA
     if (widget.bill.originalBillId != null && widget.bill.originalBillId!.isNotEmpty) {
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: InkWell(
-          onTap: () async {
-            if (!context.mounted) return;
-            // Lấy đơn gốc
-            final original = await BillService().getOriginalBill(widget.bill.originalBillId!);
+            onTap: () async {
+              final ctx = context;
+              final original = await BillService().getOriginalBill(widget.bill.originalBillId!);
 
-            if (context.mounted) {
+              if (!ctx.mounted) return;
+
               if (original != null) {
-                Navigator.pop(context);
+                Navigator.pop(ctx);
                 showDialog(
-                  context: context,
-                  builder: (_) => BillReceiptDialog(bill: original, currentUser: widget.currentUser, storeInfo: widget.storeInfo),
+                  context: ctx,
+                  builder: (_) => BillReceiptDialog(
+                    bill: original,
+                    currentUser: widget.currentUser,
+                    storeInfo: widget.storeInfo,
+                  ),
                 );
               } else {
-                ToastService().show(message: "Không tìm thấy hóa đơn gốc.", type: ToastType.warning);
+                ToastService().show(
+                  message: "Không tìm thấy hóa đơn gốc.",
+                  type: ToastType.warning,
+                );
               }
-            }
-          },
-          child: Container(
+            },
+            child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
                 color: Colors.blue.shade50,

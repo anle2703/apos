@@ -104,13 +104,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 3. [LOGIC ĐÃ SỬA] Cập nhật Token cho CHÍNH TÀI KHOẢN ĐANG ĐĂNG NHẬP
     try {
-      // Dùng uid của người đang đăng nhập, không dùng ownerUid
       final currentUserUid = _currentUser!.uid;
-
-      // Đọc cấu hình của chính user này
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUserUid).get();
-
-      // Kiểm tra xem user này có bật nhận thông báo không
       final bool isEnabled = userDoc.data()?['receivePaymentNotification'] ?? false;
 
       if (isEnabled) {
@@ -118,12 +113,12 @@ class _HomeScreenState extends State<HomeScreen> {
         debugPrint(">>> [DEBUG] Token thiết bị: $token");
 
         if (token != null) {
-          // Sử dụng arrayUnion: Chỉ thêm nếu Token CHƯA TỒN TẠI
-          // Giúp đảm bảo mảng fcmTokens luôn chứa các token duy nhất
+          // [CHANGE] Thay arrayUnion bằng gán trực tiếp token (String)
+          // Việc này sẽ ghi đè token cũ bất kể là thiết bị nào
           await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
-            'fcmTokens': FieldValue.arrayUnion([token])
+            'fcmTokens': token
           });
-          debugPrint(">>> [DEBUG] Đã đồng bộ Token vào tài khoản $currentUserUid.");
+          debugPrint(">>> [DEBUG] Đã cập nhật Token (String) cho tài khoản $currentUserUid.");
         }
       }
     } catch (e) {

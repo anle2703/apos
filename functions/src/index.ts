@@ -705,14 +705,31 @@ export const sendPaymentNotification = onDocumentWritten("bills/{billId}",
       if (usersSnap.empty) return;
 
       const tokens: string[] = [];
+
       usersSnap.forEach((doc) => {
         const userData = doc.data();
-        if (userData.fcmTokens && Array.isArray(userData.fcmTokens)) {
-          tokens.push(...userData.fcmTokens);
+        const tokenData = userData.fcmTokens;
+
+        if (tokenData) {
+          // CASE 1: Dữ liệu cũ (Mảng)
+          if (Array.isArray(tokenData)) {
+            tokenData.forEach((t: any) => {
+              // Kiểm tra kỹ t có phải string không để tránh lỗi crash
+              if (typeof t === 'string' && t.trim() !== '') {
+                tokens.push(t);
+              }
+            });
+          } 
+          // CASE 2: Dữ liệu mới (String) - Logic ghi đè bạn vừa làm
+          else if (typeof tokenData === 'string' && tokenData.trim() !== '') {
+            tokens.push(tokenData);
+          }
         }
       });
 
       if (tokens.length === 0) return;
+
+      // QUAN TRỌNG: Loại bỏ các token trùng lặp (nếu có)
       const uniqueTokens = [...new Set(tokens)];
 
       // 4. Gửi thông báo (Dùng âm thanh mặc định)

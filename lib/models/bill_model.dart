@@ -28,9 +28,11 @@ class BillModel {
   final String? customerId;
   final double customerPointsUsed;
   final double customerPointsValue;
+  final double deductedPoints;
   final String? voucherCode;
   final double voucherDiscount;
   final double pointsEarned;
+  final double returnedPoints;
   final double totalProfit;
   final String? reportDateKey;
   final String? shiftId;
@@ -41,8 +43,6 @@ class BillModel {
   final String? guestAddress;
   final String? originalBillId;
   final String? originalBillCode;
-
-  // [NEW] Các trường mới cho tính năng Đổi hàng
   final List<dynamic>? exchangeItems;
   final Map<String, dynamic>? exchangeSummary;
   final double? exchangeSubtotal;
@@ -77,6 +77,8 @@ class BillModel {
     this.voucherCode,
     required this.voucherDiscount,
     required this.pointsEarned,
+    this.returnedPoints = 0.0,
+    this.deductedPoints = 0.0,
     required this.totalProfit,
     this.reportDateKey,
     this.shiftId,
@@ -87,8 +89,6 @@ class BillModel {
     this.guestAddress,
     this.originalBillId,
     this.originalBillCode,
-
-    // [NEW] Constructor update
     this.exchangeItems,
     this.exchangeSummary,
     this.exchangeSubtotal,
@@ -155,6 +155,8 @@ class BillModel {
       voucherCode: data['voucherCode'] as String?,
       voucherDiscount: (data['voucherDiscount'] as num?)?.toDouble() ?? 0.0,
       pointsEarned: (data['pointsEarned'] as num?)?.toDouble() ?? 0.0,
+      returnedPoints: (data['returnedPoints'] as num?)?.toDouble() ?? 0.0,
+      deductedPoints: (data['deductedPoints'] as num?)?.toDouble() ?? 0.0,
       totalProfit: (data['totalProfit'] as num?)?.toDouble() ?? 0.0,
       reportDateKey: data['reportDateKey'] as String?,
       shiftId: data['shiftId'] as String?,
@@ -165,8 +167,6 @@ class BillModel {
       guestAddress: data['guestAddress'] as String?,
       originalBillId: data['originalBillId'] as String?,
       originalBillCode: data['originalBillCode'] as String?,
-
-      // [NEW] Mapping fields từ Firestore
       exchangeItems: data['exchangeItems'] as List<dynamic>?,
       exchangeSummary: data['exchangeSummary'] as Map<String, dynamic>?,
       exchangeSubtotal: (data['exchangeSubtotal'] as num?)?.toDouble(),
