@@ -1364,7 +1364,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Online Booking'),
+        title: const Text('Đơn hàng Online'),
         actions: _buildFilterActions(),
       ),
       body: FutureBuilder<List<ProductModel>>(

@@ -1576,7 +1576,8 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     _session.saveSessionToLocal();
   }
 
-  void _removeItem(String key) {
+  // [SỬA LẠI HÀM NÀY] Thêm tham số allowClose
+  void _removeItem(String key, {bool allowClose = true}) {
     if (_currentTab == null) return;
     final item = _currentTab!.items[key];
 
@@ -1592,10 +1593,14 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     });
 
     _cartUpdateController.add(null);
-    // [QUAN TRỌNG] Chạy lại logic sau khi xóa
     _applyBuyXGetYLogic();
     _session.saveSessionToLocal();
-    if (_currentTab!.items.isEmpty && !isDesktop && mounted) {
+
+    // [QUAN TRỌNG] Chỉ đóng nếu allowClose = true
+    if (allowClose &&
+        _currentTab!.items.isEmpty &&
+        !isDesktop &&
+        mounted) {
       Navigator.of(context).pop();
     }
   }
@@ -2440,7 +2445,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                       .toList();
 
                   for (final key in keysToRemove) {
-                    _removeItem(key);
+                    _removeItem(key, allowClose: false);
                   }
                 },
                 child: Container(
