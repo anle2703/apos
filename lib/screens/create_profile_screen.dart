@@ -5,6 +5,7 @@ import '../../services/firestore_service.dart';
 import '../../services/toast_service.dart';
 import 'home_screen.dart';
 import '../../widgets/custom_text_form_field.dart';
+import 'auth_gate.dart';
 
 class CreateProfileScreen extends StatefulWidget {
   final User user;
@@ -37,6 +38,12 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
   void _cancelAndSignOut() async {
     setState(() => _isLoading = true);
     await _authService.signOut();
+
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const AuthGate()),
+          (route) => false,
+    );
   }
 
   String _generateStoreId(String storeName) {

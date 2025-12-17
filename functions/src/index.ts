@@ -11,6 +11,7 @@ import {
 import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import moment from "moment-timezone";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -770,3 +771,128 @@ export const sendPaymentNotification = onDocumentWritten("bills/{billId}",
     }
   }
 );
+
+
+// ============================================================================
+// HÀM 4: CHECK TỒN KHO HÀNG NGÀY (CHẠY 8:00 SÁNG)
+// ============================================================================
+export const checkLowStockDaily = onSchedule(
+  {
+    schedule: "every day 08:00", // Chạy lúc 8h sáng mỗi ngày
+    timeZone: "Asia/Ho_Chi_Minh",
+    region: "asia-southeast1",
+    timeoutSeconds: 540, // Tăng thời gian timeout vì phải quét nhiều store
+  },
+  async (event) => {
+    console.log("--- BẮT ĐẦU CHECK TỒN KHO HÀNG NGÀY ---");
+
+    try {
+      // 1. Lấy danh sách Users có bật thông báo và có Token
+      const usersSnap = await db.collection("users")
+        .where("receivePaymentNotification", "==", true) // Tận dụng cờ này hoặc tạo cờ mới tùy bạn
+        .get();
+
+      if (usersSnap.empty) {
+        console.log("Không có user nào bật thông báo.");
+        return;
+      }
+
+      // 2. Gom nhóm Token theo StoreID để tránh query DB nhiều lần cho cùng 1 cửa hàng
+      // Map<StoreId, List<Tokens>>
+      const storeTokensMap = new Map<string, string[]>();
+
+      usersSnap.forEach((doc) => {
+        const data = doc.data();
+        const storeId = data.storeId;
+        const tokenData = data.fcmTokens;
+        
+        if (storeId && tokenData) {
+            let tokens: string[] = [];
+            // Logic lấy token giống hàm sendPaymentNotification
+            if (Array.isArray(tokenData)) {
+                tokens = tokenData.filter(t => typeof t === 'string' && t.trim() !== '');
+            } else if (typeof tokenData === 'string' && tokenData.trim() !== '') {
+                tokens = [tokenData];
+            }
+
+            if (tokens.length > 0) {
+                const existing = storeTokensMap.get(storeId) || [];
+                storeTokensMap.set(storeId, [...existing, ...tokens]);
+            }
+        }
+      });
+
+      // 3. Duyệt từng Store để kiểm tra sản phẩm
+      for (const [storeId, tokens] of storeTokensMap.entries()) {
+        const uniqueTokens = [...new Set(tokens)];
+        if (uniqueTokens.length === 0) continue;
+
+        // Lấy tất cả sản phẩm của Store (Firestore không hỗ trợ so sánh 2 field stock < minStock trực tiếp)
+        // Nên ta phải lấy về và lọc bằng code
+        const productsSnap = await db.collection("products")
+            .where("storeId", "==", storeId)
+            // Chỉ lấy sp có quản lý tồn kho (nếu có field này)
+            // .where("manageStockSeparately", "==", true) 
+            .get();
+
+        let lowStockCount = 0;
+        let exampleProductName = "";
+
+        productsSnap.forEach(doc => {
+            const p = doc.data();
+            const stock = Number(p.stock || 0);
+            const minStock = Number(p.minStock || 0);
+
+            // Kiểm tra điều kiện tồn kho thấp
+            if (minStock > 0 && stock < minStock) {
+                lowStockCount++;
+                if (exampleProductName === "") exampleProductName = p.productName;
+            }
+        });
+
+        // 4. Gửi thông báo nếu có hàng sắp hết
+        if (lowStockCount > 0) {
+            const title = "⚠️ Cảnh báo tồn kho";
+            const body = lowStockCount === 1
+                ? `Sản phẩm "${exampleProductName}" đã xuống dưới mức định mức.`
+                : `Có ${lowStockCount} sản phẩm sắp hết hàng (${exampleProductName},...). Kiểm tra ngay!`;
+
+            const message = {
+                notification: {
+                    title: title,
+                    body: body,
+                },
+                android: {
+                    notification: {
+                        channelId: 'high_importance_channel_v4', // Dùng chung channel ID
+                        priority: 'high' as 'high',
+                        visibility: 'public' as 'public',
+                    }
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            contentAvailable: true,
+                        }
+                    }
+                },
+                data: {
+                    click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                    type: 'low_stock', // Loại thông báo mới
+                    storeId: storeId,
+                },
+                tokens: uniqueTokens,
+            };
+
+            await admin.messaging().sendEachForMulticast(message);
+            console.log(`[LowStock] Đã gửi cảnh báo cho store ${storeId}: ${lowStockCount} sản phẩm.`);
+        }
+      }
+
+    } catch (error) {
+      console.error("[LowStock] Lỗi khi chạy job:", error);
+    }
+  }
+);
+

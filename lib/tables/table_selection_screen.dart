@@ -25,6 +25,7 @@ import 'package:collection/collection.dart';
 import '../../services/discount_service.dart';
 import '../../models/discount_model.dart';
 import '../screens/sales/return_order_screen.dart';
+import '../tables/add_edit_table_screen.dart';
 
 enum TableStatusFilter { all, occupied, empty }
 
@@ -502,8 +503,46 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
                   }
                 }).toList();
 
+                // [CODE MỚI] Hiển thị nút bấm tạo bàn khi danh sách trống
                 if (filteredList.isEmpty) {
-                  return const Center(child: Text('Không có bàn nào phù hợp.'));
+                  return Center(
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => AddEditTableScreen(
+                              currentUser: widget.currentUser,
+                              // Biến 'groups' đã có sẵn từ snapshot.data!['groups'] ở trên
+                              tableGroups: groups,
+                            ),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              "Danh sách phòng/bàn đang trống.",
+                              style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "Bấm vào đây để tạo phòng/bàn!",
+                              style: TextStyle(
+                                color: Theme.of(context).primaryColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
                 }
 
                 return GridView.builder(

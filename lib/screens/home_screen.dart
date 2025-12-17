@@ -152,6 +152,32 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      if (message.data['type'] == 'low_stock') {
+        _navigateToInventoryReport();
+      }
+    });
+
+    // XỬ LÝ KHI BẤM VÀO THÔNG BÁO (APP TẮT HẲN)
+    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+      if (message != null && message.data['type'] == 'low_stock') {
+        _navigateToInventoryReport();
+      }
+    });
+  }
+
+  // Hàm điều hướng chuyên biệt
+  void _navigateToInventoryReport() {
+    setState(() {
+      // 1. Thay đổi số này thành Index của màn hình Báo cáo trong BottomNavigationBar của bạn
+      _selectedIndex = 3;
+    });
+
+    // 2. Chuyển tab con sang "Tồn kho"
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ReportScreen.selectedTabNotifier.value = 3;
+    });
   }
 
   Future<void> _initializeUserAndSettings() async {
@@ -310,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 setState(() {
                   _currentUser = _currentUser!.copyWith(businessType: type);
                   _isShowingTypePicker = false;
-                  _selectedIndex = 0;
+                  _selectedIndex = 2;
                 });
               }
             } catch (e) {

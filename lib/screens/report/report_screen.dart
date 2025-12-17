@@ -26,6 +26,7 @@ class _ReportTabInfo {
 
 class ReportScreen extends StatefulWidget {
   final UserModel currentUser;
+  static ValueNotifier<int> selectedTabNotifier = ValueNotifier<int>(0);
   const ReportScreen({super.key, required this.currentUser});
   @override
   State<ReportScreen> createState() => _ReportScreenState();
@@ -55,6 +56,17 @@ class _ReportScreenState extends State<ReportScreen>
     _initTabsBasedOnPermissions(); // Khởi tạo danh sách tab trước
 
     _tabController = TabController(length: _visibleTabs.length, vsync: this);
+    ReportScreen.selectedTabNotifier.addListener(() {
+      final targetIndex = ReportScreen.selectedTabNotifier.value;
+
+      // Kiểm tra xem index có hợp lệ không (tránh lỗi nếu user bị ẩn quyền xem tab đó)
+      if (targetIndex >= 0 && targetIndex < _visibleTabs.length) {
+        // Nếu muốn tìm chính xác tab "Tồn kho" thay vì dùng số cứng, bạn có thể loop check title
+        // Nhưng tạm thời dùng index cho đơn giản
+        _tabController.animateTo(targetIndex);
+      }
+    });
+
     _tabController.addListener(() {
       if (mounted) {
         setState(() {});

@@ -1268,6 +1268,65 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
   }
 
   Future<void> _handleCancel(BuildContext context) async {
+    // --- [LOGIC MỚI] CHECK RÀNG BUỘC ĐƠN TRẢ HÀNG ---
+
+    // 1. Kiểm tra xem đây là đơn Trả hàng (TH) hay đơn Bán hàng
+    final bool isReturnBill = widget.bill.billCode.trim().toUpperCase().startsWith('TH');
+
+    // 2. Nếu là đơn BÁN HÀNG, cần kiểm tra xem có đơn trả hàng con nào chưa hủy không
+    if (!isReturnBill) {
+      try {
+        // Tìm các bill có originalBillId trùng với id của bill này
+        final relatedReturnsSnapshot = await FirebaseFirestore.instance
+            .collection('bills')
+            .where('originalBillId', isEqualTo: widget.bill.id)
+            .get();
+
+        // Lọc ra các đơn trả hàng mà trạng thái KHÁC 'cancelled'
+        final activeReturns = relatedReturnsSnapshot.docs.where((doc) {
+          final data = doc.data();
+          return data['status'] != 'cancelled';
+        }).toList();
+
+        // Nếu tồn tại đơn trả hàng chưa hủy -> CHẶN
+        if (activeReturns.isNotEmpty) {
+          final returnCodes = activeReturns.map((e) => e['billCode']).join(', ');
+
+          // Kiểm tra mounted trước khi dùng context để hiện dialog chặn
+          if (context.mounted) {
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text("Không thể hủy hóa đơn", style: TextStyle(color: Colors.red)),
+                content: Text(
+                  "Hóa đơn này đã phát sinh đổi/trả hàng ($returnCodes).\n"
+                      "Vui lòng HỦY các phiếu trả hàng liên quan trước khi hủy hóa đơn gốc.",
+                  style: const TextStyle(fontSize: 16),
+                ),
+                actions: [
+                  TextButton(
+                    child: const Text("Đã hiểu"),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  )
+                ],
+              ),
+            );
+          }
+          return; // Dừng lại, không thực hiện tiếp
+        }
+      } catch (e) {
+        debugPrint("Lỗi kiểm tra đơn trả hàng: $e");
+        ToastService().show(message: "Lỗi kiểm tra dữ liệu: $e", type: ToastType.error);
+        return;
+      }
+    }
+    // ----------------------------------------------------
+
+    // [FIX LỖI ASYNC GAP TẠI ĐÂY]
+    // Kiểm tra xem màn hình còn tồn tại không sau khi chạy xong các lệnh await ở trên
+    if (!context.mounted) return;
+
+    // --- LOGIC CŨ GIỮ NGUYÊN BÊN DƯỚI ---
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
@@ -1293,6 +1352,7 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
     );
 
     if (confirmed != true) return;
+    if (!context.mounted) return; // Kiểm tra thêm 1 lần nữa sau dialog xác nhận
 
     try {
       if (widget.bill.billCode.toUpperCase().startsWith('TH')) {
