@@ -654,12 +654,7 @@ class _ImportTabState extends State<_ImportTab> {
           data['imageUrl'] = imageUrl;
 
           final DocumentReference docRef;
-          // Ưu tiên ID từ file nếu có (cho trường hợp import lại file cũ đã xóa sp)
-          if (job.idFromFile != null && !productMapById.containsKey(job.idFromFile)) {
-            docRef = FirebaseFirestore.instance.collection('products').doc(job.idFromFile);
-          } else {
-            docRef = FirebaseFirestore.instance.collection('products').doc();
-          }
+          docRef = FirebaseFirestore.instance.collection('products').doc();
           batch.set(docRef, data);
         }
 

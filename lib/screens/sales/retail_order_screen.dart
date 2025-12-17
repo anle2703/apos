@@ -1752,7 +1752,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       builder: (context, snapshot) {
         // 1. Kiểm tra dữ liệu sản phẩm
         // Nếu chưa có sản phẩm nào, chưa cho phép load đơn hàng cũ (vì sẽ không map được thông tin)
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+        if (!snapshot.hasData) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }

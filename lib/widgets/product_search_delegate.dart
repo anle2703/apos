@@ -185,7 +185,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                   controller: _searchController,
                   autofocus: true,
                   decoration: InputDecoration(
-                    hintText: 'Bấm 2 lần vào tên nhóm để chọn/hủy nhanh',
+                    hintText: 'Bấm nhanh 2 lần vào tên nhóm để chọn tất cả',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     filled: true,
                     fillColor: Colors.grey.shade100,
