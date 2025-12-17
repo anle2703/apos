@@ -29,6 +29,7 @@ import '../services/shift_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:io';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -56,6 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _canEditTax = false;
   bool _isShowingTypePicker = false;
   bool _canViewContacts = false;
+  bool _isNotificationSetup = false;
   final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
   @override
@@ -73,15 +75,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _setupNotificationSystem() async {
-    debugPrint(">>> [DEBUG] BẮT ĐẦU CÀI ĐẶT HỆ THỐNG THÔNG BÁO (V4)...");
+    if (_isNotificationSetup) {
+      return;
+    }
+    _isNotificationSetup = true;
 
-    // Kiểm tra User trước
+    debugPrint(">>> [DEBUG] BẮT ĐẦU CÀI ĐẶT HỆ THỐNG THÔNG BÁO (FINAL)...");
+
     if (_currentUser == null) return;
 
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-    // 1. Xin quyền (Bắt buộc cho Android 13+)
     NotificationSettings settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    await messaging.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
       sound: true,
@@ -92,82 +103,93 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 2. Khởi tạo Local Notification
     const AndroidInitializationSettings initializationSettingsAndroid =
     AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
+    final DarwinInitializationSettings initializationSettingsDarwin =
+    DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
     );
 
-    await _localNotificationsPlugin.initialize(initializationSettings);
+    final InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsDarwin,
+    );
 
-    // 3. [LOGIC ĐÃ SỬA] Cập nhật Token cho CHÍNH TÀI KHOẢN ĐANG ĐĂNG NHẬP
+    await _localNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse details) {
+        debugPrint(">>> [DEBUG] Bấm vào thông báo: ${details.payload}");
+        if (details.payload == 'low_stock') {
+          _navigateToInventoryReport();
+        }
+      },
+    );
+
     try {
       final currentUserUid = _currentUser!.uid;
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUserUid).get();
-      final bool isEnabled = userDoc.data()?['receivePaymentNotification'] ?? false;
+      String? token = await messaging.getToken();
 
-      if (isEnabled) {
-        String? token = await messaging.getToken();
-        debugPrint(">>> [DEBUG] Token thiết bị: $token");
+      if (token != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUserUid)
+            .get();
 
-        if (token != null) {
-          // [CHANGE] Thay arrayUnion bằng gán trực tiếp token (String)
-          // Việc này sẽ ghi đè token cũ bất kể là thiết bị nào
+        bool isEnabled = userDoc.data()?['receivePaymentNotification'] ?? false;
+
+        if (isEnabled) {
           await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
-            'fcmTokens': token
+            'fcmTokens': FieldValue.arrayUnion([token])
           });
-          debugPrint(">>> [DEBUG] Đã cập nhật Token (String) cho tài khoản $currentUserUid.");
+          debugPrint(">>> [DEBUG] Đã thêm Token vào danh sách thiết bị.");
+        } else {
+          debugPrint(">>> [DEBUG] User đang tắt thông báo -> Không update token.");
+
+          await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({'fcmTokens': FieldValue.arrayRemove([token])
+          });
         }
       }
     } catch (e) {
       debugPrint(">>> [DEBUG] Lỗi đồng bộ Token: $e");
     }
 
-    // 4. LẮNG NGHE SỰ KIỆN KHI APP ĐANG MỞ (FOREGROUND)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint(">>> [DEBUG] TIN NHẮN ĐẾN KHI APP MỞ: ${message.notification?.title}");
 
       RemoteNotification? notification = message.notification;
       AndroidNotification? android = message.notification?.android;
 
-      if (notification != null && android != null) {
-        _localNotificationsPlugin.show(
-          notification.hashCode,
-          notification.title,
-          notification.body,
-          NotificationDetails(
-            android: AndroidNotificationDetails(
-              'high_importance_channel_v4',
-              'Thông báo thanh toán',
-              channelDescription: 'Thông báo khi có đơn hàng mới',
-              importance: Importance.max,
-              priority: Priority.high,
-              playSound: true,
-              visibility: NotificationVisibility.public,
-              icon: '@mipmap/ic_launcher',
+      if (notification != null) {
+        if (Platform.isAndroid && android != null) {
+          _localNotificationsPlugin.show(
+            notification.hashCode,
+            notification.title,
+            notification.body,
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'high_importance_channel_v4',
+                'Thông báo thanh toán',
+                importance: Importance.max,
+                priority: Priority.high,
+                icon: '@mipmap/ic_launcher',
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
     });
 
+    // 5. Xử lý khi bấm vào thông báo từ Background
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       if (message.data['type'] == 'low_stock') {
         _navigateToInventoryReport();
       }
     });
-
-    // XỬ LÝ KHI BẤM VÀO THÔNG BÁO (APP TẮT HẲN)
-    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
-      if (message != null && message.data['type'] == 'low_stock') {
-        _navigateToInventoryReport();
-      }
-    });
   }
 
-  // Hàm điều hướng chuyên biệt
   void _navigateToInventoryReport() {
     setState(() {
       // 1. Thay đổi số này thành Index của màn hình Báo cáo trong BottomNavigationBar của bạn
