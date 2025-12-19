@@ -30,6 +30,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
+import 'subscription_expired_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -48,7 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 2;
   Future<void>? _initializationFuture;
   StreamSubscription? _userStatusSubscription;
-
+  StreamSubscription? _ownerStatusSubscription;
   bool _canViewPurchaseOrder = false;
   bool _canViewPromotions = false;
   bool _canViewListTable = false;
@@ -71,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     PrintQueueService().dispose();
     _userStatusSubscription?.cancel();
+    _ownerStatusSubscription?.cancel();
     super.dispose();
   }
 
@@ -266,8 +268,40 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _processExpiredUser(Timestamp? expiryTimestamp) {
+    if (expiryTimestamp == null) return;
+
+    final expiry = expiryTimestamp.toDate();
+    if (DateTime.now().isAfter(expiry)) {
+      _userStatusSubscription?.cancel(); // Dừng lắng nghe user
+      _ownerStatusSubscription?.cancel(); // Dừng lắng nghe owner
+      _ownerStatusSubscription = null;
+      _authService.signOut().then((_) {
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(
+                  builder: (context) => SubscriptionExpiredScreen(expiryDate: expiry)),
+                  (route) => false);
+        }
+      });
+    }
+  }
+
+  void _startListeningToOwnerStatus(String ownerUid) {
+    if (_ownerStatusSubscription != null) return;
+
+    _ownerStatusSubscription = _firestoreService.streamUserProfile(ownerUid).listen((ownerProfile) {
+      if (ownerProfile != null) {
+        _processExpiredUser(ownerProfile.subscriptionExpiryDate);
+
+      }
+    });
+  }
+
   void _listenForUserStatusChanges() {
     _userStatusSubscription?.cancel();
+    _ownerStatusSubscription?.cancel();
+    _ownerStatusSubscription = null;
 
     if (_currentUser != null) {
       final navigator = Navigator.of(context);
@@ -284,6 +318,43 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         if (!userProfile.active) {
+          bool isExpired = false;
+          if (userProfile.inactiveReason == 'store_expired' ||
+              userProfile.inactiveReason == 'expired_subscription') {
+            isExpired = true;
+          } else if (userProfile.role == 'owner' &&
+              userProfile.subscriptionExpiryDate != null &&
+              DateTime.now().isAfter(userProfile.subscriptionExpiryDate!.toDate())) {
+            isExpired = true;
+          }
+
+          if (isExpired) {
+            // A. Xử lý cho NHÂN VIÊN
+            if (userProfile.role != 'owner' && userProfile.ownerUid != null) {
+              // Gọi hàm lấy thông tin chủ
+              _firestoreService.getUserProfile(userProfile.ownerUid!).then((owner) {
+                DateTime expiryDisplay = DateTime.now();
+                if (owner != null && owner.subscriptionExpiryDate != null) {
+                  expiryDisplay = owner.subscriptionExpiryDate!.toDate();
+                }
+                // Chuyển màn hình
+                _executeLogoutAndShowExpiry(navigator, expiryDisplay);
+              });
+
+              // [QUAN TRỌNG !!!] Phải có return ở đây để code KHÔNG chạy xuống đoạn Toast báo lỗi bên dưới
+              return;
+            }
+
+            // B. Xử lý cho CHỦ
+            if (userProfile.role == 'owner' && userProfile.subscriptionExpiryDate != null) {
+              final expiryDisplay = userProfile.subscriptionExpiryDate!.toDate();
+              _executeLogoutAndShowExpiry(navigator, expiryDisplay);
+
+              // [QUAN TRỌNG !!!] Return để dừng
+              return;
+            }
+          }
+
           ToastService().show(
               message: 'Tài khoản của bạn đã bị quản trị viên vô hiệu hóa.',
               type: ToastType.error,
@@ -297,6 +368,12 @@ class _HomeScreenState extends State<HomeScreen> {
             });
           });
           return;
+        }
+
+        if (userProfile.role == 'owner') {
+          _processExpiredUser(userProfile.subscriptionExpiryDate);
+        } else if (userProfile.ownerUid != null) {
+          _startListeningToOwnerStatus(userProfile.ownerUid!);
         }
 
         if (userProfile.role == 'owner') {
@@ -338,6 +415,21 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
     }
+  }
+
+  void _executeLogoutAndShowExpiry(NavigatorState navigator, DateTime expiryDate) {
+    _userStatusSubscription?.cancel();
+    _ownerStatusSubscription?.cancel();
+    _ownerStatusSubscription = null;
+
+    _authService.signOut().then((_) {
+      if (mounted) {
+        navigator.pushAndRemoveUntil(
+            MaterialPageRoute(
+                builder: (context) => SubscriptionExpiredScreen(expiryDate: expiryDate)),
+                (route) => false);
+      }
+    });
   }
 
   void _showBusinessTypePicker(BuildContext context) {
@@ -411,10 +503,48 @@ class _HomeScreenState extends State<HomeScreen> {
         return ReportScreen(currentUser: _currentUser!);
       case 4:
         return Scaffold(
-          appBar: AppBar(title: const Text('Khác')),
+          appBar: AppBar(
+            // [SỬA ĐỔI] Icon + Text nằm cùng 1 dòng
+            title: (_currentUser?.role == 'owner' && _currentUser?.subscriptionExpiryDate != null)
+                ? Builder(builder: (context) {
+              final expiry = _currentUser!.subscriptionExpiryDate!.toDate();
+
+              // Format giờ phút ngày tháng
+              final hour = expiry.hour.toString().padLeft(2, '0');
+              final minute = expiry.minute.toString().padLeft(2, '0');
+              final day = expiry.day.toString().padLeft(2, '0');
+              final month = expiry.month.toString().padLeft(2, '0');
+              final year = expiry.year;
+
+              // Logic màu sắc (dưới 7 ngày là báo động đỏ)
+              final daysLeft = expiry.difference(DateTime.now()).inDays;
+              final isUrgent = daysLeft <= 7;
+              final displayColor = isUrgent ? Colors.red : Colors.green[700];
+
+              return Row(
+                children: [
+                  // 1. Icon lúc nãy
+                  Icon(Icons.workspace_premium, color: displayColor),
+
+                  const SizedBox(width: 8), // Khoảng cách
+
+                  // 2. Dòng chữ nằm cùng hàng
+                  Text(
+                    'Hạn sử dụng: $hour:$minute $day/$month/$year',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: displayColor,
+                    ),
+                  ),
+                ],
+              );
+            })
+                : const Text('Khác'),
+            centerTitle: false,
+          ),
           body: ListView(
             children: [
-              // [MỚI] Nếu là role 'order', ẨN HẾT các mục quản lý
               if (_currentUser?.role != 'order') ...[
                 ListTile(
                   leading: const Icon(Icons.add_business_outlined),
@@ -595,9 +725,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
                 const Divider(height: 4, thickness: 0.5, color: Colors.grey),
-              ], // --- HẾT PHẦN ẨN ---
+              ],
 
-              // Hai mục này LUÔN HIỆN cho tất cả role
               ListTile(
                 leading: const Icon(Icons.settings_outlined),
                 title: const Text('Cài đặt'),

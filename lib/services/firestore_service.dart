@@ -193,8 +193,11 @@ class FirestoreService {
     String? storePhone,
   }) async {
     try {
+      final DateTime now = DateTime.now();
+      final DateTime expiryDate = now.add(const Duration(days: 7));
+
       await _db.collection('users').doc(uid).set({
-        'uid': uid, // giữ nguyên Firebase UID
+        'uid': uid,
         'email': email,
         'storeId': storeId,
         'storeName': _toTitleCase(storeName),
@@ -205,6 +208,8 @@ class FirestoreService {
         'name': _toTitleCase(name),
         'createdAt': FieldValue.serverTimestamp(),
         'businessType': null,
+        'active': true,
+        'subscriptionExpiryDate': Timestamp.fromDate(expiryDate),
       });
     } catch (e) {
       throw Exception('Không thể tạo hồ sơ người dùng: $e');

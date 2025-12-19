@@ -51,8 +51,11 @@ class SalesReportTabState extends State<SalesReportTab> {
 
   TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
   StreamSubscription<StoreSettings>? _settingsSub;
+  double _totalReturnTax = 0;
+  double _totalReturnProfit = 0;
   double _totalTax = 0;
   double _totalReturnRevenue = 0;
+  double _totalReturnDebt = 0;
   double _totalRevenue = 0;
   double _totalProfit = 0;
   double _totalCash = 0;
@@ -454,10 +457,12 @@ class SalesReportTabState extends State<SalesReportTab> {
     double totalRevenue = 0, totalProfit = 0, totalDebt = 0, totalCash = 0, otherPayments = 0;
     double totalTax = 0;
     double totalReturnRevenue = 0;
+    double totalReturnTax = 0;
+    double totalReturnProfit = 0;
     int totalOrders = 0;
+    double totalReturnDebt = 0;
     final Map<String, double> dailyRevenue = {}, dailyProfit = {}, topSellingProducts = {};
 
-    // 1. Xử lý KPIs & Top Selling (từ daily_reports)
     for (final doc in mainReports) {
       final data = doc.data() as Map<String, dynamic>;
       final dateTimestamp = data['date'] as Timestamp?;
@@ -466,23 +471,49 @@ class SalesReportTabState extends State<SalesReportTab> {
       final dateLocal = dateTimestamp.toDate();
       final dayKey = DateFormat('dd/MM').format(dateLocal);
 
-      final dailyRev = (data['totalRevenue'] as num?)?.toDouble() ?? 0.0;
-      final dailyProf = (data['totalProfit'] as num?)?.toDouble() ?? 0.0;
-      totalReturnRevenue += (data['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
-      totalTax += (data['totalTax'] as num?)?.toDouble() ?? 0.0;
+      // --- [SỬA LẠI ĐOẠN NÀY] ---
+      // 1. Lấy dữ liệu Gốc (Gross) từ DB
+      final dailyRevGross = (data['totalRevenue'] as num?)?.toDouble() ?? 0.0;
+      final dailyProfGross = (data['totalProfit'] as num?)?.toDouble() ?? 0.0;
+      final dailyTaxGross = (data['totalTax'] as num?)?.toDouble() ?? 0.0;
+      final dailyDebtGross = (data['totalDebt'] as num?)?.toDouble() ?? 0.0;
+
+      // 2. Lấy dữ liệu Trả (Return) từ DB
+      final dailyReturnRev = (data['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
+      final dailyReturnTax = (data['totalReturnTax'] as num?)?.toDouble() ?? 0.0;
+      final dailyReturnProf = (data['totalReturnProfit'] as num?)?.toDouble() ?? 0.0;
+      final dailyReturnDebt = (data['totalReturnDebt'] as num?)?.toDouble() ?? 0.0;
+
+      // 3. Tính Net (Thuần) = Gốc - Trả
+      final dailyRevNet = dailyRevGross - dailyReturnRev;
+      final dailyProfNet = dailyProfGross - dailyReturnProf;
+      final dailyTaxNet = dailyTaxGross - dailyReturnTax;
+      final dailyDebtNet = dailyDebtGross - dailyReturnDebt;
+
+      // 4. Cộng dồn vào biến tổng (Dùng số NET)
+      totalRevenue += dailyRevNet;
+      totalProfit += dailyProfNet;
+      totalTax += dailyTaxNet;
+
+      // Cộng dồn phần trả hàng riêng
+      totalReturnRevenue += dailyReturnRev;
+      totalReturnTax += dailyReturnTax;
+      totalReturnProfit += dailyReturnProf;
+
+      totalDebt += dailyDebtNet;       // Tổng Nợ thuần
+      totalReturnDebt += dailyReturnDebt;
+
+      // Cập nhật biểu đồ (Dùng số NET để biểu đồ chính xác)
+      dailyRevenue.update(dayKey, (value) => value + dailyRevNet, ifAbsent: () => dailyRevNet);
+      dailyProfit.update(dayKey, (value) => value + dailyProfNet, ifAbsent: () => dailyProfNet);
+      // --------------------------
+
       totalOrders += (data['billCount'] as num?)?.toInt() ?? 0;
-      totalRevenue += dailyRev;
-      totalProfit += dailyProf;
-      totalDebt += (data['totalDebt'] as num?)?.toDouble() ?? 0.0;
       totalCash += (data['totalCash'] as num?)?.toDouble() ?? 0.0;
       otherPayments += (data['totalOtherPayments'] as num?)?.toDouble() ?? 0.0;
 
-      dailyRevenue.update(dayKey, (value) => value + dailyRev, ifAbsent: () => dailyRev);
-      dailyProfit.update(dayKey, (value) => value + dailyProf, ifAbsent: () => dailyProf);
-
       final rootProducts = (data['products'] as Map<String, dynamic>?) ?? {};
       for (final pEntry in rootProducts.entries) {
-        // pEntry.value là một map: {productId, productName, ...}
         final pData = pEntry.value as Map<String, dynamic>;
         final productName = pData['productName'] as String?;
         final quantity = (pData['quantitySold'] as num?)?.toDouble() ?? 0.0;
@@ -525,12 +556,16 @@ class SalesReportTabState extends State<SalesReportTab> {
       _totalCash = totalCash;
       _otherPayments = otherPayments;
       _totalTax = totalTax;
+      _totalReturnTax = totalReturnTax;
+      _totalReturnProfit = totalReturnProfit;
       _totalReturnRevenue = totalReturnRevenue;
       _dailyRevenue = dailyRevenue;
       _dailyProfit = dailyProfit;
       _hourlyRevenue = hourlyRevenue;
       _hourlyProfit = hourlyProfit;
       _topSellingProducts = sortedProducts;
+      _totalDebt = totalDebt;
+      _totalReturnDebt = totalReturnDebt;
     });
   }
 
@@ -734,34 +769,16 @@ class SalesReportTabState extends State<SalesReportTab> {
                     suffix: null),
                 _KpiCard(
                     width: cardWidth,
-                    title: 'Doanh Thu',
-                    value: _totalRevenue,
-                    icon: Icons.trending_up,
-                    color: AppTheme.primaryColor),
-                _KpiCard(
-                    width: cardWidth,
                     title: 'Trả Hàng',
                     value: _totalReturnRevenue,
                     icon: Icons.assignment_return_outlined,
-                    color: Colors.deepOrange),
-                _KpiCard(
-                    width: cardWidth,
-                    title: 'Lợi Nhuận',
-                    value: _totalProfit,
-                    icon: Icons.monetization_on,
-                    color: Colors.amber.shade700),
-                _KpiCard(
-                    width: cardWidth,
-                    title: 'Ghi Nợ',
-                    value: _totalDebt,
-                    icon: Icons.receipt,
-                    color: Colors.red),
+                    color: Colors.orange),
                 _KpiCard(
                     width: cardWidth,
                     title: 'Tiền Mặt',
                     value: _totalCash,
                     icon: Icons.money,
-                    color: Colors.orange),
+                    color: Colors.deepOrange),
                 _KpiCard(
                     width: cardWidth,
                     title: 'Thanh Toán Khác',
@@ -770,10 +787,36 @@ class SalesReportTabState extends State<SalesReportTab> {
                     color: Colors.blue),
                 _KpiCard(
                     width: cardWidth,
+                    title: 'Ghi Nợ',
+                    value: _totalDebt,
+                    grossValue: _totalDebt + _totalReturnDebt,
+                    returnValue: _totalReturnDebt,
+                    icon: Icons.receipt,
+                    color: Colors.purpleAccent),
+                _KpiCard(
+                    width: cardWidth,
                     title: 'Thuế',
                     value: _totalTax,
+                    grossValue: _totalTax + _totalReturnTax,
+                    returnValue: _totalReturnTax,
                     icon: Icons.calculate,
-                    color: Colors.purple),
+                    color: Colors.red),
+                _KpiCard(
+                    width: cardWidth,
+                    title: 'Doanh Thu',
+                    value: _totalRevenue,
+                    grossValue: _totalRevenue + _totalReturnRevenue,
+                    returnValue: _totalReturnRevenue,
+                    icon: Icons.trending_up,
+                    color: AppTheme.primaryColor),
+                _KpiCard(
+                    width: cardWidth,
+                    title: 'Lợi Nhuận',
+                    value: _totalProfit,
+                    grossValue: _totalProfit + (_totalReturnProfit),
+                    returnValue: _totalReturnProfit,
+                    icon: Icons.monetization_on,
+                    color: Colors.amber.shade700),
               ],
             );
           },
@@ -830,6 +873,8 @@ class SalesReportTabState extends State<SalesReportTab> {
 class _KpiCard extends StatelessWidget {
   final String title;
   final double value;
+  final double? grossValue;
+  final double? returnValue;
   final IconData icon;
   final Color color;
   final String? suffix;
@@ -838,52 +883,108 @@ class _KpiCard extends StatelessWidget {
   const _KpiCard({
     required this.title,
     required this.value,
+    required this.width,
     required this.icon,
     required this.color,
-    required this.width,
+    this.grossValue,
+    this.returnValue,
     this.suffix = 'đ',
   });
 
   @override
   Widget build(BuildContext context) {
-    final formattedValue = formatNumber(value);
+    final formattedNet = formatNumber(value);
+    final formattedGross = grossValue != null ? formatNumber(grossValue!) : null;
+    final formattedReturn = returnValue != null ? formatNumber(returnValue!) : null;
+
+    final bool hasDetail = (returnValue != null && returnValue! > 0);
+
     return SizedBox(
       width: width,
+      height: 85,
       child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         elevation: 2,
+        margin: EdgeInsets.zero,
         child: Padding(
-          padding: const EdgeInsets.all(12.0),
+          padding: const EdgeInsets.fromLTRB(12, 12, 6, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
+              // --- CỤM TIÊU ĐỀ & CHI TIẾT (GROSS/RETURN) ---
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(icon, color: color, size: 25),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: Text(title.toUpperCase(),
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(
-                              color: Colors.grey.shade700,
-                              fontSize: 13,
-                          fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis)),
+                  // 1. Tiêu đề + Icon
+                  Row(
+                    children: [
+                      Icon(icon, color: color, size: 18),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          title.toUpperCase(),
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // [FIX 3] Thiết kế lại dòng Gross/Return: Nhỏ, gọn, sát tiêu đề
+                  if (hasDetail)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2, left: 2),
+                      child: Row(
+                        children: [
+                          if (formattedGross != null)
+                            Text.rich(
+                              TextSpan(children: [
+                                TextSpan(text: formattedGross, style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold)),
+                              ]),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+
+                          if (formattedGross != null && formattedReturn != null)
+                            Text.rich(
+                              TextSpan(children: [
+                                TextSpan(text: " - ", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                              ]),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+
+                          if (formattedReturn != null)
+                            Text.rich(
+                              TextSpan(children: [
+                                TextSpan(text: formattedReturn, style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                              ]),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
-              const SizedBox(height: 8),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  suffix != null ? '$formattedValue $suffix' : formattedValue,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade700,
-                      fontSize: 17),
-                  maxLines: 1,
+
+              // --- GIÁ TRỊ NET (DOANH THU THỰC) ---
+              Align(
+                alignment: Alignment.bottomLeft,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    suffix != null ? '$formattedNet $suffix' : formattedNet,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: Colors.grey.shade900,
+                      fontSize: 18,
+                      height: 1.0,
+                    ),
+                  ),
                 ),
               ),
             ],

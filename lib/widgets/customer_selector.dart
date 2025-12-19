@@ -84,13 +84,35 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
   final _searchController = TextEditingController();
   Timer? _debounce;
 
+  // Stream khởi tạo là luồng rỗng
+  Stream<List<CustomerModel>>? _customerStream;
+
   @override
   void initState() {
     super.initState();
+
+    // [FIX QUAN TRỌNG] Không load data ngay lúc đầu nữa
+    // Để null hoặc Stream rỗng để giao diện đứng yên, không hiện loading
+    _customerStream = null;
+
     _searchController.addListener(() {
       if (_debounce?.isActive ?? false) _debounce!.cancel();
-      _debounce = Timer(const Duration(milliseconds: 500), () {
-        if (mounted) setState(() {});
+      _debounce = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          final keyword = _searchController.text.trim().toLowerCase();
+          setState(() {
+            if (keyword.isEmpty) {
+              // Nếu xóa hết chữ thì quay về trạng thái rỗng, không load tất cả
+              _customerStream = null;
+            } else {
+              // Chỉ tìm khi có chữ
+              _customerStream = widget.firestoreService.searchCustomers(
+                keyword,
+                widget.storeId,
+              );
+            }
+          });
+        }
       });
     });
   }
@@ -102,7 +124,7 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
     super.dispose();
   }
 
-
+  // ... (Giữ nguyên các hàm _addNewCustomer, _editCustomer cũ) ...
   Future<void> _addNewCustomer() async {
     final CustomerModel? newCustomer = await showDialog<CustomerModel>(
       context: context,
@@ -115,9 +137,29 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
     Navigator.of(context).pop(newCustomer);
   }
 
+  Future<void> _editCustomer(CustomerModel customer) async {
+    await showDialog<CustomerModel>(
+      context: context,
+      builder: (_) => AddEditCustomerDialog(
+        firestoreService: widget.firestoreService,
+        storeId: widget.storeId,
+        customer: customer,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth > 800;
+    final dialogWidth = isDesktop ? 550.0 : double.maxFinite;
+
     return AlertDialog(
+      insetPadding: EdgeInsets.symmetric(
+          horizontal: isDesktop ? 40.0 : 16.0,
+          vertical: 24.0
+      ),
+      contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       title: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -131,9 +173,9 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
         ],
       ),
       content: SizedBox(
-        width: 500,
-        height: 400,
+        width: dialogWidth,
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: _searchController,
@@ -141,14 +183,27 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
               decoration: const InputDecoration(
                 labelText: 'Nhập tên hoặc SĐT...',
                 prefixIcon: Icon(Icons.search),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
               ),
             ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: StreamBuilder<List<CustomerModel>>(
-                stream: widget.firestoreService.searchCustomers(
-                    _searchController.text.trim().toLowerCase(),
-                    widget.storeId),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 350,
+              // [FIX UI] Hiển thị thông báo ban đầu thay vì Loading
+              child: _customerStream == null
+                  ? const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.keyboard_outlined, size: 48, color: Colors.grey),
+                    SizedBox(height: 12),
+                    Text('Nhập từ khóa tên KH hoặc 3 số cuối SĐT để tìm kiếm...', style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              )
+                  : StreamBuilder<List<CustomerModel>>(
+                stream: _customerStream,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -158,43 +213,80 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
                   }
                   if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return const Center(
-                        child: Text('Không tìm thấy khách hàng.'));
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.search_off, size: 40, color: Colors.grey),
+                          SizedBox(height: 8),
+                          Text('Không tìm thấy kết quả nào.', style: TextStyle(color: Colors.grey)),
+                        ],
+                      ),
+                    );
                   }
+
                   final customers = snapshot.data!;
                   customers.sort((a, b) => a.name.compareTo(b.name));
-                  return ListView.builder(
+
+                  return ListView.separated(
                     itemCount: customers.length,
+                    separatorBuilder: (ctx, i) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final customer = customers[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        child: ListTile(
-                          leading: const Icon(Icons.person, color: Colors.grey),
-                          title: Text(
-                            customer.name,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black),
-                          ),
-                          subtitle: Column(
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                        leading: CircleAvatar(
+                          backgroundColor: Colors.grey.shade200,
+                          child: Icon(Icons.person, color: Colors.grey.shade600),
+                        ),
+                        title: Text(
+                          customer.name,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                customer.phone,
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                "Dư nợ: ${NumberFormat('#,##0').format(customer.debt ?? 0)}đ   •   Điểm thưởng: ${NumberFormat('#,##0').format(customer.points)}",
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
+                              Text(customer.phone, style: const TextStyle(fontSize: 14)),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(Icons.monetization_on_outlined,
+                                      size: 14, color: Colors.red),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    NumberFormat('#,##0').format(customer.debt ?? 0),
+                                    style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Icon(Icons.stars_rounded,
+                                      size: 14, color: Colors.greenAccent),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    NumberFormat('#,##0').format(customer.points),
+                                    style: TextStyle(
+                                        color: Colors.greenAccent,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14
+                                    ),
+                                  ),
+                                ],
+                              )
                             ],
                           ),
-                          onTap: () => Navigator.of(context).pop(customer),
                         ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blue),
+                          onPressed: () => _editCustomer(customer),
+                        ),
+                        onTap: () => Navigator.of(context).pop(customer),
                       );
                     },
                   );
@@ -212,7 +304,7 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
           child: const Text(
-            'Xóa lựa chọn',
+            'Bỏ chọn khách',
             style: TextStyle(color: Colors.red),
           ),
         ),

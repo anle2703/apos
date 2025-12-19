@@ -546,6 +546,8 @@ class ReturnService {
 
     // 1. Chuẩn bị data cho các chỉ số cấp 1 (Level 1 Fields)
     final Map<String, dynamic> reportUpdates = {
+      'date': Timestamp.fromDate(DateTime(now.year, now.month, now.day)),
+      'storeId': storeId,
       'returnCount': FieldValue.increment(1),
       'totalDebt': FieldValue.increment(-deductDebt),
     };
@@ -578,9 +580,9 @@ class ReturnService {
     // Cập nhật Shift Data (Cấp 1 của Shift)
     if (currentShiftId != null) {
       final Map<String, dynamic> shiftUpdates = {
-        // [FIX] Đưa shiftStartTime vào sử dụng để hết warning và đảm bảo data
         'startTime': shiftStartTime,
         'userId': currentUser.uid,
+        'userName': currentUser.name,
         'status': 'open',
         'returnCount': FieldValue.increment(1),
         'totalDebt': FieldValue.increment(-deductDebt),
@@ -2538,7 +2540,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          flex: 2,
+                          flex: 6,
                           child: TextField(
                               controller: _noteCtrl,
                               decoration: const InputDecoration(labelText: "Ghi chú đơn", border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12))
@@ -2547,7 +2549,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                         const SizedBox(width: 12),
                         if (showPaymentMethod)
                           Expanded(
-                            flex: 1,
+                            flex: 4,
                             child: InputDecorator(
                               decoration: const InputDecoration(labelText: "Hoàn tiền qua", border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
                               child: DropdownButtonHideUnderline(

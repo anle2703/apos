@@ -896,3 +896,90 @@ export const checkLowStockDaily = onSchedule(
   }
 );
 
+// ============================================================================
+// HÀM 5: QUÉT VÀ KHÓA TÀI KHOẢN HẾT HẠN (CHẠY 08:01 SÁNG HÀNG NGÀY)
+// ============================================================================
+export const checkExpiredSubscriptions = onSchedule(
+  {
+    schedule: "every day 12:00",
+    timeZone: "Asia/Ho_Chi_Minh",
+    region: "asia-southeast1",
+    timeoutSeconds: 540,
+  },
+  async (event) => {
+    console.log("--- BẮT ĐẦU QUÉT TÀI KHOẢN HẾT HẠN ---");
+    const now = admin.firestore.Timestamp.now();
+    const db = admin.firestore();
+    const auth = admin.auth();
+
+    try {
+      // 1. Tìm các tài khoản CHỦ (owner) đã hết hạn
+      const expiredOwnersQuery = db.collection("users")
+        .where("role", "==", "owner") 
+        .where("active", "==", true)
+        .where("subscriptionExpiryDate", "<", now);
+
+      const ownersSnapshot = await expiredOwnersQuery.get();
+
+      if (ownersSnapshot.empty) {
+        console.log("Không có tài khoản nào hết hạn hôm nay.");
+        return;
+      }
+
+      console.log(`Tìm thấy ${ownersSnapshot.size} chủ cửa hàng hết hạn. Đang xử lý...`);
+
+      const bulkWriter = db.bulkWriter();
+
+      // 2. Duyệt từng ông chủ hết hạn
+      for (const ownerDoc of ownersSnapshot.docs) {
+        const ownerData = ownerDoc.data();
+        const ownerUid = ownerDoc.id;
+        const storeId = ownerData.storeId;
+
+        console.log(`>> Xử lý Owner: ${ownerUid} (Store: ${storeId})`);
+
+        // A. Khóa tài khoản CHỦ trong Firestore
+        bulkWriter.update(ownerDoc.ref, { 
+          active: false,
+          inactiveReason: 'expired_subscription' 
+        });
+
+        // B. Thu hồi Token Auth của CHỦ (Chỉ Owner mới có Auth)
+        try {
+          await auth.revokeRefreshTokens(ownerUid);
+          console.log(`   - Đã revoke token Auth của chủ.`);
+        } catch (authError) {
+          console.error(`   - Lỗi revoke token chủ ${ownerUid} (có thể user không tồn tại trên Auth):`, authError);
+        }
+
+        // C. Tìm và khóa tất cả NHÂN VIÊN của cửa hàng này
+        if (storeId) {
+          const employeesQuery = await db.collection("users")
+            .where("storeId", "==", storeId)
+            .where("role", "!=", "owner") // Tránh query lại ông chủ
+            .where("active", "==", true)  // Chỉ khóa những đứa đang mở
+            .get();
+
+          if (!employeesQuery.empty) {
+            console.log(`   - Tìm thấy ${employeesQuery.size} nhân viên cần khóa.`);
+            employeesQuery.forEach((empDoc) => {
+              // Khóa nhân viên trong Firestore
+              // Lưu ý: Không gọi revokeRefreshTokens với nhân viên vì họ không có Auth
+              bulkWriter.update(empDoc.ref, {
+                active: false,
+                inactiveReason: 'store_expired'
+              });
+            });
+          }
+        }
+      }
+
+      // 3. Thực thi tất cả lệnh ghi
+      await bulkWriter.close();
+      console.log("--- HOÀN TẤT QUÉT VÀ KHÓA TÀI KHOẢN ---");
+
+    } catch (error) {
+      console.error("Lỗi khi chạy job quét hết hạn:", error);
+    }
+  }
+);

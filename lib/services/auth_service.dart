@@ -1,3 +1,5 @@
+// lib/services/auth_service.dart
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'firestore_service.dart';
@@ -27,7 +29,6 @@ class AuthService {
     } on FirebaseAuthException {
       // Nếu sai mật khẩu owner, ta bỏ qua lỗi để tiếp tục kiểm tra nhân viên
     } catch (e) {
-      // Lỗi khác không mong muốn
       debugPrint("AuthService Error: $e");
     }
 
@@ -35,12 +36,21 @@ class AuthService {
     try {
       // Hàm này sẽ tự tìm user, mã hóa mật khẩu nhập vào và so sánh
       final employee = await _firestoreService.getEmployeeByPhone(phoneNumber, password);
+
       if (employee != null) {
+        // [SỬA ĐỔI QUAN TRỌNG]
+        // Bỏ đoạn check active ở đây.
+        // Lý do: Chúng ta cần trả về object employee (dù active=false) 
+        // để màn hình Login/AuthGate kiểm tra lý do khóa (hết hạn hay bị admin khóa).
+
+        /* ĐOẠN CŨ ĐÃ XÓA:
         if (!employee.active) {
           ToastService().show(message: 'Tài khoản đã bị vô hiệu hóa.', type: ToastType.error);
           return null;
         }
-        // Nếu thành công (mật khẩu khớp), trả về đối tượng UserModel của nhân viên
+        */
+
+        // Trả về đối tượng UserModel (kể cả khi active = false)
         return employee;
       }
     } catch (e) {
@@ -79,7 +89,6 @@ class AuthService {
       // B1: Chọn tài khoản Google
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) {
-        // Người dùng bấm hủy
         return null;
       }
 
@@ -105,7 +114,7 @@ class AuthService {
     }
   }
 
-  /// Liên kết thêm password vào tài khoản (ví dụ sau khi đăng nhập Google)
+  /// Liên kết thêm password vào tài khoản
   Future<bool> linkPasswordToAccount(String password) async {
     try {
       final user = _auth.currentUser;
@@ -144,14 +153,11 @@ class AuthService {
     } catch (e) {
       debugPrint('Lỗi trong quá trình đăng xuất Google: $e');
     } finally {
-      // THÊM: Xóa session của nhân viên đã lưu trên thiết bị
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('employee_uid');
 
-      // Luôn luôn đăng xuất Firebase (cho owner)
       await _auth.signOut();
       await stopPrintServer();
-
     }
   }
 }

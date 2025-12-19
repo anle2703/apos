@@ -37,13 +37,12 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _firestoreService = FirestoreService();
-  final _printerManager = pos_printer.PrinterManager.instance;
   final List<ScannedPrinter> _scannedPrinters = [];
   final _serverIpController = TextEditingController();
   final _storeNameController = TextEditingController();
   final _storePhoneController = TextEditingController();
   final _storeAddressController = TextEditingController();
-
+  StreamSubscription<pos_printer.PrinterDevice>? _discoverySubscription;
   TimeOfDay _reportCutoffTime = const TimeOfDay(hour: 0, minute: 0);
 
   Map<String, ConfiguredPrinter?> _printerAssignments = {};
@@ -109,6 +108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _storeNameController.dispose();
     _storePhoneController.dispose();
     _storeAddressController.dispose();
+    _discoverySubscription?.cancel();
     super.dispose();
   }
 
@@ -351,14 +351,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _discoverPrinters() async {
     if (!mounted) return;
+
+    // Hủy subscription cũ nếu có (nếu bạn vẫn giữ biến này, không có thì bỏ dòng này)
+    // _discoverySubscription?.cancel();
+
     setState(() {
       _isScanning = true;
       _scannedPrinters.clear();
     });
 
-    debugPrint(">>> BẮT ĐẦU QUÉT MÁY IN...");
+    debugPrint(">>> BẮT ĐẦU QUÉT MÁY IN (FAST MODE)...");
 
+    // --- PHẦN 1: QUÉT USB (Giữ nguyên logic cũ) ---
     if (isDesktop) {
+      // Logic cho Windows/Mac
       try {
         final systemPrinters = await Printing.listPrinters();
         for (var p in systemPrinters) {
@@ -371,35 +377,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
       } catch (e) {
         debugPrint("Lỗi Windows: $e");
       }
-    }
-
-    if (!isDesktop) {
+    } else {
+      // Logic cho Android/iOS (Native)
       final nativeService = NativePrinterService();
-
       try {
         final devices = await nativeService.getPrinters();
         for (var device in devices) {
-          final String realId =
-              device.identifier; // Địa chỉ động (ví dụ: /dev/usb/001)
+          final String realId = device.identifier;
           final String vid = device.vendorId.toString();
           final String pid = device.productId.toString();
-
-          // Tạo tên hiển thị kèm VID:PID để bạn dễ phân biệt khi chọn
           final String displayName = "${device.name} (USB $vid:$pid)";
 
           final p = pos_printer.PrinterDevice(
-            name: displayName, // Lưu tên gốc vào đây (thư viện sẽ dùng tên này)
-            address: realId, // Địa chỉ động để kết nối
+            name: displayName,
+            address: realId,
             vendorId: vid,
             productId: pid,
           );
 
           final scanned =
-              ScannedPrinter(device: p, type: pos_printer.PrinterType.usb);
+          ScannedPrinter(device: p, type: pos_printer.PrinterType.usb);
 
           if (mounted) {
             setState(() {
-              // Logic check trùng lặp dựa trên ID mới (USB:VID:PID:NAME)
               final uniqueId = _getPrinterUniqueId(scanned);
               if (!_scannedPrinters
                   .any((p) => _getPrinterUniqueId(p) == uniqueId)) {
@@ -409,103 +409,136 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         }
       } catch (e) {
-        debugPrint("Lỗi quét Native: $e");
+        debugPrint("Lỗi quét Native USB: $e");
       }
-
-      _printerManager
-          .discovery(type: pos_printer.PrinterType.network)
-          .listen((printer) {
-        if (mounted) {
-          setState(() {
-            if (!_scannedPrinters
-                .any((p) => p.device.address == printer.address)) {
-              _scannedPrinters.add(ScannedPrinter(
-                  device: printer, type: pos_printer.PrinterType.network));
-            }
-          });
-        }
-      });
     }
 
-    Future.delayed(const Duration(seconds: 1), () async {
-      if (mounted) {
+    // --- PHẦN 2: QUÉT LAN SIÊU TỐC (Mới) ---
+    // Chỉ quét LAN nếu không phải Desktop hoặc đang ở chế độ cần kết nối mạng
+    if (!isDesktop || (_isThisDeviceTheServer || _clientPrintMode == 'direct')) {
+      await _scanLanPrintersFast();
+    }
+
+    // --- PHẦN 3: KẾT THÚC VÀ CẬP NHẬT TỰ ĐỘNG ---
+    if (mounted) {
+      setState(() {
+        _isScanning = false; // Tắt loading ngay lập tức
+
+        // Logic tự động cập nhật cổng USB nếu thay đổi (Logic cũ của bạn)
         bool hasChanged = false;
+        _printerAssignments.forEach((role, config) {
+          if (config != null &&
+              config.physicalPrinter.type == pos_printer.PrinterType.usb) {
+            final savedVid = config.physicalPrinter.device.vendorId.toString();
+            final savedPid = config.physicalPrinter.device.productId.toString();
 
-        setState(() {
-          _isScanning = false;
+            // Tìm máy in USB tương ứng trong danh sách vừa quét
+            final savedId = _getPrinterUniqueId(config.physicalPrinter);
+            var foundPrinter = _scannedPrinters
+                .firstWhereOrNull((p) => _getPrinterUniqueId(p) == savedId);
 
-          // Duyệt qua các máy in ĐÃ ĐƯỢC GÁN (ví dụ: Máy in Bếp, Thu ngân...)
-          _printerAssignments.forEach((role, config) {
-            if (config != null &&
-                config.physicalPrinter.type == pos_printer.PrinterType.usb) {
-              final savedVid =
-                  config.physicalPrinter.device.vendorId.toString();
-              final savedPid =
-                  config.physicalPrinter.device.productId.toString();
+            foundPrinter ??= _scannedPrinters.firstWhereOrNull((p) {
+              final pVid = p.device.vendorId.toString();
+              final pPid = p.device.productId.toString();
+              return pVid == savedVid && pPid == savedPid;
+            });
 
-              // 1. Thử tìm chính xác theo Unique ID (Logic cũ)
-              final savedId = _getPrinterUniqueId(config.physicalPrinter);
-              var foundPrinter = _scannedPrinters
-                  .firstWhereOrNull((p) => _getPrinterUniqueId(p) == savedId);
-
-              // 2. Nếu không tìm thấy theo ID (do đổi tên), tìm theo VID + PID (Logic mới quan trọng)
-              if (foundPrinter == null) {
-                foundPrinter = _scannedPrinters.firstWhereOrNull((p) {
-                  final pVid = p.device.vendorId.toString();
-                  final pPid = p.device.productId.toString();
-                  return pVid == savedVid && pPid == savedPid;
-                });
-                if (foundPrinter != null) {
-                  debugPrint(
-                      ">>> UI: Tìm thấy máy in $role qua VID/PID (Tên có thể đã đổi).");
-                }
-              }
-
-              // 3. Nếu tìm thấy máy in tương ứng
-              if (foundPrinter != null) {
-                // Kiểm tra xem Address có khác không
-                if (config.physicalPrinter.device.address !=
-                    foundPrinter.device.address) {
-                  debugPrint(
-                      ">>> UI Auto-update address cho $role: ${config.physicalPrinter.device.address} -> ${foundPrinter.device.address}");
-
-                  // Cập nhật lại config với máy in mới tìm thấy
-                  _printerAssignments[role] = ConfiguredPrinter(
-                      logicalName: role,
-                      physicalPrinter:
-                          foundPrinter // Dùng object mới quét được (có address mới)
-                      );
-                  hasChanged = true;
-                }
+            // Nếu tìm thấy và địa chỉ cổng thay đổi -> Cập nhật
+            if (foundPrinter != null) {
+              if (config.physicalPrinter.device.address !=
+                  foundPrinter.device.address) {
+                _printerAssignments[role] = ConfiguredPrinter(
+                    logicalName: role, physicalPrinter: foundPrinter);
+                hasChanged = true;
               }
             }
-          });
+          }
         });
 
-        // Lưu lại nếu có thay đổi
+        // Lưu nếu có thay đổi tự động
         if (hasChanged) {
-          try {
-            final prefs = await SharedPreferences.getInstance();
-            final List<Map<String, dynamic>> listToSave = _printerAssignments
-                .values
-                .where((p) => p != null)
-                .map((p) => p!.toJson())
-                .toList();
-            await prefs.setString(
-                'printer_assignments', jsonEncode(listToSave));
-            debugPrint(
-                ">>> Đã lưu địa chỉ máy in mới xuống bộ nhớ thành công.");
+          _saveAutoUpdatedPrinters();
+        }
+      });
 
-            ToastService().show(
-                message: "Đã tự động cập nhật cổng kết nối máy in!",
-                type: ToastType.success);
-          } catch (e) {
-            debugPrint(">>> Lỗi khi lưu cập nhật máy in tự động: $e");
-          }
+      ToastService().show(message: "Đã quét xong!", type: ToastType.success);
+    }
+  }
+
+  Future<void> _saveAutoUpdatedPrinters() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final List<Map<String, dynamic>> listToSave = _printerAssignments.values
+          .where((p) => p != null)
+          .map((p) => p!.toJson())
+          .toList();
+      await prefs.setString('printer_assignments', jsonEncode(listToSave));
+      debugPrint(">>> Đã tự động cập nhật địa chỉ USB mới.");
+    } catch (e) {
+      debugPrint("Lỗi lưu auto-update: $e");
+    }
+  }
+
+  Future<String?> _checkPort9100(String ip) async {
+    try {
+      final socket = await Socket.connect(ip, 9100,
+          timeout: const Duration(milliseconds: 600));
+      socket.destroy();
+      return ip;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _scanLanPrintersFast() async {
+    // 1. Xác định lớp mạng (Subnet)
+    String currentIp = _deviceIp;
+    if (currentIp.isEmpty ||
+        currentIp == 'Đang tìm IP...' ||
+        currentIp == 'Không tìm thấy IP hợp lệ' ||
+        currentIp == 'Lỗi khi lấy IP') {
+      // Nếu chưa lấy được IP thiết bị, thử dùng lớp mạng phổ biến
+      currentIp = '192.168.1.1';
+    }
+
+    // Lấy 3 phần đầu của IP (ví dụ: 192.168.1)
+    final String subnet = currentIp.substring(0, currentIp.lastIndexOf('.'));
+
+    // 2. Tạo danh sách các tác vụ (Futures) cần chạy
+    final List<Future<String?>> checkFutures = [];
+    for (int i = 1; i < 255; i++) {
+      final targetIp = '$subnet.$i';
+      // Bỏ qua IP của chính điện thoại/máy tính này (để tránh tự kết nối chính mình nếu có cài service in)
+      if (targetIp == currentIp) continue;
+      checkFutures.add(_checkPort9100(targetIp));
+    }
+
+    // 3. Chạy TẤT CẢ cùng lúc và chờ kết quả (chỉ mất tối đa ~600ms)
+    final results = await Future.wait(checkFutures);
+
+    // 4. Xử lý kết quả trả về
+    for (var ip in results) {
+      if (ip != null) {
+        final device = pos_printer.PrinterDevice(
+          name: 'Máy in LAN ($ip)', // Đặt tên tạm
+          address: ip,
+          vendorId: '',
+          productId: '',
+        );
+
+        final scanned = ScannedPrinter(
+            device: device, type: pos_printer.PrinterType.network);
+
+        if (mounted) {
+          setState(() {
+            // Chỉ thêm nếu chưa có trong danh sách
+            if (!_scannedPrinters.any((p) => p.device.address == ip)) {
+              _scannedPrinters.add(scanned);
+            }
+          });
         }
       }
-      debugPrint(">>> KẾT THÚC QUÉT.");
-    });
+    }
   }
 
   Future<void> _addManualPrinter() async {
@@ -816,8 +849,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ],
     );
   }
-
-  // --- LAYOUT METHODS ---
 
   Widget _buildMobileLayout() {
     final role = widget.currentUser.role;

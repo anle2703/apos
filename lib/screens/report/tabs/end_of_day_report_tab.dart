@@ -786,6 +786,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       'closingBalance': _closingBalance,
       'productsSold': _rootProductsSold,
       'paymentMethods': _rootPaymentMethods,
+      'totalReturnRevenue': _totalReturnRevenue,
     };
 
     final List<Map<String, dynamic>> shiftReportsData =
@@ -813,7 +814,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
 
       final DateTime? calculatedStartTime = _parseDateTime(shiftData['calculatedStartTime']);
       final DateTime? calculatedEndTime = _parseDateTime(shiftData['calculatedEndTime']);
-
+      final double shiftReturnRevenue = (shiftData['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
       return {
         'reportTitle': 'CA THU NGÂN: $employeeName',
         'employeeName': employeeName,
@@ -838,6 +839,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
         'calculatedEndTime': calculatedEndTime?.toIso8601String(),
         'productsSold': (shiftData['products'] as Map<String, dynamic>?) ?? {},
         'paymentMethods': (shiftData['paymentMethods'] as Map<String, dynamic>?) ?? {},
+        'totalReturnRevenue': shiftReturnRevenue,
       };
     }).toList();
 
@@ -879,6 +881,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       'closingBalance': _closingBalance,
       'productsSold': _rootProductsSold,
       'paymentMethods': _rootPaymentMethods,
+      'totalReturnRevenue': _totalReturnRevenue,
     };
 
     final List<Map<String, dynamic>> shiftReportsData = [];
@@ -904,7 +907,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
         (shiftData['totalOtherRevenue'] as num?)?.toDouble() ?? 0.0;
     final double shiftOtherExpense =
         (shiftData['totalOtherExpense'] as num?)?.toDouble() ?? 0.0;
-
+    final double shiftReturnRevenue = (shiftData['totalReturnRevenue'] as num?)?.toDouble() ?? 0.0;
     final String shiftId = (shiftData['shiftId'] as String?) ?? '';
     final double shiftOpeningBalance = _shiftOpeningBalances[shiftId] ?? 0.0;
 
@@ -933,6 +936,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       'totalSurcharges':
       (shiftData['totalSurcharges'] as num?)?.toDouble() ?? 0.0,
       'totalRevenue': (shiftData['totalRevenue'] as num?)?.toDouble() ?? 0.0,
+      'totalReturnRevenue': shiftReturnRevenue,
       'totalCash': shiftCash,
       'totalOtherPayments': shiftOtherPayments,
       'totalDebt': (shiftData['totalDebt'] as num?)?.toDouble() ?? 0.0,
@@ -1337,12 +1341,16 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Phụ thu', surcharges),
               divider,
-              _buildReportRow('Doanh thu bán hàng', revenue, isBold: true),
-              boldDivider,
+              _buildReportRow('Tổng doanh thu bán', revenue, isBold: true),
+              // 2. Nếu có trả hàng thì hiển thị dòng trừ và dòng Net
               if (returnRevenue > 0) ...[
-                _buildReportRow('Trả hàng', returnRevenue),
                 divider,
+                _buildReportRow('(-) Trả hàng', returnRevenue, color: Colors.red),
+                divider,
+                // Tính Net = Gross - Return
+                _buildReportRow('(=) Doanh thu thuần', revenue - returnRevenue, isBold: true, color: AppTheme.primaryColor),
               ],
+              boldDivider,
               _buildReportRow('Tiền mặt', cashFromMap),
               divider,
               if (paymentWidgets.isNotEmpty) ...paymentWidgets,
@@ -1587,13 +1595,14 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
               divider,
               _buildReportRow('Phụ thu', _totalSurcharges),
               divider,
-              _buildReportRow('Doanh thu bán hàng', _totalRevenue,
-                  isBold: true),
-              boldDivider,
+              _buildReportRow('Tổng doanh thu bán', _totalRevenue, isBold: true),
               if (_totalReturnRevenue > 0) ...[
-                _buildReportRow('Trả hàng', _totalReturnRevenue),
                 divider,
+                _buildReportRow('(-) Trả hàng', _totalReturnRevenue, color: Colors.red),
+                divider,
+                _buildReportRow('(=) Doanh thu thuần', _totalRevenue - _totalReturnRevenue, isBold: true, color: AppTheme.primaryColor),
               ],
+              boldDivider,
               _buildReportRow('Tiền mặt', totalCashFromMap),
               divider,
               if (totalPaymentWidgets.isNotEmpty) ...totalPaymentWidgets,

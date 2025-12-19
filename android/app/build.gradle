@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace "com.example.app_4cash"
+    namespace "com.aposcompany.apos"
     compileSdk 36
 
     // --- BẮT ĐẦU ĐOẠN SỬA LỖI ---
@@ -22,7 +22,7 @@ android {
     // --- KẾT THÚC ĐOẠN SỬA LỖI ---
 
     defaultConfig {
-        applicationId "com.example.app_4cash"
+        applicationId "com.aposcompany.apos"
         minSdkVersion flutter.minSdkVersion
         targetSdk 34
         versionCode 1
@@ -39,7 +39,7 @@ android {
     }
 
     compileOptions {
-	coreLibraryDesugaringEnabled true
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }

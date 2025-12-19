@@ -22,6 +22,8 @@ class UserModel {
   final String? bankBin;
   final String? bankAccount;
   final String? bankAccountName;
+  final Timestamp? subscriptionExpiryDate;
+  final String? inactiveReason;
 
   UserModel({
     required this.uid,
@@ -43,7 +45,8 @@ class UserModel {
     this.bankBin,
     this.bankAccount,
     this.bankAccountName,
-
+    this.subscriptionExpiryDate,
+    this.inactiveReason,
   });
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
@@ -68,7 +71,8 @@ class UserModel {
       bankBin: data['bankBin'] as String?,
       bankAccount: data['bankAccount'] as String?,
       bankAccountName: data['bankAccountName'] as String?,
-
+      subscriptionExpiryDate: data['subscriptionExpiryDate'] as Timestamp?,
+      inactiveReason: data['inactiveReason'] as String?,
     );
   }
 
@@ -92,7 +96,8 @@ class UserModel {
     String? bankBin,
     String? bankAccount,
     String? bankAccountName,
-    
+    Timestamp? subscriptionExpiryDate,
+    String? inactiveReason,
   }) {
     return UserModel(
       uid: uid ?? this.uid,
@@ -114,7 +119,8 @@ class UserModel {
       bankBin: bankBin ?? this.bankBin,
       bankAccount: bankAccount ?? this.bankAccount,
       bankAccountName: bankAccountName ?? this.bankAccountName,
-
+      subscriptionExpiryDate: subscriptionExpiryDate ?? this.subscriptionExpiryDate,
+      inactiveReason: inactiveReason ?? this.inactiveReason,
     );
   }
 }

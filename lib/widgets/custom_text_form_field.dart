@@ -1,3 +1,5 @@
+// lib/widgets/custom_text_form_field.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -19,6 +21,11 @@ class CustomTextFormField extends StatelessWidget {
   final TextAlign textAlign;
   final EdgeInsets scrollPadding;
 
+  // --- CÁC TRƯỜNG MỚI THÊM VÀO ĐỂ HỖ TRỢ TAB VÀ ENTER ---
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onFieldSubmitted;
+  final FocusNode? focusNode;
+
   const CustomTextFormField({
     super.key,
     this.controller,
@@ -35,9 +42,12 @@ class CustomTextFormField extends StatelessWidget {
     this.autofocus = false,
     this.maxLines = 1,
     this.minLines,
-    this.textAlign = TextAlign.start, // ✅ mặc định là trái
-    this.scrollPadding = const EdgeInsets.all(20), // ✅ default
-
+    this.textAlign = TextAlign.start,
+    this.scrollPadding = const EdgeInsets.all(20),
+    // --- THÊM VÀO CONSTRUCTOR ---
+    this.textInputAction,
+    this.onFieldSubmitted,
+    this.focusNode,
   });
 
   @override
@@ -66,9 +76,11 @@ class CustomTextFormField extends StatelessWidget {
       autofocus: autofocus,
       maxLines: maxLines,
       minLines: minLines,
-      textAlign: textAlign, // ✅ truyền xuống
-      scrollPadding: scrollPadding, // ✅ FORWARD XUỐNG ĐÂY
-
+      textAlign: textAlign,
+      scrollPadding: scrollPadding,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onFieldSubmitted,
+      focusNode: focusNode,
     );
   }
 }

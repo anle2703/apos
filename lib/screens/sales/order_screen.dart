@@ -52,6 +52,10 @@ class OrderScreen extends StatefulWidget {
 }
 
 class _OrderScreenState extends State<OrderScreen> {
+  String _scannerBuffer = '';
+  Timer? _bufferClearTimer;
+  String _lastScannedCode = '';
+  DateTime _lastScanTime = DateTime.now();
   final _firestoreService = FirestoreService();
   late final SettingsService _settingsService;
   StreamSubscription<StoreSettings>? _settingsSub;
@@ -310,7 +314,7 @@ class _OrderScreenState extends State<OrderScreen> {
     _discountsSub?.cancel();
     _manualUpdateSub?.cancel();
 
-    // [QUAN TRỌNG] Hủy lắng nghe Mua X Tặng Y để tránh lỗi
+    _bufferClearTimer?.cancel();
     _buyXGetYSub?.cancel();
 
     super.dispose();
@@ -668,85 +672,164 @@ class _OrderScreenState extends State<OrderScreen> {
     // 1. Kiểm tra màn hình hiện tại có hợp lệ không
     if (!mounted || ModalRoute.of(context)?.isCurrent != true) return false;
 
-    // --- SỬA Ở ĐÂY: Nếu đang ở màn hình thanh toán (bên phải), không can thiệp phím tắt ---
+    // Nếu đang ở màn hình thanh toán, không can thiệp
     if (_isPaymentView) return false;
-    // --------------------------------------------------------------------------------------
 
-    // 2. Kiểm tra xem người dùng có đang nhập liệu ở ô khác...
-    final currentFocus = FocusManager.instance.primaryFocus;
-    if (currentFocus != null &&
-        currentFocus.context != null &&
-        currentFocus.context!.widget is EditableText &&
-        currentFocus != _searchFocusNode) {
-      return false;
-    }
-
-    // 3. Nếu ô tìm kiếm ĐANG được chọn (Focus) -> Để hệ thống tự xử lý, không can thiệp
-    if (_searchFocusNode.hasFocus) {
-      return false;
-    }
-
-    // --- XỬ LÝ KHI Ô TÌM KIẾM KHÔNG CÓ FOCUS ---
-
-    // TRƯỜNG HỢP A: Phím Enter -> Thực hiện tìm kiếm/thêm món
-    if (event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-      if (_searchController.text.isNotEmpty) {
-        _handleBarcodeScan(_searchController.text);
-        return true; // Đã xử lý
+    // 2. PHÂN LOẠI XỬ LÝ THEO NỀN TẢNG
+    bool isDesktopMode = false;
+    try {
+      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        isDesktopMode = true;
       }
-      return false;
-    }
+    } catch (_) {}
 
-    // TRƯỜNG HỢP B: Phím Xóa (Backspace) -> Xóa ký tự cuối
-    if (event.logicalKey == LogicalKeyboardKey.backspace) {
-      final text = _searchController.text;
-      if (text.isNotEmpty) {
-        final newText = text.substring(0, text.length - 1);
+    if (isDesktopMode) {
+      // ============================================================
+      // LOGIC CHO DESKTOP (GIỮ NGUYÊN NHƯ CŨ)
+      // ============================================================
+      final currentFocus = FocusManager.instance.primaryFocus;
+      if (currentFocus != null &&
+          currentFocus.context != null &&
+          currentFocus.context!.widget is EditableText &&
+          currentFocus != _searchFocusNode) {
+        return false;
+      }
+
+      // Nếu ô tìm kiếm đang focus -> Để hệ thống tự xử lý
+      if (_searchFocusNode.hasFocus) return false;
+
+      // Enter -> Tìm
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        if (_searchController.text.isNotEmpty) {
+          _handleBarcodeScan(_searchController.text);
+          return true;
+        }
+        return false;
+      }
+
+      // Backspace -> Xóa
+      if (event.logicalKey == LogicalKeyboardKey.backspace) {
+        final text = _searchController.text;
+        if (text.isNotEmpty) {
+          final newText = text.substring(0, text.length - 1);
+          _searchController.value = TextEditingValue(
+            text: newText,
+            selection: TextSelection.collapsed(offset: newText.length),
+          );
+          return true;
+        }
+        return false;
+      }
+
+      // Ký tự -> Điền vào ô tìm kiếm
+      if (event.character != null &&
+          event.character!.isNotEmpty &&
+          !_isControlKey(event.logicalKey)) {
+        final newText = _searchController.text + event.character!;
         _searchController.value = TextEditingValue(
           text: newText,
           selection: TextSelection.collapsed(offset: newText.length),
         );
         return true;
       }
+
+      return false;
+
+    } else {
+      // ============================================================
+      // LOGIC CHO ANDROID POS / MOBILE (AUTO BUFFER)
+      // ============================================================
+
+      // A. Chặn phím điều hướng để không bị nhảy lung tung
+      if (event.logicalKey == LogicalKeyboardKey.tab ||
+          event.logicalKey == LogicalKeyboardKey.arrowDown ||
+          event.logicalKey == LogicalKeyboardKey.arrowUp ||
+          event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        return true;
+      }
+
+      // B. Phím Enter -> Xử lý mã trong buffer
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+
+        if (_scannerBuffer.isNotEmpty) {
+          final now = DateTime.now();
+          // Chống dội (Double scan check - trong 1.5 giây không nhận mã trùng)
+          if (_scannerBuffer == _lastScannedCode &&
+              now.difference(_lastScanTime).inMilliseconds < 1500) {
+            _scannerBuffer = '';
+            _bufferClearTimer?.cancel();
+            return true;
+          }
+
+          // XỬ LÝ TÌM KIẾM TỪ BUFFER
+          _handleBarcodeScan(_scannerBuffer);
+
+          // Lưu trạng thái
+          _lastScannedCode = _scannerBuffer;
+          _lastScanTime = now;
+          _scannerBuffer = '';
+          _bufferClearTimer?.cancel();
+          return true; // Chặn sự kiện Enter không cho hệ thống xử lý tiếp
+        }
+        return false;
+      }
+
+      // C. Ký tự bình thường -> Gom vào buffer VÀ CHẶN HIỂN THỊ
+      if (event.character != null && event.character!.isNotEmpty) {
+        if (!_isControlKey(event.logicalKey)) {
+          _bufferClearTimer?.cancel();
+          // Reset buffer nếu quá 500ms không nhận ký tự tiếp theo (scanner bắn rất nhanh)
+          _bufferClearTimer = Timer(const Duration(milliseconds: 500), () {
+            _scannerBuffer = '';
+          });
+
+          _scannerBuffer += event.character!;
+
+          // [QUAN TRỌNG] Return true để báo "Tôi đã xử lý rồi",
+          // ký tự sẽ KHÔNG hiện lên ô tìm kiếm dù nó đang focus.
+          return true;
+        }
+      }
+
       return false;
     }
-
-    // TRƯỜNG HỢP C: Ký tự bình thường (Số/Chữ) -> Điền vào ô tìm kiếm
-    if (event.character != null &&
-        event.character!.isNotEmpty &&
-        !_isControlKey(event.logicalKey)) {
-      final newText = _searchController.text + event.character!;
-      _searchController.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(
-            offset: newText.length), // Đưa con trỏ về cuối
-      );
-      return true; // Đã xử lý
-    }
-
-    return false;
   }
 
+  // Hàm kiểm tra phím điều khiển (Phiên bản chuẩn, đầy đủ nhất)
   bool _isControlKey(LogicalKeyboardKey key) {
-    return key == LogicalKeyboardKey.shift ||
-        key == LogicalKeyboardKey.control ||
-        key == LogicalKeyboardKey.alt ||
-        key == LogicalKeyboardKey.meta ||
-        key == LogicalKeyboardKey.tab ||
-        key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.f1 ||
-        key == LogicalKeyboardKey.f2 ||
-        key == LogicalKeyboardKey.f3 ||
-        key == LogicalKeyboardKey.f4 ||
-        key == LogicalKeyboardKey.f5 ||
-        key == LogicalKeyboardKey.f6 ||
-        key == LogicalKeyboardKey.f7 ||
-        key == LogicalKeyboardKey.f8 ||
-        key == LogicalKeyboardKey.f9 ||
-        key == LogicalKeyboardKey.f10 ||
-        key == LogicalKeyboardKey.f11 ||
-        key == LogicalKeyboardKey.f12;
+    return
+      // 1. Các phím Modifier (Bắt cụ thể Trái/Phải để chính xác 100%)
+      key == LogicalKeyboardKey.shiftLeft ||
+          key == LogicalKeyboardKey.shiftRight ||
+          key == LogicalKeyboardKey.controlLeft ||
+          key == LogicalKeyboardKey.controlRight ||
+          key == LogicalKeyboardKey.altLeft ||
+          key == LogicalKeyboardKey.altRight ||
+          key == LogicalKeyboardKey.metaLeft || // Phím Windows/Command
+          key == LogicalKeyboardKey.metaRight ||
+
+          // 2. Các phím điều hướng & chức năng cơ bản
+          key == LogicalKeyboardKey.tab ||
+          key == LogicalKeyboardKey.escape ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
+
+          // 3. Các phím Function (F1 - F12) - Chặn để không kích hoạt tính năng lạ
+          key == LogicalKeyboardKey.f1 ||
+          key == LogicalKeyboardKey.f2 ||
+          key == LogicalKeyboardKey.f3 ||
+          key == LogicalKeyboardKey.f4 ||
+          key == LogicalKeyboardKey.f5 ||
+          key == LogicalKeyboardKey.f6 ||
+          key == LogicalKeyboardKey.f7 ||
+          key == LogicalKeyboardKey.f8 ||
+          key == LogicalKeyboardKey.f9 ||
+          key == LogicalKeyboardKey.f10 ||
+          key == LogicalKeyboardKey.f11 ||
+          key == LogicalKeyboardKey.f12;
   }
 
   Future<void> _listenQuickNotes() async {
@@ -2673,6 +2756,12 @@ class _OrderScreenState extends State<OrderScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          // Giảm padding để tiết kiệm không gian ngang
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          // Thu gọn chiều cao nút nếu cần
+                          visualDensity: VisualDensity.compact,
+                        ),
                         onPressed: widget.table.id.startsWith('schedule_')
                             ? () async {
                           await _saveOrder();
@@ -2681,48 +2770,63 @@ class _OrderScreenState extends State<OrderScreen> {
                               type: ToastType.success);
                         }
                             : (_hasUnsentItems ? _sendToKitchen : null),
-                        child: const Text('LƯU ĐƠN'),
+                        child: const Text(
+                          'LƯU ĐƠN',
+                          style: TextStyle(fontSize: 14), // Giảm cỡ chữ xuống 12
+                          maxLines: 1, // Đảm bảo không xuống dòng
+                          overflow: TextOverflow.ellipsis, // Nếu quá dài thì hiện dấu ...
+                        ),
                       ),
                     ),
-                    if (_canSell) ...[
-                      const SizedBox(width: 8),
+                    if (_canSell && widget.currentUser.role != 'order') ...[
+                      const SizedBox(width: 4), // Giảm khoảng cách từ 8 xuống 4
                       if (_allowProvisionalBill && !widget.table.id.startsWith('schedule_')) ...[
                         Expanded(
                           child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              visualDensity: VisualDensity.compact,
+                            ),
                             onPressed: _displayCart.isNotEmpty
                                 ? _handlePrintProvisionalBill
                                 : null,
-                            child: const Text('KIỂM MÓN'),
+                            child: const Text(
+                              'KIỂM MÓN',
+                              style: TextStyle(fontSize: 14),
+                              maxLines: 1,
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                       ],
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 12),
+                            // Đồng bộ padding và giảm xuống mức thấp nhất
+                            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 12),
+                            visualDensity: VisualDensity.compact,
                           ),
-                          // SỬA: Phân biệt nút Thanh toán và Nhận khách
                           onPressed: _displayCart.isNotEmpty
                               ? (widget.table.id.startsWith('schedule_')
-                              ? _handleBookingCheckIn // Hàm mới xử lý nhận khách
+                              ? _handleBookingCheckIn
                               : _handlePayment)
                               : null,
                           child: _isPaymentLoading
                               ? const SizedBox(
-                              width: 20,
-                              height: 20,
+                              width: 18,
+                              height: 18,
                               child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2.5))
-                              : Text(widget.table.id.startsWith('schedule_')
-                              ? 'NHẬN KHÁCH'
-                              : 'THANH TOÁN'),
+                                  color: Colors.white, strokeWidth: 2))
+                              : Text(
+                            widget.table.id.startsWith('schedule_') ? 'NHẬN KHÁCH' : 'THANH TOÁN', // Viết tắt nếu cần
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                          ),
                         ),
                       ),
                     ],
                   ],
-                ),
+                )
               ]
             ],
           ),

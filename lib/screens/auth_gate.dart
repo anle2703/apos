@@ -15,6 +15,7 @@ import 'package:app_4cash/main.dart';
 import '../services/settings_service.dart';
 import '../models/store_settings_model.dart';
 import 'sales/guest_order_screen.dart';
+import '../screens/subscription_expired_screen.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -77,37 +78,78 @@ class AuthGate extends StatelessWidget {
 class EmployeeSessionChecker extends StatelessWidget {
   const EmployeeSessionChecker({super.key});
 
-  Future<UserModel?> _getSavedEmployeeSession() async {
+  Future<Widget> _checkEmployeeSession() async {
     final prefs = await SharedPreferences.getInstance();
     final employeeUid = prefs.getString('employee_uid');
 
+    // Chưa đăng nhập -> Login
     if (employeeUid == null) {
-      return null;
+      return const LoginScreen();
     }
 
-    final userProfile = await FirestoreService().getUserProfile(employeeUid);
+    final firestoreService = FirestoreService();
+    final userProfile = await firestoreService.getUserProfile(employeeUid);
 
-    if (userProfile != null && userProfile.active) {
-      return userProfile;
+    // 1. Không tìm thấy user trong DB -> Xóa session -> Về Login
+    if (userProfile == null) {
+      await prefs.remove('employee_uid');
+      return const LoginScreen();
     }
 
-    await prefs.remove('employee_uid');
-    return null;
+    // 2. User bị khóa (Active = false)
+    if (!userProfile.active) {
+      debugPrint(">>> [AuthGate] Nhân viên ${userProfile.name} bị khóa. Reason: ${userProfile.inactiveReason}");
+
+      bool isExpired = false;
+      DateTime expiryDate = DateTime.now();
+
+      // A. Kiểm tra lý do từ DB (Nếu Cloud Function đã chạy và ghi lý do)
+      if (userProfile.inactiveReason == 'store_expired' ||
+          userProfile.inactiveReason == 'expired_subscription') {
+        isExpired = true;
+      }
+
+      // B. Kiểm tra chéo ngày hết hạn của Owner (Đảm bảo chính xác 100%)
+      if (userProfile.ownerUid != null) {
+        try {
+          final owner = await firestoreService.getUserProfile(userProfile.ownerUid!);
+          if (owner != null && owner.subscriptionExpiryDate != null) {
+            final ownerExpiry = owner.subscriptionExpiryDate!.toDate();
+            if (DateTime.now().isAfter(ownerExpiry)) {
+              isExpired = true;
+              expiryDate = ownerExpiry;
+            }
+          }
+        } catch (e) {
+          debugPrint(">>> [AuthGate] Lỗi check owner: $e");
+        }
+      }
+
+      if (isExpired) {
+        // NẾU HẾT HẠN -> Trả về màn hình Hết hạn
+        return SubscriptionExpiredScreen(expiryDate: expiryDate);
+      } else {
+        // NẾU BỊ KHÓA TAY (bởi Admin) -> Xóa session -> Về Login
+        await prefs.remove('employee_uid');
+        return const LoginScreen();
+      }
+    }
+
+    // 3. Tài khoản Hợp lệ -> Vào Home
+    startPrintServerForUser(userProfile);
+    return HomeScreen(user: userProfile);
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<UserModel?>(
-      future: _getSavedEmployeeSession(),
+    return FutureBuilder<Widget>(
+      future: _checkEmployeeSession(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        if (snapshot.hasData && snapshot.data != null) {
-          startPrintServerForUser(snapshot.data!);
-          return HomeScreen(user: snapshot.data!);
-        }
-        return const LoginScreen();
+        // Điều hướng đến màn hình đã được quyết định ở trên (Home, Login hoặc Expired)
+        return snapshot.data ?? const LoginScreen();
       },
     );
   }
@@ -140,6 +182,17 @@ class _ProfileCheckState extends State<ProfileCheck> {
             (route) => false,
       );
       return;
+    }
+    if (userProfile.role == 'owner' && userProfile.subscriptionExpiryDate != null) {
+      final expiry = userProfile.subscriptionExpiryDate!.toDate();
+      if (DateTime.now().isAfter(expiry)) {
+        // Nếu đã hết hạn, chuyển hướng sang màn hình báo lỗi
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => SubscriptionExpiredScreen(expiryDate: expiry)),
+              (route) => false,
+        );
+        return;
+      }
     }
 
     await startPrintServerForUser(userProfile);
@@ -248,7 +301,6 @@ class QrOrderLoader extends StatelessWidget {
   }
 }
 
-// --- Class 'QrWebOrderLoader' (Đã sửa lỗi) ---
 class QrWebOrderLoader extends StatelessWidget {
   final String storeId;
   final String type; // 'ship' hoặc 'schedule'

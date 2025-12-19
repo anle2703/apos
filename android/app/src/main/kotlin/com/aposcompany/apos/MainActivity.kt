@@ -1,4 +1,4 @@
-package com.example.app_4cash
+package com.aposcompany.apos
 
 import android.content.Context
 import android.hardware.usb.UsbConstants

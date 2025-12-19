@@ -223,8 +223,8 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                 final filteredProducts = _getFilteredProducts();
 
                 return widget.groupByCategory
-                    ? _buildTabbedProductList(filteredProducts) // Truyền ds đã lọc vào
-                    : _buildFlatProductList(filteredProducts); // Truyền ds đã lọc vào
+                    ? _buildTabbedProductList(filteredProducts)
+                    : _buildFlatProductList(filteredProducts);
               },
             )
             ),
@@ -415,7 +415,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
           Text(
             product.productName,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: AppTheme.textColor,
+              color: Colors.grey.shade700,
               fontWeight: FontWeight.bold,
             ),
             maxLines: 2, // Giới hạn 2 dòng cho tên dài
@@ -461,7 +461,6 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
               Text(
                 formatNumber(product.sellPrice),
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
                     color: Colors.grey.shade700,
                     fontSize: 14
                 ),

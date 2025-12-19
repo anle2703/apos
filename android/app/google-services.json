@@ -7,17 +7,17 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:411711991157:android:4a0ced550a347c6c28373c",
+        "mobilesdk_app_id": "1:411711991157:android:10a016d50359455128373c",
         "android_client_info": {
-          "package_name": "com.example.app_4cash"
+          "package_name": "com.aposcompany.apos"
         }
       },
       "oauth_client": [
         {
-          "client_id": "411711991157-3rfgadgroun385p48v91qm8o4rpuv9t1.apps.googleusercontent.com",
+          "client_id": "411711991157-jufgafcsdplafako28ufnm2lrgdh8vbb.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.example.app_4cash",
+            "package_name": "com.aposcompany.apos",
             "certificate_hash": "d4bbdf37a8c53d375959c5ed9d58b68abefae31a"
           }
         },
@@ -39,10 +39,10 @@
               "client_type": 3
             },
             {
-              "client_id": "411711991157-lthapdnldoummllhk1dvu6nm8alqslnf.apps.googleusercontent.com",
+              "client_id": "411711991157-0hg1bfvo4feudkjgncrlevqv155snslr.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.app4cash"
+                "bundle_id": "com.apos.appapos"
               }
             }
           ]

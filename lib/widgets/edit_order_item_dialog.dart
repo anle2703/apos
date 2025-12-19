@@ -174,7 +174,7 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
       actionsPadding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 16.0),
 
       content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 500, minWidth: 400),
+        constraints: const BoxConstraints(maxWidth: 400, minWidth: 300),
         // 2. Xoa SingleChildScrollView o day
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -292,113 +292,119 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
               ),
               const SizedBox(height: 8),
             ],
-            Row(
+            Text('Chiết khấu sản phẩm',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. Cụm nút Tăng/Giảm (Custom Container)
-                Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  height: 48, // Chiều cao cố định khớp với Input
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12), // Bo góc 12 theo yêu cầu
-                    border: Border.all(color: Colors.grey.shade400), // Viền xám mờ
-                  ),
+                // HÀNG 1: Sử dụng IntrinsicHeight để ép chiều cao 2 bên bằng nhau
+                IntrinsicHeight(
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch, // [QUAN TRỌNG] Kéo dãn chiều cao cho bằng nhau
                     children: [
-                      // NÚT TRỪ (-)
-                      InkWell(
-                        onTap: () => setState(() => _isIncrease = false),
-                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                      // 1. Cụm nút Tăng/Giảm (Chiếm 4 phần)
+                      Expanded(
+                        flex: 4,
                         child: Container(
-                          width: 45, // Độ rộng nút
-                          alignment: Alignment.center,
+                          // [ĐÃ SỬA] Xóa bỏ dòng height: 55
                           decoration: BoxDecoration(
-                            // Nếu đang chọn Giảm (False) thì hiện nền đỏ nhạt
-                            color: !_isIncrease ? Colors.red.shade50 : null,
-                            borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade300),
                           ),
-                          child: Icon(
-                              Icons.remove,
-                              color: !_isIncrease ? Colors.red : Colors.grey.shade600
+                          child: Row(
+                            children: [
+                              // NÚT TRỪ (-)
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setState(() => _isIncrease = false),
+                                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                                  child: Container(
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: !_isIncrease ? Colors.red.shade50 : null,
+                                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+                                    ),
+                                    child: Icon(
+                                      Icons.remove,
+                                      color: !_isIncrease ? Colors.red : Colors.grey.shade600,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              // ĐƯỜNG KẺ GIỮA
+                              Container(
+                                width: 1,
+                                // [ĐÃ SỬA] Dùng margin vertical để tự canh giữa thay vì fix height
+                                margin: const EdgeInsets.symmetric(vertical: 2),
+                                color: Colors.grey.shade300,
+                              ),
+
+                              // NÚT CỘNG (+)
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setState(() => _isIncrease = true),
+                                  borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+                                  child: Container(
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: _isIncrease ? AppTheme.primaryColor.withValues(alpha: 0.1) : null,
+                                      borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
+                                    ),
+                                    child: Icon(
+                                      Icons.add,
+                                      color: _isIncrease ? AppTheme.primaryColor : Colors.grey.shade600,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
 
-                      // ĐƯỜNG KẺ ĐỨNG NGĂN CÁCH MỜ
-                      Container(
-                        width: 1,
-                        height: 45, // Chiều cao ngắn hơn container để tạo cảm giác thanh thoát
-                        color: Colors.grey.shade300,
-                      ),
+                      const SizedBox(width: 8),
 
-                      // NÚT CỘNG (+)
-                      InkWell(
-                        onTap: () => setState(() => _isIncrease = true),
-                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
-                        child: Container(
-                          width: 45, // Độ rộng nút
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            // Nếu đang chọn Tăng (True) thì hiện nền xanh nhạt
-                            color: _isIncrease ? AppTheme.primaryColor.withValues(alpha: 0.1) : null,
-                            borderRadius: const BorderRadius.horizontal(right: Radius.circular(12)),
-                          ),
-                          child: Icon(
-                              Icons.add,
-                              color: _isIncrease ? AppTheme.primaryColor : Colors.grey.shade600
-                          ),
+                      // 2. Chọn đơn vị (Chiếm 6 phần)
+                      Expanded(
+                        flex: 6,
+                        child: AppDropdown(
+                          labelText: 'Đơn vị',
+                          value: _discountUnit,
+                          items: ['%', 'VNĐ'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                          onChanged: (v) {
+                            if (v != null) setState(() => _discountUnit = v);
+                          },
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                // 2. Ô nhập giá trị (Input)
-                Expanded(
-                  flex: 3,
-                  child: SizedBox(
-                    height: 48, // Ép chiều cao khớp với nút bên cạnh
-                    child: CustomTextFormField(
-                      controller: _discountValueController,
-                      decoration: InputDecoration(
-                        labelText: _isIncrease ? 'Mức Tăng' : 'Mức Giảm',
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                        // Đảm bảo Input cũng bo góc 12
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: Colors.grey.shade400),
-                        ),
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [ThousandDecimalInputFormatter()],
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 12),
 
-                // 3. Chọn đơn vị
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: SizedBox(
-                    height: 48, // Ép chiều cao khớp
-                    child: AppDropdown(
-                      labelText: 'Đơn vị',
-                      value: _discountUnit,
-                      items: ['%', 'VNĐ'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
-                      onChanged: (v) {
-                        if (v != null) setState(() => _discountUnit = v);
-                      },
-                      // Lưu ý: Bạn cần kiểm tra AppDropdown có hỗ trợ borderRadius không.
-                      // Nếu AppDropdown dùng InputDecoration mặc định của Theme thì nó sẽ tự bo theo theme.
+                // HÀNG 2: Ô nhập giá trị
+                CustomTextFormField(
+                  controller: _discountValueController,
+                  decoration: InputDecoration(
+                    labelText: _isIncrease ? 'Giá trị tăng' : 'Giá trị giảm',
+                    prefixIcon: Icon(
+                      _isIncrease ? Icons.trending_up : Icons.trending_down,
+                      color: _isIncrease ? AppTheme.primaryColor : Colors.red,
                     ),
                   ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [ThousandDecimalInputFormatter()],
                 ),
               ],
             ),
-
             const SizedBox(height: 8),
             CustomTextFormField(
               controller: _noteController,
@@ -417,7 +423,7 @@ class _EditOrderItemDialogState extends State<EditOrderItemDialog> {
               if (widget.isLoadingStaff)
                 const Center(child: CircularProgressIndicator())
               else if (widget.staffList.isEmpty)
-                const Text('Không tìm thấy danh sách nhân viên.')
+                const Text('Chưa thiết lập mốc hoa hồng.')
               else ...[
                   _buildStaffDropdown(
                     'Nhân viên cấp 1',

@@ -660,8 +660,9 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
 
   List<Widget> _buildAppBarActions() {
     return [
-      _buildReturnOrderButton(),
-      const SizedBox(width: 8),
+      if (widget.currentUser.role != 'order') ...[
+        _buildReturnOrderButton(),
+        const SizedBox(width: 8),
       Badge(
         backgroundColor: Colors.red,
         offset: const Offset(-2, 2),
@@ -687,6 +688,7 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
           },
         ),
       ),
+      ],
       ValueListenableBuilder<List<PrintJob>>(
         valueListenable: PrintQueueService().failedJobsNotifier,
         builder: (context, failedJobs, _) => Badge(

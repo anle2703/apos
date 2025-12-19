@@ -38,6 +38,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'web_order_list_screen.dart';
 import '/screens/sales/return_order_screen.dart';
+import '../../widgets/app_dropdown.dart';
 
 class RetailTab {
   String id;
@@ -255,6 +256,10 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   final FocusNode _searchFocusNode = FocusNode();
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  String _scannerBuffer = '';
+  Timer? _bufferClearTimer;
+  String _lastScannedCode = '';
+  DateTime _lastScanTime = DateTime.now();
   bool _isPaymentView = false;
   bool _isSessionRestored = false;
   List<ProductGroupModel> _menuGroups = [];
@@ -270,6 +275,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
   StreamSubscription? _buyXGetYSub;
   bool _canSell = false;
   String? _currentShiftId;
+  String _selectedMobileGroup = 'Tất cả';
 
   @override
   void initState() {
@@ -358,6 +364,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _buyXGetYSub?.cancel();
+    _bufferClearTimer?.cancel();
     super.dispose();
   }
 
@@ -2208,9 +2215,259 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
           padding: const EdgeInsets.all(8.0),
           child: _buildSearchBar(),
         ),
-        Expanded(child: _buildMenuView()),
+        Expanded(child: _buildMobileMenuView()),
         _buildMobileCartSummary(),
       ],
+    );
+  }
+
+  Widget _buildMobileMenuView() {
+    // 1. Tạo danh sách nhóm cho Dropdown
+    final List<String> groupNames = ['Tất cả', ..._menuGroups.map((g) => g.name)];
+
+    // 2. Lọc sản phẩm theo Dropdown và Search
+    final filteredProducts = _menuProducts.where((p) {
+      // Logic lọc nhóm
+      bool matchGroup =
+          _selectedMobileGroup == 'Tất cả' || p.productGroup == _selectedMobileGroup;
+      if (_selectedMobileGroup == 'Khác') {
+        matchGroup = (p.productGroup == null || p.productGroup!.isEmpty);
+      }
+
+      // Logic tìm kiếm (giữ nguyên logic cũ)
+      bool matchSearch = _searchQuery.isEmpty ||
+          p.productName.toLowerCase().contains(_searchQuery) ||
+          (p.productCode?.toLowerCase().contains(_searchQuery) ?? false) ||
+          p.additionalBarcodes.any((b) => b.contains(_searchQuery));
+
+      return matchGroup && matchSearch;
+    }).toList();
+
+    return Column(
+      children: [
+        // A. Dropdown chọn nhóm
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8), // Padding ngoài
+          child: SizedBox(
+            height: 50,
+            child: AppDropdown<String>(
+              labelText: "Nhóm sản phẩm",
+              value: groupNames.contains(_selectedMobileGroup)
+                  ? _selectedMobileGroup
+                  : 'Tất cả',
+              items: groupNames
+                  .map((name) => DropdownMenuItem(
+                value: name,
+                child: Text(name,
+                    style: const TextStyle(fontSize: 14)),
+              ))
+                  .toList(),
+              isDense: true,
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedMobileGroup = val);
+                }
+              },
+            ),
+          ),
+        ),
+
+        // B. Danh sách sản phẩm (ListView)
+        Expanded(
+          child: Container(
+            color: const Color(0xFFF2F2F2), // Màu nền nhẹ
+            child: filteredProducts.isEmpty
+                ? Center(
+                child: Text("Không tìm thấy sản phẩm",
+                    style: TextStyle(color: Colors.grey[600])))
+                : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 80), // Padding dưới để tránh nút giỏ hàng
+              itemCount: filteredProducts.length,
+              itemBuilder: (ctx, i) =>
+                  _buildMobileProductRow(filteredProducts[i]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileProductRow(ProductModel product) {
+    // 1. Tính toán số lượng đã chọn
+    double quantityInCart = 0;
+    if (_currentTab != null) {
+      final cartItems =
+      _currentTab!.items.values.where((i) => i.product.id == product.id);
+      quantityInCart = cartItems.fold(0, (tong, i) => tong + i.quantity);
+    }
+
+    // 2. Kiểm tra quyền xem tồn kho
+    const stockManagedTypes = {'Hàng hóa'};
+    final bool showStock = stockManagedTypes.contains(product.productType);
+
+    // Format số liệu
+    final numberFormat = NumberFormat('#,##0.####', 'vi_VN');
+    final currencyFormat = NumberFormat('#,##0', 'vi_VN');
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => _addItemToCart(product),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+          child: IntrinsicHeight( // Giúp căn giữa các cột theo chiều cao
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // --- 1. ẢNH SẢN PHẨM (Giữ nguyên) ---
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.grey[100],
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: product.imageUrl != null && product.imageUrl!.isNotEmpty
+                        ? CachedNetworkImage(
+                      imageUrl: product.imageUrl!,
+                      fit: BoxFit.cover,
+                      errorWidget: (c, u, e) => const Icon(
+                          Icons.image_not_supported_outlined,
+                          color: Colors.grey),
+                    )
+                        : const Icon(Icons.inventory_2_outlined,
+                        size: 32, color: Colors.grey),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // --- 2. THÔNG TIN (ĐÃ SỬA: Căn Trên - Giữa - Dưới) ---
+                Expanded(
+                  child: SizedBox(
+                    height: 80, // [QUAN TRỌNG] Buộc chiều cao bằng ảnh để căn lề chuẩn
+                    child: Column(
+                      // [QUAN TRỌNG] spaceBetween: Tên lên đỉnh, Kho xuống đáy, Mã vào giữa
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Dòng 1: Tên sản phẩm (Nằm trên cùng)
+                        Text(
+                          product.productName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Colors.black87,
+                              height: 1.1 // Giảm height nhẹ để nếu tên 2 dòng vẫn thoáng
+                          ),
+                        ),
+
+                        // Dòng 2: Mã sản phẩm (Nằm giữa)
+                        Row(
+                          children: [
+                            const Icon(Icons.qr_code_scanner,
+                                size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                product.productCode ?? '---',
+                                style: TextStyle(
+                                    color: Colors.grey[700], fontSize: 13),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Dòng 3: ĐVT và Tồn kho (Nằm dưới cùng)
+                        Row(
+                          children: [
+                            // Đơn vị tính
+                            if (product.unit != null && product.unit!.isNotEmpty) ...[
+                              const Icon(Icons.straighten_outlined,
+                                  size: 14, color: Colors.grey),
+                              const SizedBox(width: 4),
+                              Container(
+                                constraints: const BoxConstraints(maxWidth: 60),
+                                child: Text(
+                                  product.unit!,
+                                  style: TextStyle(
+                                      color: Colors.grey[700], fontSize: 13),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                            ],
+
+                            // Tồn kho
+                            if (showStock) ...[
+                              const Icon(Icons.inventory_2_outlined,
+                                  size: 14, color: Colors.grey),
+                              const SizedBox(width: 4),
+                              Text(
+                                numberFormat.format(product.stock),
+                                style: TextStyle(
+                                    color: Colors.grey[700],
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // --- 3. GIÁ & SỐ LƯỢNG (Giữ nguyên theo code bạn gửi) ---
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // Badge số lượng (Nằm trên)
+                    if (quantityInCart > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(12),
+
+                        ),
+                        child: Text(
+                          numberFormat.format(quantityInCart),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ),
+
+                    const Spacer(), // Đẩy giá xuống dưới cùng
+
+                    // Giá tiền (Nằm dưới)
+                    Text(
+                      currencyFormat.format(product.sellPrice),
+                      style: const TextStyle(
+                          color: AppTheme.primaryColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -3170,25 +3427,158 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
             selectedUnit: result['selectedUnit'],
             note: () => (result['note'] as String?).nullIfEmpty);
       });
+      _cartUpdateController.add(null);
       _applyBuyXGetYLogic();
+      _session.saveSessionToLocal();
     }
   }
 
   bool _handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
-
     if (_isPaymentView) return false;
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return false;
 
-    if (!mounted || ModalRoute.of(context)?.isCurrent != true) {
-      return false;
+    // 2. PHÂN LOẠI XỬ LÝ THEO NỀN TẢNG
+    bool isDesktopMode = false;
+    try {
+      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        isDesktopMode = true;
+      }
+    } catch (_) {}
+
+    if (isDesktopMode) {
+      // --- LOGIC CHO DESKTOP (WINDOWS) GIỮ NGUYÊN ---
+      // (Code cũ của bạn ở phần này đã ổn: Enter tìm, Backspace xóa, Ký tự tự điền & Focus)
+
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        if (_searchController.text.isNotEmpty) {
+          _handleBarcodeScan(_searchController.text);
+          return true;
+        }
+        return false;
+      }
+
+      if (event.logicalKey == LogicalKeyboardKey.backspace) {
+        final text = _searchController.text;
+        if (text.isNotEmpty) {
+          final newText = text.substring(0, text.length - 1);
+          _searchController.value = TextEditingValue(
+            text: newText,
+            selection: TextSelection.collapsed(offset: newText.length),
+          );
+          if (!_searchFocusNode.hasFocus) _searchFocusNode.requestFocus();
+          return true;
+        }
+        return false;
+      }
+
+      if (event.character != null &&
+          event.character!.isNotEmpty &&
+          !_isControlKey(event.logicalKey)) {
+        final newText = _searchController.text + event.character!;
+        _searchController.value = TextEditingValue(
+          text: newText,
+          selection: TextSelection.collapsed(offset: newText.length),
+        );
+        if (!_searchFocusNode.hasFocus) _searchFocusNode.requestFocus();
+        return true;
+      }
+    } else {
+      // ============================================================
+      // LOGIC CHO ANDROID POS / MOBILE (ĐÃ SỬA)
+      // ============================================================
+
+      // A. Chặn phím điều hướng để không bị nhảy lung tung
+      if (event.logicalKey == LogicalKeyboardKey.tab ||
+          event.logicalKey == LogicalKeyboardKey.arrowDown ||
+          event.logicalKey == LogicalKeyboardKey.arrowUp ||
+          event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        return true;
+      }
+
+      // B. Phím Enter -> Xử lý mã trong buffer
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+
+        if (_scannerBuffer.isNotEmpty) {
+          final now = DateTime.now();
+          // Chống dội (Double scan check)
+          if (_scannerBuffer == _lastScannedCode &&
+              now.difference(_lastScanTime).inMilliseconds < 1500) {
+            _scannerBuffer = '';
+            _bufferClearTimer?.cancel();
+            return true;
+          }
+          // Xử lý tìm kiếm
+          _handleBarcodeScan(_scannerBuffer);
+
+          // Lưu trạng thái
+          _lastScannedCode = _scannerBuffer;
+          _lastScanTime = now;
+          _scannerBuffer = '';
+          _bufferClearTimer?.cancel();
+          return true; // [QUAN TRỌNG] return true để chặn Enter không tác động vào ô tìm kiếm
+        }
+        // Nếu buffer rỗng mà bấm Enter, có thể cho phép (hoặc chặn tùy ý)
+        return false;
+      }
+
+      // C. Ký tự bình thường -> Gom vào buffer VÀ CHẶN HIỂN THỊ
+      if (event.character != null && event.character!.isNotEmpty) {
+        if (!_isControlKey(event.logicalKey)) {
+          _bufferClearTimer?.cancel();
+          // Reset buffer nếu quá lâu không nhận ký tự tiếp theo (scanner bắn rất nhanh)
+          _bufferClearTimer = Timer(const Duration(milliseconds: 500), () {
+            _scannerBuffer = '';
+          });
+
+          _scannerBuffer += event.character!;
+
+          // [CỰC KỲ QUAN TRỌNG]
+          // Return true để báo rằng "Tôi đã xử lý phím này rồi, đừng in nó ra màn hình nữa"
+          // Nhờ vậy, ô tìm kiếm sẽ không bị điền chữ vào dù đang focus.
+          return true;
+        }
+      }
     }
 
-    if (_searchFocusNode.hasFocus) return false;
-
-    if (event.character != null && event.character!.isNotEmpty) {
-      _searchFocusNode.requestFocus();
-    }
     return false;
+  }
+
+  // Hàm kiểm tra phím điều khiển (Phiên bản đầy đủ, đồng bộ với Order Screen)
+  bool _isControlKey(LogicalKeyboardKey key) {
+    return
+      // 1. Các phím Modifier (Shift, Ctrl, Alt, Meta)
+      key == LogicalKeyboardKey.shiftLeft ||
+          key == LogicalKeyboardKey.shiftRight ||
+          key == LogicalKeyboardKey.controlLeft ||
+          key == LogicalKeyboardKey.controlRight ||
+          key == LogicalKeyboardKey.altLeft ||
+          key == LogicalKeyboardKey.altRight ||
+          key == LogicalKeyboardKey.metaLeft ||
+          key == LogicalKeyboardKey.metaRight ||
+
+          // 2. Các phím điều hướng & chức năng cơ bản
+          key == LogicalKeyboardKey.tab ||
+          key == LogicalKeyboardKey.escape ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
+
+          // 3. Các phím Function (F1 - F12) - Chặn để tránh rác từ máy quét hoặc bấm nhầm
+          key == LogicalKeyboardKey.f1 ||
+          key == LogicalKeyboardKey.f2 ||
+          key == LogicalKeyboardKey.f3 ||
+          key == LogicalKeyboardKey.f4 ||
+          key == LogicalKeyboardKey.f5 ||
+          key == LogicalKeyboardKey.f6 ||
+          key == LogicalKeyboardKey.f7 ||
+          key == LogicalKeyboardKey.f8 ||
+          key == LogicalKeyboardKey.f9 ||
+          key == LogicalKeyboardKey.f10 ||
+          key == LogicalKeyboardKey.f11 ||
+          key == LogicalKeyboardKey.f12;
   }
 }
 
