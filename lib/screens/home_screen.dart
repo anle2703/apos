@@ -163,10 +163,10 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final currentUserUid = _currentUser!.uid;
       String? token = await messaging.getToken();
-
       if (token != null) {
         await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
-          'fcmTokens': FieldValue.arrayUnion([token])
+          'fcmTokens': FieldValue.arrayUnion([token]),
+          'receivePaymentNotification': true,
         });
       }
     } catch (e) {
