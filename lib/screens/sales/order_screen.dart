@@ -2758,9 +2758,7 @@ class _OrderScreenState extends State<OrderScreen> {
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           // Giảm padding để tiết kiệm không gian ngang
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          // Thu gọn chiều cao nút nếu cần
-                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                         ),
                         onPressed: widget.table.id.startsWith('schedule_')
                             ? () async {
@@ -2784,8 +2782,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         Expanded(
                           child: OutlinedButton(
                             style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                             ),
                             onPressed: _displayCart.isNotEmpty
                                 ? _handlePrintProvisionalBill
@@ -2803,8 +2800,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             // Đồng bộ padding và giảm xuống mức thấp nhất
-                            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 12),
-                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                           ),
                           onPressed: _displayCart.isNotEmpty
                               ? (widget.table.id.startsWith('schedule_')

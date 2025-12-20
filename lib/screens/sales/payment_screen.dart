@@ -2816,9 +2816,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           child: OutlinedButton.icon(
             onPressed: _isProcessingPayment ? null : _printAndExit,
             icon: const Icon(Icons.print_outlined, size: 20),
-            label: const Text('Tạm Tính'),
+            label: const Text('TẠM TÍNH'),
             style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16)),
+                padding: const EdgeInsets.symmetric(vertical: 8)),
           ),
         ),
         const SizedBox(width: 8),
@@ -2828,14 +2828,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             // F&B gọi không tham số -> in theo cấu hình
             onPressed: _isProcessingPayment ? null : () => _confirmPayment(),
             style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16)),
+                padding: const EdgeInsets.symmetric(vertical: 8)),
             child: _isProcessingPayment
                 ? const SizedBox(
                 width: 24,
                 height: 24,
                 child: CircularProgressIndicator(
                     color: Colors.white, strokeWidth: 3))
-                : const Text('Xác Nhận Thanh Toán'),
+                : const Text('XÁC NHẬN THANH TOÁN'),
           ),
         ),
       ],

@@ -3235,7 +3235,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                       : const Icon(Icons.cloud_upload_outlined, size: 20),
                   label: Text(_isSaving ? "ĐANG LƯU..." : "LƯU ĐƠN"),
                   style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       side: const BorderSide(color: AppTheme.primaryColor),
                       foregroundColor: AppTheme.primaryColor),
                 ),
@@ -3247,7 +3247,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   child: ElevatedButton(
                     onPressed: tab.items.isNotEmpty ? _handlePayment : null,
                     style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         backgroundColor: AppTheme.primaryColor,
                         foregroundColor: Colors.white,
                         elevation: 2),
