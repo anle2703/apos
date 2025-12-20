@@ -854,7 +854,7 @@ export const checkLowStockDaily = onSchedule(
         if (lowStockCount > 0) {
             const title = "⚠️ Cảnh báo tồn kho";
             const body = lowStockCount === 1
-                ? `Sản phẩm "${exampleProductName}" đã xuống dưới mức định mức.`
+                ? `"${exampleProductName}" sắp hết hàng rồi kìa người đẹp.`
                 : `Có ${lowStockCount} sản phẩm sắp hết hàng (${exampleProductName},...). Kiểm tra ngay!`;
 
             const message = {

@@ -29,8 +29,8 @@ import '../services/shift_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:io';
 import 'subscription_expired_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -40,6 +40,14 @@ class HomeScreen extends StatefulWidget {
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
+
+const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  'high_importance_channel_v4', // id bắt buộc phải khớp với server gửi về
+  'Thông báo thanh toán', // title hiện trong setting điện thoại
+  description: 'Kênh thông báo nhận tiền và đơn hàng',
+  importance: Importance.max, // QUAN TRỌNG: Để hiện popup (heads-up)
+  playSound: true,
+);
 
 class _HomeScreenState extends State<HomeScreen> {
   final FirestoreService _firestoreService = FirestoreService();
@@ -81,10 +89,28 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     _isNotificationSetup = true;
-
-    debugPrint(">>> [DEBUG] BẮT ĐẦU CÀI ĐẶT HỆ THỐNG THÔNG BÁO (FINAL)...");
-
     if (_currentUser == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    bool isDeviceEnabled = prefs.getBool('device_notify_enabled') ?? false;
+
+    // Nếu trong cài đặt đã tắt -> Không làm gì cả (hoặc đảm bảo token bị xóa)
+    if (!isDeviceEnabled) {
+      debugPrint(">>> [DEBUG] Thông báo đang tắt trên thiết bị này.");
+      // Tùy chọn: Xóa token để chắc chắn (đề phòng trường hợp cache lệch)
+      try {
+        String? token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(_currentUser!.uid)
+              .update({'fcmTokens': FieldValue.arrayRemove([token])});
+        }
+      } catch (e) {
+        debugPrint("Lỗi xóa token cache: $e");
+      }
+      return;
+    }
 
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
@@ -120,6 +146,10 @@ class _HomeScreenState extends State<HomeScreen> {
       iOS: initializationSettingsDarwin,
     );
 
+    await _localNotificationsPlugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
     await _localNotificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse details) {
@@ -135,24 +165,9 @@ class _HomeScreenState extends State<HomeScreen> {
       String? token = await messaging.getToken();
 
       if (token != null) {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(currentUserUid)
-            .get();
-
-        bool isEnabled = userDoc.data()?['receivePaymentNotification'] ?? false;
-
-        if (isEnabled) {
-          await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
-            'fcmTokens': FieldValue.arrayUnion([token])
-          });
-          debugPrint(">>> [DEBUG] Đã thêm Token vào danh sách thiết bị.");
-        } else {
-          debugPrint(">>> [DEBUG] User đang tắt thông báo -> Không update token.");
-
-          await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({'fcmTokens': FieldValue.arrayRemove([token])
-          });
-        }
+        await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
+          'fcmTokens': FieldValue.arrayUnion([token])
+        });
       }
     } catch (e) {
       debugPrint(">>> [DEBUG] Lỗi đồng bộ Token: $e");
@@ -164,23 +179,23 @@ class _HomeScreenState extends State<HomeScreen> {
       RemoteNotification? notification = message.notification;
       AndroidNotification? android = message.notification?.android;
 
-      if (notification != null) {
-        if (Platform.isAndroid && android != null) {
-          _localNotificationsPlugin.show(
-            notification.hashCode,
-            notification.title,
-            notification.body,
-            const NotificationDetails(
-              android: AndroidNotificationDetails(
-                'high_importance_channel_v4',
-                'Thông báo thanh toán',
-                importance: Importance.max,
-                priority: Priority.high,
-                icon: '@mipmap/ic_launcher',
-              ),
+      if (notification != null && android != null) { // Thêm check android != null
+        _localNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          NotificationDetails( // Bỏ const vì channel.id không phải hằng số biên dịch
+            android: AndroidNotificationDetails(
+              channel.id, // Sử dụng ID từ channel đã tạo phía trên
+              channel.name,
+              channelDescription: channel.description,
+              importance: Importance.max,
+              priority: Priority.high,
+              icon: '@mipmap/ic_launcher',
+              largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
             ),
-          );
-        }
+          ),
+        );
       }
     });
 

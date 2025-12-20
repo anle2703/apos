@@ -189,21 +189,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
 
-    try {
-      final userSnapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(ownerUid)
-          .get();
-
-      if (userSnapshot.exists && mounted) {
-        final data = userSnapshot.data() as Map<String, dynamic>;
-        setState(() {
-          _receivePaymentNotification =
-              data['receivePaymentNotification'] ?? false;
-        });
-      }
-    } catch (e) {
-      debugPrint("Lỗi tải trạng thái thông báo: $e");
+    if (mounted) {
+      setState(() {
+        _receivePaymentNotification = prefs.getBool('device_notify_enabled') ?? false;
+      });
     }
 
     final jsonString = prefs.getString('printer_assignments');
@@ -238,38 +227,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'storeName': _storeNameController.text.trim(),
         'storePhone': _storePhoneController.text.trim(),
         'storeAddress': _storeAddressController.text.trim(),
-        'receivePaymentNotification': _receivePaymentNotification,
+        // [QUAN TRỌNG] Bỏ dòng 'receivePaymentNotification' để không đồng bộ tắt/bật sang máy khác
       };
 
-      if (_receivePaymentNotification) {
-        // 1. Xin quyền thông báo
-        FirebaseMessaging messaging = FirebaseMessaging.instance;
-        NotificationSettings settings = await messaging.requestPermission(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
+      // 1. Lưu trạng thái Bật/Tắt vào bộ nhớ máy (Cache)
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('device_notify_enabled', _receivePaymentNotification);
 
-        if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-          // 2. Lấy Token thiết bị hiện tại
-          String? token = await messaging.getToken();
-          if (token != null) {
-            // [CHANGE] Lưu dạng String thay vì Array
-            userUpdateData['fcmTokens'] = token;
+      // 2. Xử lý Token với Firestore (Thêm hoặc Xóa khỏi mảng)
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+      String? token = await messaging.getToken();
+
+      if (token != null) {
+        if (_receivePaymentNotification) {
+          // --- TRƯỜNG HỢP BẬT THÔNG BÁO ---
+          NotificationSettings settings = await messaging.requestPermission(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+
+          if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+            // [QUAN TRỌNG] Dùng arrayUnion để THÊM token vào danh sách (giữ nguyên token các máy khác)
+            userUpdateData['fcmTokens'] = FieldValue.arrayUnion([token]);
+          } else {
+            // Nếu người dùng từ chối cấp quyền -> Tự động tắt
+            setState(() => _receivePaymentNotification = false);
+            await prefs.setBool('device_notify_enabled', false);
+
+            // Xóa token khỏi danh sách để không gửi rác
+            userUpdateData['fcmTokens'] = FieldValue.arrayRemove([token]);
+
+            ToastService().show(
+                message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.",
+                type: ToastType.warning);
           }
         } else {
-          // Người dùng từ chối cấp quyền -> Tắt switch
-          setState(() => _receivePaymentNotification = false);
-          userUpdateData['receivePaymentNotification'] = false;
-          // [CHANGE] Xóa token bằng cách gán chuỗi rỗng hoặc null
-          userUpdateData['fcmTokens'] = "";
-          ToastService().show(
-              message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.",
-              type: ToastType.warning);
+          // --- TRƯỜNG HỢP TẮT THÔNG BÁO ---
+          // [QUAN TRỌNG] Dùng arrayRemove để chỉ XÓA token của máy này khỏi danh sách
+          userUpdateData['fcmTokens'] = FieldValue.arrayRemove([token]);
         }
-      } else {
-        // [CHANGE] Nếu tắt chức năng -> Xóa token (gán rỗng)
-        userUpdateData['fcmTokens'] = "";
       }
 
       if (_isThisDeviceTheServer) {
@@ -278,7 +275,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       await _firestoreService.updateUserField(ownerUid, userUpdateData);
 
-      final prefs = await SharedPreferences.getInstance();
       await prefs.setString('client_print_mode', _clientPrintMode);
       await prefs.setBool('is_print_server', _isThisDeviceTheServer);
       await prefs.setString('print_server_ip', _serverIpController.text.trim());
