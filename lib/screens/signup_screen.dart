@@ -4,6 +4,7 @@ import '../services/firestore_service.dart';
 import '../services/toast_service.dart';
 import '../theme/responsive_helper.dart';
 import '../widgets/custom_text_form_field.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -49,54 +50,68 @@ class _SignupScreenState extends State<SignupScreen> {
 
   void _signUp() async {
     if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
+
     final email = _emailController.text.trim();
     final shopName = _shopNameController.text.trim();
     final shopId = _generateStoreId(shopName);
     final phoneNumber = _phoneController.text.trim();
     final password = _passwordController.text.trim();
 
-    bool emailExists = await _firestoreService.isFieldInUse(field: 'email', value: email);
-    if (emailExists) {
-      _toastService.show(message: 'Email này đã được sử dụng.', type: ToastType.error);
-      setState(() => _isLoading = false);
-      return;
-    }
-    bool shopIdExists = await _firestoreService.isFieldInUse(field: 'storeId', value: shopId);
-    if (shopIdExists) {
-      _toastService.show(message: 'Tên cửa hàng này đã tạo ra một ID bị trùng.', type: ToastType.error);
-      setState(() => _isLoading = false);
-      return;
-    }
-    bool phoneExists = await _firestoreService.isFieldInUse(field: 'phoneNumber', value: phoneNumber);
-    if (phoneExists) {
-      _toastService.show(message: 'Số điện thoại này đã được sử dụng.', type: ToastType.error);
-      setState(() => _isLoading = false);
-      return;
-    }
+    try {
+      // 1. GỌI SERVER KIỂM TRA TRÙNG LẶP (SĐT & SHOP ID)
+      // (Bước này giờ đã an toàn và chính xác)
+      await FirebaseFunctions.instanceFor(region: 'asia-southeast1')
+          .httpsCallable('checkRegisterInfo')
+          .call({
+        'phoneNumber': phoneNumber,
+        'storeId': shopId,
+      });
 
-    final user = await _authService.signUpWithEmailPassword(email, password);
-    if (user != null) {
-      await _firestoreService.createUserProfile(
-        uid: user.uid,
-        email: user.email!,
-        storeId: shopId,
-        storeName: shopName,
-        phoneNumber: phoneNumber,
-        role: 'owner',
-        name: 'admin',
-      );
+      // 2. Nếu Server ok (không lỗi), tiếp tục tạo Auth
+      final user = await _authService.signUpWithEmailPassword(email, password);
 
-      await _authService.signOut();
+      if (user != null) {
+        await _firestoreService.createUserProfile(
+          uid: user.uid,
+          email: user.email!,
+          storeId: shopId,
+          storeName: shopName,
+          phoneNumber: phoneNumber,
+          role: 'owner',
+          name: 'admin',
+        );
+
+        await _authService.signOut();
+
+        if (mounted) {
+          _toastService.show(
+              message: 'Đăng ký thành công! Vui lòng đăng nhập.',
+              type: ToastType.success
+          );
+          Navigator.of(context).pop();
+        }
+      }
+    } catch (e) {
+      String errorMessage = 'Đăng ký thất bại.';
+
+      // Bắt lỗi từ Cloud Function trả về
+      if (e is FirebaseFunctionsException) {
+        errorMessage = e.message ?? errorMessage;
+      }
+      // Bắt lỗi từ Firebase Auth
+      else if (e.toString().contains('email-already-in-use')) {
+        errorMessage = 'Email này đã được sử dụng.';
+      } else {
+        errorMessage = e.toString().replaceAll("Exception: ", "");
+      }
+
       if (mounted) {
-        _toastService.show(message: 'Đăng ký thành công! Vui lòng đăng nhập.', type: ToastType.success);
-        Navigator.of(context).pop();
+        _toastService.show(message: errorMessage, type: ToastType.error);
       }
-    } else {
-      if(mounted) {
-        _toastService.show(message: 'Đăng ký thất bại, vui lòng thử lại.', type: ToastType.error);
-        setState(() => _isLoading = false);
-      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

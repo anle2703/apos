@@ -12,6 +12,8 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import moment from "moment-timezone";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
+import * as crypto from 'crypto';
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -981,5 +983,107 @@ export const checkExpiredSubscriptions = onSchedule(
     } catch (error) {
       console.error("Lỗi khi chạy job quét hết hạn:", error);
     }
+  }
+);
+
+// HÀM LOGIN THÔNG MINH (CHỦ & NHÂN VIÊN)
+export const loginEmployee = onCall(
+  { region: "asia-southeast1" },
+  async (request: CallableRequest) => {
+    const { phoneNumber, password } = request.data;
+
+    if (!phoneNumber || !password) {
+      throw new HttpsError('invalid-argument', 'Thiếu thông tin đăng nhập');
+    }
+
+    // 1. Tìm user theo số điện thoại
+    const userQuery = await db.collection('users')
+      .where('phoneNumber', '==', phoneNumber)
+      .limit(1)
+      .get();
+
+    if (userQuery.empty) {
+      throw new HttpsError('not-found', 'Số điện thoại này chưa được đăng ký.');
+    }
+
+    const userDoc = userQuery.docs[0];
+    const userData = userDoc.data();
+    const uid = userDoc.id;
+
+    // ============================================================
+    // TRƯỜNG HỢP A: LÀ CHỦ CỬA HÀNG (OWNER)
+    // ============================================================
+    if (userData.role === 'owner') {
+      // Chủ dùng Firebase Auth chuẩn, server không check password được.
+      // Trả về Email để Client tự đăng nhập bằng SDK.
+      return { 
+        isOwner: true, 
+        email: userData.email 
+      };
+    }
+
+    // ============================================================
+    // TRƯỜNG HỢP B: LÀ NHÂN VIÊN (EMPLOYEE)
+    // ============================================================
+    
+    // 2. Check Active
+    if (userData.active === false) {
+      throw new HttpsError('permission-denied', 'Tài khoản nhân viên đã bị khóa.');
+    }
+
+    // 3. Mã hóa mật khẩu gửi lên để so sánh với DB
+    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+
+    if (userData.password !== hashedPassword) {
+         throw new HttpsError('unauthenticated', 'Sai mật khẩu nhân viên.');
+    }
+
+    try {
+      // 4. Tạo Custom Token cho nhân viên
+      const customToken = await admin.auth().createCustomToken(uid, {
+        role: userData.role || 'employee',
+        storeId: userData.storeId
+      });
+
+      return { 
+        isOwner: false,
+        token: customToken 
+      };
+    } catch (error) {
+      console.error("Lỗi tạo token:", error);
+      throw new HttpsError('internal', 'Lỗi hệ thống khi tạo token (Kiểm tra IAM Role).');
+    }
+  }
+);
+
+// Hàm kiểm tra thông tin đăng ký (Public)
+export const checkRegisterInfo = onCall(
+  { region: "asia-southeast1" },
+  async (request: CallableRequest) => {
+    const { phoneNumber, storeId } = request.data;
+
+    // 1. Kiểm tra SĐT
+    if (phoneNumber) {
+      const phoneQuery = await db.collection('users')
+        .where('phoneNumber', '==', phoneNumber)
+        .limit(1)
+        .get();
+      if (!phoneQuery.empty) {
+        throw new HttpsError('already-exists', 'Số điện thoại này đã được sử dụng bởi cửa hàng khác.');
+      }
+    }
+
+    // 2. Kiểm tra StoreId (Tên cửa hàng)
+    if (storeId) {
+      const storeQuery = await db.collection('users')
+        .where('storeId', '==', storeId)
+        .limit(1)
+        .get();
+      if (!storeQuery.empty) {
+        throw new HttpsError('already-exists', 'Tên cửa hàng này đã tồn tại, vui lòng chọn tên khác.');
+      }
+    }
+
+    return { valid: true };
   }
 );
