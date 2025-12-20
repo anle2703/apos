@@ -60,6 +60,7 @@ dependencies:
   firebase_messaging: ^16.0.4
   flutter_local_notifications: ^19.5.0
   cloud_functions: ^6.0.5
+  firebase_crashlytics: ^5.0.6
 
 dev_dependencies:
   flutter_test:

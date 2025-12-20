@@ -19,6 +19,7 @@ import 'widgets/toast_manager.dart';
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 final PrintingService globalPrintingService =
 PrintingService(tableName: '', userName: '');
@@ -50,22 +51,28 @@ Future<void> _createNotificationChannel() async {
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runZonedGuarded<Future<void>>(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    // 1. Cài đặt Crashlytics
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
-  await _createNotificationChannel();
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    await _createNotificationChannel();
 
-  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
-      appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
-    );
-  }
+    // App Check logic của bạn (GIỮ NGUYÊN)
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      await FirebaseAppCheck.instance.activate(
+        androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+        appleProvider: kDebugMode ? AppleProvider.debug : AppleProvider.appAttest,
+      );
+    }
 
-  await initializeDateFormatting('vi_VN', null);
-  runApp(const MyApp());
+    await initializeDateFormatting('vi_VN', null);
+
+    runApp(const MyApp());
+  }, (error, stack) => FirebaseCrashlytics.instance.recordError(error, stack, fatal: true));
 }
 
 Future<void> startPrintServerForUser(UserModel user) async {

@@ -216,7 +216,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: const Text('Đăng nhập'),
                             ),
                             const SizedBox(height: 12),
-                            if (!isDesktop)
+                            if (!isDesktop && !Platform.isIOS)
                               OutlinedButton.icon(
                                 icon: const FaIcon(FontAwesomeIcons.google,
                                     color: Colors.red, size: 18),
