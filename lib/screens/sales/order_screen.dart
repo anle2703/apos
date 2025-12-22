@@ -3961,7 +3961,7 @@ class _OrderScreenState extends State<OrderScreen> {
           if (quantityInCart > 0)
             Positioned(
               top: -6,
-              right: -6,
+              right: -2,
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
@@ -3990,7 +3990,7 @@ class _OrderScreenState extends State<OrderScreen> {
           if (isMobile && quantityInCart > sentQuantity)
             Positioned(
               top: -6,
-              left: -6,
+              left: -2,
               child: GestureDetector(
                 onTap: () => _clearProductFromCart(product.id),
                 child: Container(
