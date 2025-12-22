@@ -19,7 +19,7 @@ import '../screens/subscription_expired_screen.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
-
+  static bool isManualProcess = false;
   Widget _handleWebAppUrl(BuildContext context) {
     final Uri uri = Uri.base;
     final queryParams = uri.queryParameters;
@@ -52,6 +52,20 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        if (AuthGate.isManualProcess) {
+          return const Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 20),
+                  Text("Đang xử lý đăng ký...", style: TextStyle(fontSize: 16)),
+                ],
+              ),
+            ),
+          );
+        }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }

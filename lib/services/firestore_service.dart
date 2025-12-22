@@ -30,16 +30,12 @@ class FirestoreService {
   String _toTitleCase(String? input) {
     if (input == null || input.trim().isEmpty) return '';
 
-    return input
-        .split(' ')
-        .where((word) => word.isNotEmpty)
-        .map((word) {
+    return input.split(' ').where((word) => word.isNotEmpty).map((word) {
       if (word == word.toUpperCase()) {
         return word;
       }
       return word[0].toUpperCase() + word.substring(1).toLowerCase();
-    })
-        .join(' ');
+    }).join(' ');
   }
 
   Stream<List<ProductModel>> getProductsStream(String storeId,
@@ -59,8 +55,7 @@ class FirestoreService {
         .collection('products')
         .where('storeId', isEqualTo: storeId)
         .snapshots()
-        .map((snapshot) =>
-        snapshot.docs
+        .map((snapshot) => snapshot.docs
             .map((doc) => ProductModel.fromFirestore(doc))
             .toList());
   }
@@ -71,9 +66,7 @@ class FirestoreService {
         .where('storeId', isEqualTo: storeId)
         .snapshots()
         .map((snapshot) =>
-        snapshot.docs
-            .map((doc) => UserModel.fromFirestore(doc))
-            .toList());
+            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
   }
 
   Future<DocumentReference> addProduct(Map<String, dynamic> productData) async {
@@ -96,8 +89,8 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateProduct(String productId,
-      Map<String, dynamic> data) async {
+  Future<void> updateProduct(
+      String productId, Map<String, dynamic> data) async {
     try {
       // SAU KHI SỬA: Cập nhật trực tiếp map nhận được, không convert qua Model
       // để tránh việc các trường không gửi lên bị reset về null/mặc định.
@@ -182,8 +175,6 @@ class FirestoreService {
     }
   }
 
-  // Tìm đến hàm createUserProfile và sửa lại đoạn batch.set:
-
   Future<void> createUserProfile({
     required String uid,
     required String email,
@@ -222,7 +213,7 @@ class FirestoreService {
         'storeName': _toTitleCase(storeName),
         'storeAddress': _toTitleCase(storeAddress),
         'storePhone': storePhone,
-        'businessType': businessType ?? 'retail',
+        'businessType': businessType,
         'agentId': agentId,
         'fcmTokens': [],
         'printBillAfterPayment': true,
@@ -244,7 +235,6 @@ class FirestoreService {
       });
 
       await batch.commit();
-
     } catch (e) {
       throw Exception('Không thể tạo hồ sơ người dùng và cửa hàng: $e');
     }
@@ -266,8 +256,11 @@ class FirestoreService {
 
   Future<String?> getEmailFromPhoneNumber(String phoneNumber) async {
     try {
-      final query = await _db.collection('users').where(
-          'phoneNumber', isEqualTo: phoneNumber).limit(1).get();
+      final query = await _db
+          .collection('users')
+          .where('phoneNumber', isEqualTo: phoneNumber)
+          .limit(1)
+          .get();
       if (query.docs.isNotEmpty) {
         return query.docs.first.data()['email'] as String?;
       }
@@ -280,7 +273,7 @@ class FirestoreService {
   Future<String> generateNextProductCode(String storeId, String prefix) async {
     try {
       final counterDocRef =
-      _db.collection('counters').doc('product_codes_$storeId');
+          _db.collection('counters').doc('product_codes_$storeId');
       final String counterField = '${prefix}_count';
       int? nextNumber;
       if (!kIsWeb && Platform.isWindows) {
@@ -301,9 +294,9 @@ class FirestoreService {
             transaction.set(counterDocRef, {counterField: 1});
             nextNumber = 1;
           } else {
-            final currentCount =
-                (counterSnapshot.data() as Map<String,
-                    dynamic>)[counterField] ?? 0;
+            final currentCount = (counterSnapshot.data()
+                    as Map<String, dynamic>)[counterField] ??
+                0;
             nextNumber = currentCount + 1;
             transaction.update(counterDocRef, {counterField: nextNumber});
           }
@@ -346,9 +339,8 @@ class FirestoreService {
         return _cachedProductGroups!;
       }
 
-      Query query = _db
-          .collection('product_groups')
-          .where('storeId', isEqualTo: storeId);
+      Query query =
+          _db.collection('product_groups').where('storeId', isEqualTo: storeId);
 
       if (name != null) {
         query = query.where('name', isEqualTo: name);
@@ -371,21 +363,21 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateProductGroup(String groupId, String newName,
-      int newStt) async {
+  Future<void> updateProductGroup(
+      String groupId, String newName, int newStt) async {
     try {
       await _db
           .collection('product_groups')
           .doc(groupId)
-          .update({ 'name': _toTitleCase(newName), 'stt': newStt});
+          .update({'name': _toTitleCase(newName), 'stt': newStt});
       _cachedProductGroups = null;
     } catch (e) {
       throw Exception('Không thể cập nhật nhóm sản phẩm: $e');
     }
   }
 
-  Future<void> deleteProductGroup(String groupId, String groupName,
-      String storeId) async {
+  Future<void> deleteProductGroup(
+      String groupId, String groupName, String storeId) async {
     try {
       final productQuery = await _db
           .collection('products')
@@ -561,21 +553,21 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateTableGroup(String groupId, String newName,
-      int newStt) async {
+  Future<void> updateTableGroup(
+      String groupId, String newName, int newStt) async {
     try {
       await _db
           .collection('table_groups')
           .doc(groupId)
-          .update({ 'name': _toTitleCase(newName), 'stt': newStt});
+          .update({'name': _toTitleCase(newName), 'stt': newStt});
       _cachedTableGroups = null;
     } catch (e) {
       throw Exception('Không thể cập nhật nhóm phòng/bàn: $e');
     }
   }
 
-  Future<void> deleteTableGroup(String groupId, String groupName,
-      String storeId) async {
+  Future<void> deleteTableGroup(
+      String groupId, String groupName, String storeId) async {
     try {
       final tableQuery = await _db
           .collection('tables')
@@ -604,9 +596,7 @@ class FirestoreService {
         .orderBy('stt')
         .snapshots()
         .map((snapshot) =>
-        snapshot.docs
-            .map((doc) => TableModel.fromFirestore(doc))
-            .toList());
+            snapshot.docs.map((doc) => TableModel.fromFirestore(doc)).toList());
   }
 
   Stream<List<OrderModel>> getActiveOrdersStream(String storeId) {
@@ -616,9 +606,7 @@ class FirestoreService {
         .where('status', isEqualTo: 'active')
         .snapshots()
         .map((snapshot) =>
-        snapshot.docs
-            .map((doc) => OrderModel.fromFirestore(doc))
-            .toList());
+            snapshot.docs.map((doc) => OrderModel.fromFirestore(doc)).toList());
   }
 
   Future<String> addOrder(Map<String, dynamic> orderData) async {
@@ -630,8 +618,8 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateOrder(String orderId,
-      Map<String, dynamic> orderData) async {
+  Future<void> updateOrder(
+      String orderId, Map<String, dynamic> orderData) async {
     try {
       await _db.collection('orders').doc(orderId).update(orderData);
     } catch (e) {
@@ -680,7 +668,8 @@ class FirestoreService {
   Future<Map<String, String>?> getStoreDetails(String storeId) async {
     try {
       // SỬA: Đọc trực tiếp từ 'store_settings' thay vì tìm trong 'users'
-      final docSnapshot = await _db.collection('store_settings').doc(storeId).get();
+      final docSnapshot =
+          await _db.collection('store_settings').doc(storeId).get();
 
       if (docSnapshot.exists) {
         final data = docSnapshot.data();
@@ -700,19 +689,21 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateStoreDetails(String storeId,
-      Map<String, dynamic> data) async {
+  Future<void> updateStoreDetails(
+      String storeId, Map<String, dynamic> data) async {
     try {
-      await _db.collection('stores').doc(storeId).set(
-          data, SetOptions(merge: true));
+      await _db
+          .collection('stores')
+          .doc(storeId)
+          .set(data, SetOptions(merge: true));
     } catch (e) {
       debugPrint("Lỗi khi cập nhật thông tin cửa hàng: $e");
       rethrow;
     }
   }
 
-  Future<DocumentReference> createPrintJobDocument(Map<String, dynamic> jobData,
-      String storeId) async {
+  Future<DocumentReference> createPrintJobDocument(
+      Map<String, dynamic> jobData, String storeId) async {
     try {
       final dataToSave = {
         ...jobData,
@@ -760,9 +751,7 @@ class FirestoreService {
 
       String? safeValue(dynamic value) {
         final String? str = value as String?;
-        return (str == null || str
-            .trim()
-            .isEmpty) ? null : str;
+        return (str == null || str.trim().isEmpty) ? null : str;
       }
 
       formattedData['name'] = safeTitleCase(customerData['name']);
@@ -805,7 +794,7 @@ class FirestoreService {
       // Việc này đảm bảo CustomerModel.fromMap không gặp lỗi ép kiểu từ null sang num
       formattedData['points'] ??= 0;
       formattedData['debt'] ??=
-      0.0; // debt là nullable trong Model, nhưng gán 0.0 nếu chưa có vẫn an toàn
+          0.0; // debt là nullable trong Model, nhưng gán 0.0 nếu chưa có vẫn an toàn
       formattedData['totalSpent'] ??= 0.0;
 
       // Cần Timestamp thay vì FieldValue khi tạo model cục bộ
@@ -821,8 +810,8 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateCustomer(String customerId,
-      Map<String, dynamic> data) async {
+  Future<void> updateCustomer(
+      String customerId, Map<String, dynamic> data) async {
     try {
       final formattedData = Map<String, dynamic>.from(data);
       formattedData['name'] = _toTitleCase(data['name']);
@@ -866,16 +855,14 @@ class FirestoreService {
   }
 
   Future<void> updateCustomerGroup(String groupId, String newName) async {
-    if (newName
-        .trim()
-        .isEmpty) {
+    if (newName.trim().isEmpty) {
       throw Exception('Tên nhóm không được để trống');
     }
     try {
       await _db
           .collection('customer_groups')
           .doc(groupId)
-          .update({ 'name': _toTitleCase(newName)});
+          .update({'name': _toTitleCase(newName)});
     } catch (e) {
       throw Exception('Không thể cập nhật nhóm khách hàng: $e');
     }
@@ -924,8 +911,8 @@ class FirestoreService {
   Stream<List<CustomerModel>> searchCustomers(String query, String storeId,
       {String? groupId}) {
     try {
-      Query queryRef = _db.collection('customers').where(
-          'storeId', isEqualTo: storeId);
+      Query queryRef =
+          _db.collection('customers').where('storeId', isEqualTo: storeId);
 
       if (groupId != null && groupId.isNotEmpty) {
         queryRef = queryRef.where('customerGroupId', isEqualTo: groupId);
@@ -936,10 +923,9 @@ class FirestoreService {
             queryRef.where('searchKeys', arrayContains: query.toLowerCase());
       }
 
-      return queryRef.snapshots().map((snapshot) =>
-          snapshot.docs
-              .map((doc) => CustomerModel.fromFirestore(doc))
-              .toList());
+      return queryRef.snapshots().map((snapshot) => snapshot.docs
+          .map((doc) => CustomerModel.fromFirestore(doc))
+          .toList());
     } catch (e) {
       debugPrint("Lỗi khi tìm khách hàng: $e");
       return Stream.value([]);
@@ -1008,8 +994,8 @@ class FirestoreService {
       final String datePrefix = DateFormat('ddMMyy').format(now);
 
       // 3) Lấy STT an toàn theo ngày (dùng collection 'counters')
-      final counterDocRef = _db.collection('counters').doc(
-          'bill_counts_$storeId');
+      final counterDocRef =
+          _db.collection('counters').doc('bill_counts_$storeId');
       final String counterField = 'count_$datePrefix';
 
       int nextNumber = 0;
@@ -1041,9 +1027,8 @@ class FirestoreService {
       }
 
       // 4) Ghép billId theo yêu cầu: <storeId>_bill<ddMMyy><stt4>
-      final String billId = '${storeId}_BILL$datePrefix${nextNumber
-          .toString()
-          .padLeft(4, '0')}';
+      final String billId =
+          '${storeId}_BILL$datePrefix${nextNumber.toString().padLeft(4, '0')}';
 
       // 5) Chuẩn hóa dữ liệu lưu bill
       final dataToSave = Map<String, dynamic>.from(billData);
@@ -1056,9 +1041,10 @@ class FirestoreService {
       await _db.collection('bills').doc(billId).set(dataToSave);
 
       final String? customerId = billData['customerId'] as String?;
-      final num? totalPayableNum = billData['totalPayable'] as num?; // Lấy kiểu num cho an toàn
-      final double totalPayable = totalPayableNum?.toDouble() ??
-          0.0; // Chuyển sang double
+      final num? totalPayableNum =
+          billData['totalPayable'] as num?; // Lấy kiểu num cho an toàn
+      final double totalPayable =
+          totalPayableNum?.toDouble() ?? 0.0; // Chuyển sang double
 
       // Chỉ cập nhật nếu có customerId và totalPayable > 0
       if (customerId != null && customerId.isNotEmpty && totalPayable > 0) {
@@ -1094,14 +1080,16 @@ class FirestoreService {
       final docId = '${storeId}_PointsSettings';
       final docRef = _db.collection('promotions').doc(docId);
 
-      await docRef.set({
-        'storeId': storeId,
-        'earnRateVnd': earnRate, // Số tiền để kiếm 1 điểm
-        'redeemRateVnd': redeemRate, // Giá trị của 1 điểm
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(
-          merge: true)); // Dùng merge để không ghi đè các trường khác nếu có
-
+      await docRef.set(
+          {
+            'storeId': storeId,
+            'earnRateVnd': earnRate, // Số tiền để kiếm 1 điểm
+            'redeemRateVnd': redeemRate, // Giá trị của 1 điểm
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(
+              merge:
+                  true)); // Dùng merge để không ghi đè các trường khác nếu có
     } catch (e) {
       throw Exception('Không thể lưu cài đặt tích điểm: $e');
     }
@@ -1161,8 +1149,7 @@ class FirestoreService {
         .where('storeId', isEqualTo: storeId)
         .where('type', isEqualTo: 'voucher')
         .snapshots() // Dòng này trả về Stream<QuerySnapshot>
-        .map((snapshot) =>
-        snapshot.docs // Dùng .map để chuyển đổi nó
+        .map((snapshot) => snapshot.docs // Dùng .map để chuyển đổi nó
             .map((doc) => VoucherModel.fromFirestore(doc))
             .toList());
   }
@@ -1224,9 +1211,10 @@ class FirestoreService {
   Future<void> setDefaultVoucher(String storeId, String? voucherCode) async {
     // Nếu voucherCode là null => Xóa mặc định
     // Nếu có giá trị => Đặt làm mặc định
-    await _db.collection('stores').doc(storeId).set({
-      'defaultVoucherCode': voucherCode
-    }, SetOptions(merge: true));
+    await _db
+        .collection('stores')
+        .doc(storeId)
+        .set({'defaultVoucherCode': voucherCode}, SetOptions(merge: true));
   }
 
   // Hàm lấy setting của store (để biết voucher nào đang là mặc định)
@@ -1234,19 +1222,20 @@ class FirestoreService {
     return _db.collection('stores').doc(storeId).snapshots();
   }
 
-  Future<void> updateProductStock(WriteBatch batch, String productId,
-      double quantityChange) {
+  Future<void> updateProductStock(
+      WriteBatch batch, String productId, double quantityChange) {
     final productRef = _db.collection('products').doc(productId);
     batch.update(productRef, {'stock': FieldValue.increment(-quantityChange)});
     return Future.value();
   }
 
   Future<bool> isTableOccupied(String tableId, String storeId) async {
-    final query = await _db.collection('orders')
-    // SỬA 1: Thêm truy vấn theo storeId để đảm bảo đúng cửa hàng
+    final query = await _db
+        .collection('orders')
+        // SỬA 1: Thêm truy vấn theo storeId để đảm bảo đúng cửa hàng
         .where('storeId', isEqualTo: storeId)
         .where('tableId', isEqualTo: tableId)
-    // SỬA 2: Dùng đúng trạng thái là 'active'
+        // SỬA 2: Dùng đúng trạng thái là 'active'
         .where('status', isEqualTo: 'active')
         .limit(1)
         .get();
@@ -1300,8 +1289,8 @@ class FirestoreService {
     }
   }
 
-  Future<UserModel?> getEmployeeByPhone(String phoneNumber,
-      String plainPassword) async {
+  Future<UserModel?> getEmployeeByPhone(
+      String phoneNumber, String plainPassword) async {
     try {
       final query = await _db
           .collection('users')
@@ -1400,8 +1389,7 @@ class FirestoreService {
         .where('storeId', isEqualTo: storeId)
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) =>
-        snapshot.docs
+        .map((snapshot) => snapshot.docs
             .map((doc) => QuickNoteModel.fromFirestore(doc))
             .toList());
   }
@@ -1439,9 +1427,7 @@ class FirestoreService {
   }
 
   Future<void> addPaymentMethod(PaymentMethodModel method) {
-    return _db
-        .collection('payment_methods')
-        .add(method.toMap());
+    return _db.collection('payment_methods').add(method.toMap());
   }
 
   Future<void> updatePaymentMethod(PaymentMethodModel method) {
@@ -1451,9 +1437,10 @@ class FirestoreService {
         .update(method.toMap());
   }
 
-  Future<void> updateCustomerGroupNameInCustomers(String groupId,
-      String newName, String storeId) async {
-    final query = _db.collection('customers')
+  Future<void> updateCustomerGroupNameInCustomers(
+      String groupId, String newName, String storeId) async {
+    final query = _db
+        .collection('customers')
         .where('storeId', isEqualTo: storeId)
         .where('customerGroupId', isEqualTo: groupId);
 
@@ -1487,8 +1474,8 @@ class FirestoreService {
     }
   }
 
-  Future<void> confirmAtTableWebOrder(WebOrderModel webOrder,
-      String staffName) async {
+  Future<void> confirmAtTableWebOrder(
+      WebOrderModel webOrder, String staffName) async {
     // 1. Lấy tham chiếu đến 2 document
     final webOrderRef = _db.collection('web_orders').doc(webOrder.id);
     // ID của đơn hàng tại bàn CHÍNH LÀ ID CỦA BÀN
@@ -1516,7 +1503,7 @@ class FirestoreService {
         currentVersion = (tableData['version'] as num?)?.toInt() ?? 0;
 
         final List<Map<String, dynamic>> existingItems =
-        List<Map<String, dynamic>>.from(tableData['items'] ?? []);
+            List<Map<String, dynamic>>.from(tableData['items'] ?? []);
         final double existingTotal =
             (tableData['totalAmount'] as num?)?.toDouble() ?? 0.0;
 
@@ -1603,13 +1590,15 @@ class FirestoreService {
     }
   }
 
-  Future<void> updateStoreTaxSettings(String storeId,
-      Map<String, dynamic> settings) async {
+  Future<void> updateStoreTaxSettings(
+      String storeId, Map<String, dynamic> settings) async {
     try {
       final settingsToSave = Map<String, dynamic>.from(settings);
       settingsToSave['storeId'] = storeId;
-      await _db.collection('store_tax_settings').doc(storeId).set(
-          settingsToSave, SetOptions(merge: true));
+      await _db
+          .collection('store_tax_settings')
+          .doc(storeId)
+          .set(settingsToSave, SetOptions(merge: true));
     } catch (e) {
       debugPrint("Lỗi updateStoreTaxSettings: $e");
       rethrow;
@@ -1618,10 +1607,8 @@ class FirestoreService {
 
   Future<Map<String, dynamic>> getTaxThresholds() async {
     try {
-      final doc = await _db
-          .collection('app_config')
-          .doc('tax_thresholds')
-          .get();
+      final doc =
+          await _db.collection('app_config').doc('tax_thresholds').get();
       if (doc.exists && doc.data() != null) {
         return doc.data()!;
       }
@@ -1656,11 +1643,10 @@ class FirestoreService {
     return _db
         .collection('discounts') // Lưu ở Root Collection
         .where('storeId', isEqualTo: storeId) // Lọc theo StoreId
-        .orderBy(
-        'updatedAt', descending: true) // Sắp xếp mới nhất lên đầu (tuỳ chọn)
+        .orderBy('updatedAt',
+            descending: true) // Sắp xếp mới nhất lên đầu (tuỳ chọn)
         .snapshots()
-        .map((snapshot) =>
-        snapshot.docs
+        .map((snapshot) => snapshot.docs
             .map((doc) => DiscountModel.fromFirestore(doc))
             .toList());
   }
@@ -1704,7 +1690,6 @@ class FirestoreService {
     }
   }
 
-
   // 1. Lấy danh sách Mua X Tặng Y theo StoreId
   Stream<List<Map<String, dynamic>>> getBuyXGetYStream(String storeId) {
     return _db
@@ -1713,12 +1698,11 @@ class FirestoreService {
         .where('type', isEqualTo: 'buy_x_get_y')
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) =>
-        snapshot.docs.map((doc) {
-          final data = doc.data();
-          data['id'] = doc.id; // Gán ID vào map để dùng sau này
-          return data;
-        }).toList());
+        .map((snapshot) => snapshot.docs.map((doc) {
+              final data = doc.data();
+              data['id'] = doc.id; // Gán ID vào map để dùng sau này
+              return data;
+            }).toList());
   }
 
   // 2. Lưu hoặc Cập nhật Mua X Tặng Y
@@ -1808,11 +1792,11 @@ class FirestoreService {
     return _db
         .collection('surcharges')
         .where('storeId', isEqualTo: storeId)
-    // .orderBy('createdAt', descending: true) // <--- BỎ DÒNG NÀY
+        // .orderBy('createdAt', descending: true) // <--- BỎ DÒNG NÀY
         .snapshots()
         .map((snapshot) => snapshot.docs
-        .map((doc) => SurchargeModel.fromFirestore(doc))
-        .toList());
+            .map((doc) => SurchargeModel.fromFirestore(doc))
+            .toList());
   }
 
   // 2. Lấy danh sách active (Dùng cho Payment)
@@ -1825,7 +1809,9 @@ class FirestoreService {
           .where('isActive', isEqualTo: true)
           .get();
 
-      final allActive = snapshot.docs.map((doc) => SurchargeModel.fromFirestore(doc)).toList();
+      final allActive = snapshot.docs
+          .map((doc) => SurchargeModel.fromFirestore(doc))
+          .toList();
 
       // Lọc thủ công ngày giờ
       return allActive.where((s) {
@@ -1839,9 +1825,14 @@ class FirestoreService {
     }
   }
 
-  Future<void> addSurcharge(Map<String, dynamic> data) async => await _db.collection('surcharges').add(data);
-  Future<void> updateSurcharge(String id, Map<String, dynamic> data) async => await _db.collection('surcharges').doc(id).update(data);
-  Future<void> deleteSurcharge(String id) async => await _db.collection('surcharges').doc(id).delete();
+  Future<void> addSurcharge(Map<String, dynamic> data) async =>
+      await _db.collection('surcharges').add(data);
+
+  Future<void> updateSurcharge(String id, Map<String, dynamic> data) async =>
+      await _db.collection('surcharges').doc(id).update(data);
+
+  Future<void> deleteSurcharge(String id) async =>
+      await _db.collection('surcharges').doc(id).delete();
 
   Future<void> updateWebOrderStatus(String orderId, String newStatus) async {
     try {
@@ -1851,6 +1842,85 @@ class FirestoreService {
       });
     } catch (e) {
       throw Exception('Không thể cập nhật trạng thái Web Order: $e');
+    }
+  }
+
+  Future<void> copySampleDataFromTemplate(String targetStoreId) async {
+    try {
+      const String sourceStoreId = 'apos';
+
+      // 1. Lấy dữ liệu nguồn
+      final groupSnap = await _db
+          .collection('product_groups')
+          .where('storeId', isEqualTo: sourceStoreId)
+          .get();
+
+      final productSnap = await _db
+          .collection('products')
+          .where('storeId', isEqualTo: sourceStoreId)
+          .get();
+
+      final counterSnap = await _db
+          .collection('counters')
+          .doc('product_codes_$sourceStoreId')
+          .get();
+
+      // 2. Chuẩn bị danh sách các thao tác ghi (để chia batch)
+      List<Function(WriteBatch)> operations = [];
+
+      // - Tạo thao tác copy Nhóm sản phẩm
+      for (var doc in groupSnap.docs) {
+        operations.add((batch) {
+          final newData = doc.data();
+          newData['storeId'] = targetStoreId;
+          // Tạo ID mới tự động
+          final newRef = _db.collection('product_groups').doc();
+          batch.set(newRef, newData);
+        });
+      }
+
+      // - Tạo thao tác copy Sản phẩm
+      for (var doc in productSnap.docs) {
+        operations.add((batch) {
+          final newData = doc.data();
+          newData['storeId'] = targetStoreId;
+          newData['createdAt'] = FieldValue.serverTimestamp();
+          newData['updatedAt'] = FieldValue.serverTimestamp();
+          // Tạo ID mới tự động
+          final newRef = _db.collection('products').doc();
+          batch.set(newRef, newData);
+        });
+      }
+
+      // - Tạo thao tác copy Counter (Mã sản phẩm)
+      if (counterSnap.exists && counterSnap.data() != null) {
+        operations.add((batch) {
+          final newData = counterSnap.data()!;
+          // Đổi tên doc ID sang store hiện tại
+          final newRef =
+              _db.collection('counters').doc('product_codes_$targetStoreId');
+          batch.set(newRef, newData);
+        });
+      }
+
+      // 3. Thực thi Batch (Chia nhỏ mỗi lần 450 thao tác để an toàn)
+      const int batchSize = 450;
+      for (int i = 0; i < operations.length; i += batchSize) {
+        final currentBatch = _db.batch();
+        final end = (i + batchSize < operations.length)
+            ? i + batchSize
+            : operations.length;
+
+        for (int j = i; j < end; j++) {
+          operations[j](currentBatch);
+        }
+
+        await currentBatch.commit();
+        debugPrint("Đã copy batch dữ liệu mẫu từ $i đến $end");
+      }
+    } catch (e) {
+      debugPrint("Lỗi copy dữ liệu mẫu: $e");
+      // Không throw lỗi để tránh chặn luồng chính của app
     }
   }
 }

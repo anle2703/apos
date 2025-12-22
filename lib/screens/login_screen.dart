@@ -153,21 +153,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.shopping_bag_outlined,
-                      size: 80, color: primaryColor),
+                  SizedBox(
+                    height: 120, // Chiều cao logo (bạn tự chỉnh cho vừa mắt)
+                    width: 120,  // Chiều rộng logo
+                    child: Image.asset(
+                      'assets/images/logo.png', // Đảm bảo đúng tên file và đường dẫn bạn đã lưu
+                      fit: BoxFit.contain, // Giúp ảnh co giãn mà không bị méo
+                    ),
+                  ),
+                  Text(
+                    '"Quản lý nhẹ tay - Lợi nhuận thấy ngay!"',
+                    textAlign: TextAlign.center,
+                    style: responsiveTextStyle(textTheme.titleMedium)?.copyWith(color: primaryColor, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 20),
-                  Text(
-                    'Phần mềm quản lý bán hàng APOS',
-                    textAlign: TextAlign.center,
-                    style: responsiveTextStyle(textTheme.displaySmall),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Vui lòng đăng nhập để tiếp tục',
-                    textAlign: TextAlign.center,
-                    style: responsiveTextStyle(textTheme.titleMedium),
-                  ),
-                  const SizedBox(height: 40),
                   CustomTextFormField(
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
@@ -221,14 +220,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(height: 12),
                             if (kIsWeb || (!isDesktop && !Platform.isIOS))
                               OutlinedButton.icon(
+                                label: const Text('Đăng ký/Đăng nhập bằng Google'),
                                 icon: const FaIcon(FontAwesomeIcons.google,
-                                    color: Colors.red, size: 18),
-                                label: const Text('Đăng nhập với Google'),
+                                    color: Colors.red, size: 16),
                                 onPressed: _signInWithGoogle,
                               ),
                           ],
                         ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

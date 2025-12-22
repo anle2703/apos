@@ -25,7 +25,7 @@ import '../widgets/kitchen_ticket_widget.dart';
 import '../widgets/label_widget.dart';
 import '../widgets/receipt_widget.dart';
 import '../widgets/cash_flow_ticket_widget.dart';
-import '../widgets/end_of_day_report_widget.dart';
+import '../widgets/end_of_day_report_printing_helper.dart';
 import '../widgets/vietqr_generator.dart';
 import '../widgets/table_notification_widget.dart';
 
@@ -44,21 +44,16 @@ class PrintingService {
     'label_printer': 'Máy in Tem',
   };
 
-  // --- HÀM HỖ TRỢ CŨ (ĐỂ FIX LỖI Ở CÁC FILE KHÁC) ---
   static Future<pw.Font> loadFont(
       {bool isBold = false, bool isItalic = false}) async {
     try {
       if (isBold) {
         final fontData =
-        await rootBundle.load('assets/fonts/RobotoMono-Bold.ttf');
-        return pw.Font.ttf(fontData);
-      } else if (isItalic) {
-        final fontData =
-        await rootBundle.load('assets/fonts/RobotoMono-Italic.ttf');
+        await rootBundle.load('assets/fonts/Roboto-Bold.ttf');
         return pw.Font.ttf(fontData);
       } else {
         final fontData =
-        await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
+        await rootBundle.load('assets/fonts/Roboto-Regular.ttf');
         return pw.Font.ttf(fontData);
       }
     } catch (e) {
@@ -80,6 +75,7 @@ class PrintingService {
     return ReceiptTemplateModel();
   }
 
+  // Cập nhật lại hàm này
   Future<bool> _printFromWidget({
     required Widget widgetToPrint,
     required ConfiguredPrinter printer,
@@ -95,7 +91,7 @@ class PrintingService {
       final wrapperWidget = Container(
         width: paperWidth,
         color: Colors.white,
-        alignment: Alignment.topCenter, // Căn giữa nội dung 550px
+        alignment: Alignment.topCenter,
         child: widgetToPrint,
       );
 
@@ -117,40 +113,9 @@ class PrintingService {
         targetSize: const Size(paperWidth, double.infinity),
       );
 
-      // A. DESKTOP: Gọi hàm xử lý riêng
-      if (isDesktop) {
-        return await _printImageViaDesktopDriver(printer.physicalPrinter.device, imageBytes);
-      }
+      // --- THAY ĐỔI TẠI ĐÂY: Gọi hàm _printImage chung ---
+      return await _printImage(printer: printer, bytes: imageBytes);
 
-      // B. MOBILE / LAN: Xử lý ESC/POS
-      debugPrint(">>> PROCESSING IMAGE IN ISOLATE...");
-      final List<int> printCommands = await compute(_processBillImageInIsolate, {
-        'bytes': imageBytes,
-      });
-
-      final device = printer.physicalPrinter.device;
-      final type = printer.physicalPrinter.type;
-
-      if (type == PrinterType.usb) {
-        if (!kIsWeb && Platform.isAndroid) {
-          // Logic dành riêng cho máy POS Android có tích hợp sẵn service in
-          try {
-            final nativeService = NativePrinterService();
-            return await nativeService.print(device.address!, Uint8List.fromList(printCommands));
-          } catch (e) {
-            debugPrint("Lỗi in Native USB (Android): $e");
-            throw Exception("Mất kết nối máy in USB (Native)");
-          }
-        } else {
-          debugPrint(">>> Cảnh báo: In USB chỉ hỗ trợ trên Android POS. Bỏ qua lệnh in.");
-          return false; // Trả về false thay vì cố in gây lỗi
-        }
-      }
-      else if (type == PrinterType.network) {
-        return await _sendBytesViaSocket(device.address!, printCommands);
-      } else {
-        return await _sendToPrinterManager(printer, printCommands);
-      }
     } catch (e) {
       debugPrint("Lỗi in từ Widget: $e");
       rethrow;
@@ -540,6 +505,8 @@ class PrintingService {
   }
 
   // 7. IN BÁO CÁO CUỐI NGÀY (THÊM MỚI)
+  // Trong file: lib/services/printing_service.dart
+
   Future<bool> printEndOfDayReport({
     required Map<String, String> storeInfo,
     required Map<String, dynamic> totalReportData,
@@ -547,23 +514,88 @@ class PrintingService {
     required List<ConfiguredPrinter> configuredPrinters,
   }) async {
     try {
+      // 1. Tìm máy in Thu ngân
       final cashierPrinter = configuredPrinters.firstWhere(
             (p) => p.logicalName == 'cashier_printer',
         orElse: () => throw Exception('Chưa cấu hình "Máy in Thu ngân".'),
       );
 
-      // SỬA: Dùng Widget mới tách ra
-      final widget = EndOfDayReportWidget(
+      // 2. [THAY ĐỔI] Tạo PDF từ Helper thay vì Widget
+      final Uint8List pdfBytes = await EndOfDayReportPrintingHelper.generatePdf(
         storeInfo: storeInfo,
         totalReportData: totalReportData,
         shiftReportsData: shiftReportsData,
-        userName: userName,
       );
 
-      return await _printFromWidget(widgetToPrint: widget, printer: cashierPrinter);
+      // 3. [THAY ĐỔI] Chuyển PDF thành Ảnh (Rasterize)
+      // Dùng thư viện 'printing' để chuyển PDF vector thành ảnh bitmap
+      bool printResult = false;
+
+      // dpi: 203 là độ phân giải chuẩn của máy in nhiệt
+      await for (final page in printing_lib.Printing.raster(pdfBytes, pages: [0], dpi: 203)) {
+        final Uint8List imageBytes = await page.toPng();
+
+        // 4. Gửi ảnh xuống máy in
+        // Thay vì _printFromWidget(widget), ta gọi hàm in ảnh trực tiếp
+        // (Hàm _printImage này có sẵn trong service của bạn hoặc bạn tách từ _printFromWidget ra)
+        printResult = await _printImage(printer: cashierPrinter, bytes: imageBytes);
+
+        break; // Chỉ in trang đầu tiên (hoặc loop nếu in nhiều trang)
+      }
+
+      return printResult;
     } catch (e) {
       debugPrint("Lỗi in báo cáo cuối ngày: $e");
       rethrow;
+    }
+  }
+// Thêm hàm này vào class PrintingService
+  Future<bool> _printImage({
+    required ConfiguredPrinter printer,
+    required Uint8List bytes,
+  }) async {
+    try {
+      final bool isDesktop = !kIsWeb && (Platform.isWindows || Platform.isMacOS);
+
+      // A. DESKTOP: Gọi hàm xử lý riêng (Driver)
+      if (isDesktop) {
+        return await _printImageViaDesktopDriver(printer.physicalPrinter.device, bytes);
+      }
+
+      // B. MOBILE / LAN: Xử lý ESC/POS
+      debugPrint(">>> PROCESSING IMAGE IN ISOLATE...");
+
+      // Chuyển đổi ảnh sang lệnh in ESC/POS (Bitmap)
+      final List<int> printCommands = await compute(_processBillImageInIsolate, {
+        'bytes': bytes,
+      });
+
+      final device = printer.physicalPrinter.device;
+      final type = printer.physicalPrinter.type;
+
+      if (type == PrinterType.usb) {
+        if (!kIsWeb && Platform.isAndroid) {
+          try {
+            final nativeService = NativePrinterService();
+            // Gửi lệnh byte thô xuống USB
+            return await nativeService.print(device.address!, Uint8List.fromList(printCommands));
+          } catch (e) {
+            debugPrint("Lỗi in Native USB (Android): $e");
+            throw Exception("Mất kết nối máy in USB (Native)");
+          }
+        } else {
+          debugPrint(">>> Cảnh báo: In USB chỉ hỗ trợ trên Android POS. Bỏ qua lệnh in.");
+          return false;
+        }
+      }
+      else if (type == PrinterType.network) {
+        return await _sendBytesViaSocket(device.address!, printCommands);
+      } else {
+        return await _sendToPrinterManager(printer, printCommands);
+      }
+    } catch (e) {
+      debugPrint("Lỗi trong hàm _printImage: $e");
+      return false;
     }
   }
 

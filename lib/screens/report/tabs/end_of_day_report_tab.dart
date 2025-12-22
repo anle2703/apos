@@ -21,10 +21,7 @@ import '../../../widgets/app_dropdown.dart';
 import 'package:app_4cash/services/firestore_service.dart';
 import '../../../services/print_queue_service.dart';
 import '../../../models/print_job_model.dart';
-import '../../../widgets/end_of_day_report_widget.dart';
-import 'package:screenshot/screenshot.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
+import '../../../widgets/end_of_day_report_printing_helper.dart';
 
 enum TimeRange {
   today,
@@ -378,32 +375,6 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     }
   }
 
-  DateTime _getReportDayForTimestamp(DateTime timestamp) {
-    final cutoff = _reportCutoffTime;
-    final dateCutoff = DateTime(timestamp.year, timestamp.month, timestamp.day,
-        cutoff.hour, cutoff.minute);
-
-    if (timestamp.isBefore(dateCutoff)) {
-      return dateCutoff.subtract(const Duration(days: 1));
-    } else {
-      return dateCutoff;
-    }
-  }
-
-  DateTime _getStartOfReportDay(DateTime timestamp) {
-    final cutoff = _reportCutoffTime;
-    final reportDay = _getReportDayForTimestamp(timestamp);
-    return DateTime(reportDay.year, reportDay.month, reportDay.day, cutoff.hour,
-        cutoff.minute);
-  }
-
-  DateTime _getEndOfReportDay(DateTime timestamp) {
-    final DateTime startOfThisReportDay = _getStartOfReportDay(timestamp);
-    return startOfThisReportDay
-        .add(const Duration(days: 1))
-        .subtract(const Duration(milliseconds: 1));
-  }
-
   void _processReportData(
       List<QueryDocumentSnapshot> reportDocs,
       Map<String, double> oldBalances,
@@ -508,50 +479,27 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
       return bTime.compareTo(aTime);
     });
 
-    final Map<String, DateTime> lastEndTimePerUser = {};
     final List<Map<String, dynamic>> processedShifts = [];
 
     for (final shiftData in allShifts) {
-      final String userId = (shiftData['userId'] as String?) ?? 'unknown';
-      final Timestamp? actualStartTimeStamp =
-      shiftData['startTime'] as Timestamp?;
+      final Timestamp? actualStartTimeStamp = shiftData['startTime'] as Timestamp?;
       final Timestamp? actualEndTimeStamp = shiftData['endTime'] as Timestamp?;
       final String status = shiftData['status'] as String? ?? 'closed';
 
       DateTime? calculatedStartTime;
       DateTime? calculatedEndTime;
 
+      // Logic đơn giản: Có sao hiển thị vậy
       if (actualStartTimeStamp != null) {
-        final DateTime actualStartTime = actualStartTimeStamp.toDate();
-        final DateTime? lastEnd = lastEndTimePerUser[userId];
-        final DateTime startOfThisReportDay =
-        _getStartOfReportDay(actualStartTime);
+        calculatedStartTime = actualStartTimeStamp.toDate();
 
-        if (lastEnd != null) {
-          final DateTime startOfLastReportDay = _getStartOfReportDay(lastEnd);
-          if (startOfThisReportDay.isAtSameMomentAs(startOfLastReportDay)) {
-            calculatedStartTime = lastEnd;
-          } else {
-            calculatedStartTime = startOfThisReportDay;
-          }
+        if (status == 'open') {
+          // Nếu ca đang mở -> Thời gian kết thúc là HIỆN TẠI (để tính khoảng thời gian làm việc tới giờ)
+          calculatedEndTime = DateTime.now();
         } else {
-          calculatedStartTime = startOfThisReportDay;
+          // Nếu ca đã đóng -> Lấy endTime thật, nếu null thì fallback về startTime
+          calculatedEndTime = actualEndTimeStamp?.toDate() ?? calculatedStartTime;
         }
-
-        if (status == 'closed') {
-          calculatedEndTime = actualEndTimeStamp?.toDate() ?? actualStartTime;
-        } else {
-          final DateTime now = DateTime.now();
-          final DateTime startOfThisReportDay = _getStartOfReportDay(actualStartTime);
-          final DateTime startOfCurrentReportDay = _getStartOfReportDay(now);
-
-          if (startOfThisReportDay.isBefore(startOfCurrentReportDay)) {
-            calculatedEndTime = _getEndOfReportDay(actualStartTime);
-          } else {
-            calculatedEndTime = now;
-          }
-        }
-        lastEndTimePerUser[userId] = calculatedEndTime;
       }
 
       processedShifts.add({
@@ -766,8 +714,9 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     final Map<String, dynamic> totalReportData = {
       'reportTitle': 'BÁO CÁO TỔNG KẾT',
       'employeeName': widget.currentUser.name,
-      'startDate': _calendarStartDate?.toIso8601String(),
-      'endDate': _calendarEndDate?.toIso8601String(),
+      'startDate': _startDate?.toIso8601String() ?? _calendarStartDate?.toIso8601String(),
+      'endDate': _endDate?.toIso8601String() ?? _calendarEndDate?.toIso8601String(),
+      'timeRange': _buildTimeRangeString(_startDate ?? DateTime.now(), _endDate ?? DateTime.now()),
       'totalOrders': _totalOrders,
       'totalDiscount': _totalDiscount,
       'totalBillDiscount': _totalBillDiscount,
@@ -861,8 +810,9 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     final Map<String, dynamic> totalReportData = {
       'reportTitle': 'BÁO CÁO TỔNG KẾT',
       'employeeName': widget.currentUser.name,
-      'startDate': _calendarStartDate?.toIso8601String(),
-      'endDate': _calendarEndDate?.toIso8601String(),
+      'startDate': _startDate?.toIso8601String() ?? _calendarStartDate?.toIso8601String(),
+      'endDate': _endDate?.toIso8601String() ?? _calendarEndDate?.toIso8601String(),
+      'timeRange': _buildTimeRangeString(_startDate ?? DateTime.now(), _endDate ?? DateTime.now()),
       'totalOrders': _totalOrders,
       'totalDiscount': _totalDiscount,
       'totalBillDiscount': _totalBillDiscount,
@@ -922,9 +872,13 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
 
     final DateTime? calculatedStartTime = _parseDateTime(shiftData['calculatedStartTime']);
     final DateTime? calculatedEndTime = _parseDateTime(shiftData['calculatedEndTime']);
-
+    final String timeRangeStr = _buildTimeRangeString(
+        calculatedStartTime ?? DateTime.now(),
+        calculatedEndTime ?? DateTime.now()
+    );
     final Map<String, dynamic> singleShiftReportData = {
       'reportTitle': 'TỔNG KẾT CA: $employeeName',
+      'timeRange': timeRangeStr,
       'totalOrders': (shiftData['billCount'] as num?)?.toInt() ?? 0,
       'totalDiscount': (shiftData['totalDiscount'] as num?)?.toDouble() ?? 0.0,
       'totalBillDiscount': (shiftData['totalBillDiscount'] as num?)?.toDouble() ?? 0.0,
@@ -1082,7 +1036,7 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
     } else {
       endTime = formatter.format(end);
     }
-    return "($startTime - $endTime)";
+    return "$startTime - $endTime";
   }
 
   @override
@@ -1143,7 +1097,10 @@ class EndOfDayReportTabState extends State<EndOfDayReportTab>
                   ...totalCard,
                   if (totalCard.isNotEmpty && shiftCards.isNotEmpty)
                     const SizedBox(height: 16),
-                  ...shiftCards,
+                  for (int i = 0; i < shiftCards.length; i++) ...[
+                    shiftCards[i],
+                    if (i < shiftCards.length - 1) const SizedBox(height: 12),
+                  ],
                   if (emptyMessages.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     ...emptyMessages,
@@ -2013,7 +1970,6 @@ class _EndOfDayReportDialogState extends State<_EndOfDayReportDialog> {
   Uint8List? _pdfBytes;
   bool _isLoading = true;
   Map<String, String>? _storeInfo;
-  final ScreenshotController _screenshotController = ScreenshotController();
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
@@ -2025,86 +1981,105 @@ class _EndOfDayReportDialogState extends State<_EndOfDayReportDialog> {
 
   Future<void> _initialize() async {
     try {
+      // 1. Lấy thông tin cửa hàng
       _storeInfo = await FirestoreService().getStoreDetails(widget.currentUser.storeId);
-      if (_storeInfo == null) {
-        throw Exception('Không thể tải thông tin cửa hàng.');
-      }
+      if (_storeInfo == null) throw Exception('Không thể tải thông tin cửa hàng.');
 
+      // 2. Chuẩn bị dữ liệu (Quy hoạch 1 chỗ)
       Map<String, dynamic> dataToPrint;
-      List<Map<String, dynamic>> shiftDataList = [];
+      List<Map<String, dynamic>> shiftDataList;
 
       if (widget.totalReportData != null) {
-        // IN BÁO CÁO TỔNG
-        dataToPrint = widget.totalReportData!;
+        // --- IN TỔNG KẾT ---
+        dataToPrint = Map.from(widget.totalReportData!);
         shiftDataList = widget.shiftReportsData ?? [];
+        // Tính timeRange (nếu chưa có)
+        if (!dataToPrint.containsKey('timeRange')) {
+          // Logic fallback nếu tab chưa truyền
+          final start = DateTime.tryParse(dataToPrint['startDate'] ?? '') ?? DateTime.now();
+          final end = DateTime.tryParse(dataToPrint['endDate'] ?? '') ?? DateTime.now();
+          dataToPrint['timeRange'] = _buildTimeRangeString(start, end);
+        }
       } else if (widget.shiftReportsData != null && widget.shiftReportsData!.isNotEmpty) {
-        // IN BÁO CÁO CA
-        dataToPrint = widget.shiftReportsData!.first;
-        // Khi in ca lẻ, không cần danh sách ca con
-        shiftDataList = [];
+        // --- IN CA LẺ ---
+        dataToPrint = Map.from(widget.shiftReportsData!.first);
+        shiftDataList = []; // Ca lẻ thì không có list con
+        // Tính timeRange
+        if (!dataToPrint.containsKey('timeRange')) {
+          final start = DateTime.tryParse(dataToPrint['calculatedStartTime'] ?? '') ?? DateTime.now();
+          final end = DateTime.tryParse(dataToPrint['calculatedEndTime'] ?? '') ?? DateTime.now();
+          dataToPrint['timeRange'] = _buildTimeRangeString(start, end);
+        }
       } else {
         dataToPrint = {};
+        shiftDataList = [];
       }
 
-      final widgetToCapture = Container(
-        color: Colors.white,
-        child: EndOfDayReportWidget(
-          storeInfo: _storeInfo!,
-          totalReportData: dataToPrint, // Truyền data đã chọn
-          shiftReportsData: shiftDataList,
-          userName: widget.currentUser.name ?? 'Unknown',
-        ),
+      // 3. TẠO PDF (Dùng Helper thiết kế duy nhất)
+      final Uint8List pdfBytes = await EndOfDayReportPrintingHelper.generatePdf(
+        storeInfo: _storeInfo!,
+        totalReportData: dataToPrint,
+        shiftReportsData: shiftDataList,
       );
 
-      // 3. Chụp ảnh Widget
-      final Uint8List imageBytes = await _screenshotController.captureFromWidget(
-        widgetToCapture,
-        delay: const Duration(milliseconds: 100),
-        pixelRatio: 2.5,
-        targetSize: const Size(550, double.infinity),
-      );
+      // 4. CHUYỂN PDF THÀNH ẢNH ĐỂ XEM TRƯỚC (Dùng gói Printing)
+      // Hàm raster trả về Stream các trang, ta lấy trang đầu tiên
+      await for (final page in Printing.raster(pdfBytes, pages: [0], dpi: 203)) {
+        final imageBytes = await page.toPng();
 
-      // 4. Tạo PDF bao bọc ảnh (để dùng cho tính năng Lưu PDF / Chia sẻ)
-      final pdf = pw.Document();
-      final image = pw.MemoryImage(imageBytes);
-
-      pdf.addPage(pw.Page(
-          pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 0),
-          build: (ctx) {
-            return pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain));
-          }
-      ));
-      final pdfData = await pdf.save();
-
-      if (mounted) {
-        setState(() {
-          _pdfBytes = pdfData;
-          _imageProvider = MemoryImage(imageBytes); // Hiển thị ảnh preview ngay
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _pdfBytes = pdfBytes;
+            _imageProvider = MemoryImage(imageBytes);
+            _isLoading = false;
+          });
+        }
+        break; // Chỉ cần trang đầu để preview
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        debugPrint("Lỗi tạo ảnh báo cáo: $e");
-        ToastService().show(message: "Lỗi tạo ảnh báo cáo: $e", type: ToastType.error);
+        debugPrint("Lỗi tạo báo cáo: $e");
+        ToastService().show(message: "Lỗi tạo báo cáo: $e", type: ToastType.error);
       }
     }
   }
 
+  String _buildTimeRangeString(DateTime start, DateTime end) {
+    final DateFormat f = DateFormat('HH:mm dd/MM');
+    return "${f.format(start)} - ${f.format(end)}";
+  }
+
   Future<void> _printReport() async {
-    if (_isLoading || _storeInfo == null) return;
+    if (_isLoading || _pdfBytes == null) return;
     try {
+
+      Map<String, dynamic> dataToPrint;
+      List<Map<String, dynamic>> shiftDataList;
+      if (widget.totalReportData != null) {
+        dataToPrint = widget.totalReportData!;
+        shiftDataList = widget.shiftReportsData ?? [];
+      } else {
+        dataToPrint = widget.shiftReportsData!.first;
+        shiftDataList = [];
+      }
+      if (!dataToPrint.containsKey('timeRange')) {
+      }
+
       final data = {
         'storeId': widget.currentUser.storeId,
         'storeInfo': _storeInfo,
         'userName': widget.currentUser.name ?? 'Không rõ',
-        'totalReportData': widget.totalReportData,
-        'shiftReportsData': widget.shiftReportsData,
+        'totalReportData': dataToPrint, // Data này đã có timeRange (nếu ta update widget.totalReportData)
+        'shiftReportsData': shiftDataList,
       };
 
-      PrintQueueService().addJob(PrintJobType.endOfDayReport, data);
+      // MẸO: Update trực tiếp vào Map gốc của widget để đảm bảo Helper bên Service nhận được timeRange
+      if (widget.totalReportData != null) {
+        // Cần đảm bảo timeRange đã được add vào widget.totalReportData ở Class cha
+      }
 
+      PrintQueueService().addJob(PrintJobType.endOfDayReport, data);
       ToastService().show(message: "Đã gửi lệnh in", type: ToastType.success);
     } catch (e) {
       ToastService().show(message: "Lỗi khi in: $e", type: ToastType.error);

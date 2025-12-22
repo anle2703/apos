@@ -257,21 +257,22 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) {
       setState(() {
         _currentUser = loadedUser;
+        _checkAndShowBusinessTypePicker();
       });
     }
 
     if (_currentUser != null) {
       try {
-        // Lấy Store Settings
         final settings = await _settingsService.getStoreSettings(_currentUser!.storeId);
 
-        // --- THÊM ĐOẠN NÀY: Cập nhật businessType từ Store Settings vào User Model trong Ram ---
         if (settings.businessType != null && settings.businessType!.isNotEmpty) {
           if (mounted) {
             setState(() {
               _currentUser = _currentUser!.copyWith(businessType: settings.businessType);
             });
           }
+        } else {
+          if(mounted) _checkAndShowBusinessTypePicker();
         }
 
         final String? agentId = settings.agentId;
@@ -431,17 +432,40 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _checkAndShowBusinessTypePicker() {
+  Future<void> _checkAndShowBusinessTypePicker() async {
     if (_currentUser == null) return;
+    if (_currentUser!.role != 'owner') return;
     if (_isShowingTypePicker) return;
 
-    if (_currentUser!.role == 'owner' &&
-        (_currentUser!.businessType == null ||
-            _currentUser!.businessType!.isEmpty)) {
-      _isShowingTypePicker = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showBusinessTypePicker(context);
-      });
+    if (_currentUser!.businessType != null && _currentUser!.businessType!.isNotEmpty) {
+      return;
+    }
+
+    try {
+      final settings = await _settingsService.getStoreSettings(_currentUser!.storeId);
+
+      if (settings.businessType != null && settings.businessType!.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _currentUser = _currentUser!.copyWith(businessType: settings.businessType);
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint("Store Settings chưa tồn tại (User mới), chuẩn bị hiện Popup: $e");
+    }
+
+    _isShowingTypePicker = true;
+
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (mounted) {
+      if (_currentUser!.businessType != null && _currentUser!.businessType!.isNotEmpty) {
+        _isShowingTypePicker = false;
+        return;
+      }
+      _showBusinessTypePicker(context);
     }
   }
 
@@ -621,38 +645,47 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Tìm hàm này ở cuối file home_screen.dart
   void _showBusinessTypePicker(BuildContext context) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return BusinessTypePickerPopup(
-          onConfirm: (type) async {
-            final navigator = Navigator.of(dialogContext);
+          onConfirm: (type, useSampleData) async {
+            // --- BƯỚC 1: CẬP NHẬT RAM ---
+            if (mounted) {
+              setState(() {
+                _currentUser = _currentUser!.copyWith(businessType: type);
+              });
+            }
             try {
+              // Lưu settings
               await _settingsService.updateStoreSettings(
                   _currentUser!.storeId,
                   {'businessType': type}
               );
 
-              navigator.pop();
+              if (useSampleData) {
+                ToastService().show(
+                    message: 'Đang khởi tạo dữ liệu mẫu...',
+                    type: ToastType.warning
+                );
 
-              if (mounted) {
-                setState(() {
-                  _currentUser = _currentUser!.copyWith(businessType: type);
-                  _isShowingTypePicker = false;
-                  _selectedIndex = 2;
-                });
+                await _firestoreService.copySampleDataFromTemplate(_currentUser!.storeId);
+
+                ToastService().show(
+                    message: 'Đã thêm dữ liệu mẫu thành công!',
+                    type: ToastType.success
+                );
               }
             } catch (e) {
-              ToastService()
-                  .show(message: "Lỗi cập nhật: $e", type: ToastType.error);
+              debugPrint("Lỗi khởi tạo store: $e");
             }
           },
         );
       },
     ).then((_) {
+      // Đảm bảo reset cờ khi popup đóng
       _isShowingTypePicker = false;
     });
   }
@@ -1182,7 +1215,8 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class BusinessTypePickerPopup extends StatefulWidget {
-  final Function(String) onConfirm;
+  // Cập nhật: onConfirm nhận thêm bool useSampleData
+  final Function(String type, bool useSampleData) onConfirm;
 
   const BusinessTypePickerPopup({super.key, required this.onConfirm});
 
@@ -1193,65 +1227,113 @@ class BusinessTypePickerPopup extends StatefulWidget {
 
 class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
   String? _selectedType;
+  bool _useSampleData = true; // Mặc định bật
   bool _isUpdating = false;
 
   @override
   Widget build(BuildContext context) {
+    // Lấy chiều rộng màn hình để chỉnh layout
+    final screenWidth = MediaQuery.of(context).size.width;
+    final bool isMobile = screenWidth < 600;
+
     return AlertDialog(
-      title:
-          const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Lựa chọn này sẽ giúp tối ưu hóa các tính năng cho cửa hàng của bạn.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+      title: const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
+      content: Container(
+        // Giới hạn chiều rộng để popup không quá to trên desktop
+        width: isMobile ? double.maxFinite : 600,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildTypeCard(context,
-                  icon: Icons.restaurant_menu, title: 'F&B', value: 'fnb'),
-              const SizedBox(width: 16),
-              _buildTypeCard(context,
-                  icon: Icons.shopping_bag, title: 'Bán lẻ', value: 'retail'),
+              Text(
+                'Lựa chọn này sẽ giúp tối ưu hóa giao diện và tính năng cho cửa hàng của bạn.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 24),
+
+              // Row chứa 2 lựa chọn
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _buildTypeCard(
+                        context,
+                        icon: Icons.restaurant_menu,
+                        title: 'F&B (Ăn uống)',
+                        value: 'fnb',
+                        description: 'Cafe, Nhà hàng, Bi-a, Karaoke, Khách sạn,...',
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildTypeCard(
+                        context,
+                        icon: Icons.storefront,
+                        title: 'Bán lẻ',
+                        value: 'retail',
+                        description: 'Tạp hóa, Minimart, Shop thời trang, Cửa hàng điện thoại,...',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+              const Divider(),
+
+              // Switch sử dụng dữ liệu mẫu
+              SwitchListTile(
+                value: _useSampleData,
+                onChanged: _isUpdating ? null : (val) {
+                  setState(() => _useSampleData = val);
+                },
+                title: const Text(
+                  'Sử dụng dữ liệu mẫu',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: const Text(
+                  'Tự động tạo danh mục và hàng hóa mẫu để bạn trải nghiệm ngay.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                activeColor: Theme.of(context).primaryColor,
+                contentPadding: EdgeInsets.zero,
+              ),
             ],
           ),
-        ],
+        ),
       ),
       actions: [
         TextButton(
           onPressed: (_selectedType == null || _isUpdating)
               ? null
-              : () async {
-                  setState(() {
-                    _isUpdating = true;
-                  });
+              : () {
+            setState(() => _isUpdating = true);
 
-                  await widget.onConfirm(_selectedType!);
+            // 1. Đóng Popup NGAY LẬP TỨC
+            Navigator.of(context).pop();
 
-                  if (mounted) {
-                    setState(() {
-                      _isUpdating = false;
-                    });
-                  }
-                },
+            // 2. Gửi dữ liệu về HomeScreen để xử lý sau
+            widget.onConfirm(_selectedType!, _useSampleData);
+          },
           child: _isUpdating
               ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Xác nhận'),
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+              : const Text('Bắt đầu ngay'),
         ),
       ],
     );
   }
 
   Widget _buildTypeCard(BuildContext context,
-      {required IconData icon, required String title, required String value}) {
+      {required IconData icon,
+        required String title,
+        required String value,
+        required String description}) {
     final bool isSelected = _selectedType == value;
     final color = Theme.of(context).primaryColor;
 
@@ -1259,25 +1341,39 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
       onTap: _isUpdating ? null : () => setState(() => _selectedType = value),
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        width: 100,
-        height: 100,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? color.withAlpha(25) : Colors.grey[100],
+          color: isSelected ? color.withAlpha(25) : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? color : Colors.grey[300]!,
-            width: 2,
+            width: isSelected ? 2 : 1,
           ),
         ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.start,
           children: [
-            Icon(icon, size: 36, color: isSelected ? color : Colors.grey[600]),
+            Icon(icon, size: 40, color: isSelected ? color : Colors.grey[600]),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: isSelected ? color : Colors.black87,
+              ),
+            ),
             const SizedBox(height: 8),
-            Text(title,
-                style: TextStyle(
-                    fontWeight:
-                        isSelected ? FontWeight.bold : FontWeight.normal)),
+            Text(
+              description,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+                fontStyle: FontStyle.italic,
+              ),
+            ),
           ],
         ),
       ),

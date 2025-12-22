@@ -8,6 +8,8 @@ import '../theme/responsive_helper.dart';
 import '../widgets/custom_text_form_field.dart';
 import 'home_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'auth_gate.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -58,17 +60,18 @@ class _SignupScreenState extends State<SignupScreen> {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
-
+    AuthGate.isManualProcess = true;
     final email = _emailController.text.trim();
     final shopName = _shopNameController.text.trim();
     final shopId = _generateStoreId(shopName);
     final phoneNumber = _phoneController.text.trim();
     final password = _passwordController.text.trim();
 
-    String? finalAgentId;
+    User? createdUser; // Biến lưu user tạm
 
     try {
-      // --- 1. KIỂM TRA MÃ ĐẠI LÝ ---
+      // --- 1. KIỂM TRA MÃ ĐẠI LÝ (Rule app_config đã mở read) ---
+      String? finalAgentId;
       if (_agentIdController.text.trim().isNotEmpty) {
         final rawAgentId = _generateStoreId(_agentIdController.text.trim());
         final agentDoc = await FirebaseFirestore.instance
@@ -77,61 +80,72 @@ class _SignupScreenState extends State<SignupScreen> {
             .get();
 
         if (!agentDoc.exists) {
-          _toastService.show(
-              message: 'Mã đại lý "$rawAgentId" không tồn tại.',
-              type: ToastType.error);
-          setState(() => _isLoading = false);
-          return;
+          throw Exception('Mã đại lý "$rawAgentId" không tồn tại.');
         }
         finalAgentId = rawAgentId;
       }
 
-      // --- 2. KIỂM TRA TRÙNG STORE ID ---
+      // --- 2. TẠO TÀI KHOẢN AUTH TRƯỚC (Để có request.auth) ---
+      createdUser = await _authService.signUpWithEmailPassword(email, password);
+
+      if (createdUser == null) {
+        throw Exception("Không thể tạo tài khoản. Vui lòng thử lại.");
+      }
+
+      // --- 3. BÂY GIỜ MỚI CHECK TRÙNG LẶP TRONG FIRESTORE ---
+      // (Lúc này request.auth != null nên Rule users mới cho phép đọc)
+
       bool shopIdExists = await _firestoreService.isFieldInUse(field: 'storeId', value: shopId);
       if (shopIdExists) {
-        throw Exception('Tên cửa hàng này tạo ra ID "$shopId" đã bị trùng. Vui lòng chọn tên khác.');
+        throw Exception('ID cửa hàng "$shopId" đã bị trùng. Vui lòng chọn tên khác.');
       }
 
-      // --- 3. [KHÔI PHỤC] KIỂM TRA TRÙNG SỐ ĐIỆN THOẠI ---
       bool phoneExists = await _firestoreService.isFieldInUse(field: 'phoneNumber', value: phoneNumber);
       if (phoneExists) {
-        throw Exception('Số điện thoại này đã được sử dụng bởi một tài khoản khác.');
+        throw Exception('Số điện thoại này đã được đăng ký.');
       }
 
-      // --- 4. TẠO TÀI KHOẢN AUTH ---
-      final user = await _authService.signUpWithEmailPassword(email, password);
+      // --- 4. NẾU KHÔNG TRÙNG -> TẠO PROFILE ---
+      await _firestoreService.createUserProfile(
+        uid: createdUser.uid,
+        email: createdUser.email!,
+        storeId: shopId,
+        storeName: shopName,
+        phoneNumber: phoneNumber,
+        role: 'owner',
+        name: 'admin',
+        agentId: finalAgentId,
+        storePhone: phoneNumber,
+      );
 
-      if (user != null) {
-        // --- 5. TẠO PROFILE FIRESTORE ---
-        await _firestoreService.createUserProfile(
-          uid: user.uid,
-          email: user.email!,
-          storeId: shopId,
-          storeName: shopName,
-          phoneNumber: phoneNumber,
-          role: 'owner',
-          name: 'admin',
-          agentId: finalAgentId,
-          storePhone: phoneNumber,
+      // --- 5. RELOAD TOKEN ---
+      await createdUser.reload();
+      await createdUser.getIdToken(true);
+
+      if (mounted) {
+        _toastService.show(
+            message: 'Đăng ký thành công!',
+            type: ToastType.success
         );
-
-        // --- 6. RELOAD TOKEN (Để fix lỗi permission) ---
-        await user.reload();
-        await user.getIdToken(true);
-
-        if (mounted) {
-          _toastService.show(
-              message: 'Đăng ký thành công!',
-              type: ToastType.success
-          );
-
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
-                (route) => false,
-          );
-        }
+        AuthGate.isManualProcess = false;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+              (route) => false,
+        );
       }
     } catch (e) {
+      debugPrint("Lỗi đăng ký: $e");
+
+      // ROLLBACK: Xóa user nếu lỗi trùng lặp
+      if (createdUser != null) {
+        try {
+          await createdUser.delete(); // Xóa user khỏi Auth
+          await FirebaseAuth.instance.signOut(); // Đảm bảo signout sạch sẽ
+        } catch (delError) {
+          debugPrint("Lỗi khi xóa user rollback: $delError");
+        }
+      }
+
       String errorMessage = 'Đăng ký thất bại.';
       if (e.toString().contains('email-already-in-use') || e.toString().contains('email-already-exists')) {
         errorMessage = 'Email này đã được sử dụng.';
@@ -141,13 +155,16 @@ class _SignupScreenState extends State<SignupScreen> {
 
       if (mounted) {
         _toastService.show(message: errorMessage, type: ToastType.error);
+        setState(() {
+          AuthGate.isManualProcess = false;
+          _isLoading = false;
+        });
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ... (Giữ nguyên các hàm validate)
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) return 'Vui lòng nhập mật khẩu';
     if (value.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';

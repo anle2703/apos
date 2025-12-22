@@ -39,6 +39,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'web_order_list_screen.dart';
 import '/screens/sales/return_order_screen.dart';
 import '../../widgets/app_dropdown.dart';
+import '../../services/shift_service.dart';
 
 class RetailTab {
   String id;
@@ -958,7 +959,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
   }
 
-  // Tìm và thay thế toàn bộ hàm này
   Future<void> _deleteSavedOrder(OrderModel order) async {
     // 1. Kiểm tra an toàn ngay từ đầu
     if (order.id.isEmpty) {
@@ -1291,7 +1291,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
-  // Tìm và thay thế toàn bộ hàm _restoreOrderFromCloud
   void _restoreOrderFromCloud(OrderModel order, DocumentReference ref) {
     // 1. KIỂM TRA: Đơn hàng này đã được mở trong Tab nào chưa?
     final existingTab = _session.tabs.firstWhereOrNull((t) => t.cloudOrderId == ref.id);
@@ -1582,7 +1581,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     _session.saveSessionToLocal();
   }
 
-  // [SỬA LẠI HÀM NÀY] Thêm tham số allowClose
   void _removeItem(String key, {bool allowClose = true}) {
     if (_currentTab == null) return;
     final item = _currentTab!.items[key];
@@ -1643,7 +1641,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
-  void _handlePayment() {
+  Future<void> _handlePayment() async {
     if (_currentTab == null) return;
     final tab = _currentTab!;
 
@@ -1651,6 +1649,25 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       ToastService().show(
           message: "Giỏ hàng trống, vui lòng chọn món.", type: ToastType.warning);
       return;
+    }
+
+    // --- 2. THÊM ĐOẠN CHECK CA LÀM VIỆC TẠI ĐÂY ---
+    try {
+      await ShiftService().ensureShiftOpen(
+        widget.currentUser.storeId,
+        widget.currentUser.uid,
+        widget.currentUser.name ?? 'Nhân viên',
+        widget.currentUser.ownerUid ?? widget.currentUser.uid,
+      );
+
+      // Cập nhật lại ID ca mới nhất vào biến cục bộ (để PaymentScreen dùng đúng ID mới)
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _currentShiftId = prefs.getString('current_shift_id');
+      });
+
+    } catch (e) {
+      debugPrint("Lỗi kiểm tra ca làm việc: $e");
     }
 
     final String orderId =
@@ -2328,7 +2345,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
                     color: Colors.grey[100],
-                    border: Border.all(color: Colors.grey.shade200),
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
@@ -2725,7 +2741,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     );
   }
 
-  // Tìm và thay thế toàn bộ hàm _buildCartView (khoảng dòng 1200)
   Widget _buildCartView(
       {ScrollController? scrollController, bool showCustomerSelector = true}) {
     final tab = _currentTab;
@@ -3546,7 +3561,6 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     return false;
   }
 
-  // Hàm kiểm tra phím điều khiển (Phiên bản đầy đủ, đồng bộ với Order Screen)
   bool _isControlKey(LogicalKeyboardKey key) {
     return
       // 1. Các phím Modifier (Shift, Ctrl, Alt, Meta)
@@ -3625,22 +3639,18 @@ class _RetailProductOptionsDialogState
   }
 
   void _onConfirm() {
-    final selectedUnitData =
-        _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
-    final priceForSelectedUnit =
-        (selectedUnitData['sellPrice'] as num).toDouble();
+    final selectedUnitData = _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
+    final priceForSelectedUnit = (selectedUnitData['sellPrice'] as num).toDouble();
 
     final Map<ProductModel, double> toppingsMap = {};
     _selectedToppings.forEach((productId, quantity) {
       if (quantity > 0) {
-        final product =
-            _accompanyingProducts.firstWhere((p) => p.id == productId);
+        final product = _accompanyingProducts.firstWhere((p) => p.id == productId);
         toppingsMap[product] = quantity;
       }
     });
 
-    final String noteText =
-        _selectedQuickNotes.map((n) => n.noteText).join(', ');
+    final String noteText = _selectedQuickNotes.map((n) => n.noteText).join(', ');
 
     Navigator.of(context).pop({
       'selectedUnit': _selectedUnit,

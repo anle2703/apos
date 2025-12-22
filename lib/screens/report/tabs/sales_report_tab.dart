@@ -837,32 +837,52 @@ class SalesReportTabState extends State<SalesReportTab> {
         const SizedBox(height: 8),
         sellingProducts.isEmpty
             ? const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32.0),
+            padding: EdgeInsets.symmetric(vertical: 12.0),
             child: Center(child: Text("Chưa có sản phẩm nào được bán.")))
             : Card(
           clipBehavior: Clip.antiAlias,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16)),
           elevation: 2,
-          child: Column(
-            children: sellingProducts.map((entry) {
-              return ListTile(
-                title: Text(entry.key,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyLarge
-                        ?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey.shade700)),
-                trailing: Text('SL: ${formatNumber(entry.value)}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyLarge
-                        ?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey.shade700)),
-              );
-            }).toList(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Column(
+              children: sellingProducts.map((entry) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0,
+                      vertical: 6.0
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          entry.key,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyLarge
+                              ?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade700),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'SL: ${formatNumber(entry.value)}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyLarge
+                            ?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade700),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
           ),
         ),
       ],

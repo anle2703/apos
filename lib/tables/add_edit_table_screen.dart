@@ -116,11 +116,21 @@ class _AddEditTableScreenState extends State<AddEditTableScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Thêm nhóm mới'),
-        content: CustomTextFormField(
-          controller: newGroupController,
-          decoration: const InputDecoration(labelText: 'Tên nhóm'),
-          autofocus: true,
+        // --- SỬA LỖI TẠI ĐÂY ---
+        // Bao bọc bởi SingleChildScrollView để tránh lỗi tràn khi bàn phím hiện
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min, // Quan trọng: Chỉ lấy chiều cao vừa đủ nội dung
+            children: [
+              CustomTextFormField(
+                controller: newGroupController,
+                decoration: const InputDecoration(labelText: 'Tên nhóm'),
+                autofocus: true,
+              ),
+            ],
+          ),
         ),
+        // -----------------------
         actions: [
           TextButton(onPressed: () => navigator.pop(), child: const Text('Hủy')),
           ElevatedButton(
@@ -360,17 +370,50 @@ class _AddEditTableScreenState extends State<AddEditTableScreen> {
   }
 
   Widget _buildGroupDropdown() {
+    // 1. Lọc trùng lặp: Chỉ lấy các tên nhóm duy nhất
+    // Sử dụng Set để đảm bảo không có 2 tên nhóm giống nhau
+    final Set<String> uniqueGroupNames = {};
+    final List<DropdownMenuItem<String>> dropdownItems = [];
+
+    for (var group in _currentTableGroups) {
+      // Chỉ thêm vào list hiển thị nếu tên này chưa từng xuất hiện
+      if (!uniqueGroupNames.contains(group.name)) {
+        uniqueGroupNames.add(group.name);
+        dropdownItems.add(
+          DropdownMenuItem(
+            value: group.name,
+            child: Text(group.name),
+          ),
+        );
+      }
+    }
+
+    // 2. Thêm mục "Thêm nhóm mới" vào cuối
+    dropdownItems.add(
+      const DropdownMenuItem(
+        value: 'add_new',
+        child: Text(
+          '+ Thêm nhóm mới...',
+          style: TextStyle(fontStyle: FontStyle.italic),
+        ),
+      ),
+    );
+
+    // 3. Kiểm tra an toàn: Nếu _selectedTableGroup đang chọn một giá trị
+    // mà giá trị đó không còn nằm trong list (do vừa bị xóa hoặc lọc), reset về null
+    // để tránh lỗi "There should be exactly one item..."
+    String? safeSelectedValue = _selectedTableGroup;
+    if (safeSelectedValue != null &&
+        safeSelectedValue != 'add_new' &&
+        !uniqueGroupNames.contains(safeSelectedValue)) {
+      safeSelectedValue = null;
+    }
+
     return AppDropdown(
-      value: _selectedTableGroup,
+      value: safeSelectedValue,
       labelText: 'Nhóm phòng/bàn',
       prefixIcon: Icons.folder_open_outlined,
-      items: [
-        ..._currentTableGroups.map((group) => DropdownMenuItem(value: group.name, child: Text(group.name))),
-        const DropdownMenuItem(
-          value: 'add_new',
-          child: Text('+ Thêm nhóm mới...', style: TextStyle(fontStyle: FontStyle.italic)),
-        ),
-      ],
+      items: dropdownItems,
       onChanged: (value) {
         if (value == 'add_new') {
           _showAddGroupDialog();
