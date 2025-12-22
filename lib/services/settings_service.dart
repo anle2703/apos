@@ -40,11 +40,8 @@ class SettingsService {
     }
     try {
       final doc = await _db.collection('store_settings').doc(storeId).get();
-      // Nếu doc không tồn tại hoặc data null, fromMap sẽ tự xử lý (nhờ code trong StoreSettings)
-      // Nhưng ta cần đảm bảo không crash khi đọc doc
       return StoreSettings.fromMap(doc.data());
     } catch (e) {
-      print("Lỗi đọc StoreSettings: $e");
       return const StoreSettings(
         printBillAfterPayment: true,
         allowProvisionalBill: true,
