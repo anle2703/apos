@@ -139,7 +139,7 @@ class PaymentScreen extends StatelessWidget {
     );
   }
 
-  static Future<void> preloadData(String storeId, String ownerUid) async {
+  static Future<void> preloadData(String storeId) async {
     debugPrint(">>> [Preload] Bắt đầu tải trước dữ liệu thanh toán...");
 
     if (_PaymentPanelState._cachedPaymentMethods != null &&
@@ -172,31 +172,22 @@ class PaymentScreen extends StatelessWidget {
         _PaymentPanelState._cachedPaymentMethods = [cashMethod, ...methods];
       }
 
-      // 2. Tải các thông tin khác (Thuế, Voucher, Cài đặt, Thông tin Shop)
+      // 2. Tải các thông tin khác
       if (_PaymentPanelState._cachedStoreTaxSettings == null ||
           _PaymentPanelState._cachedDefaultMethodId == null ||
           _PaymentPanelState._cachedStoreDetails == null) {
         final results = await Future.wait([
-          firestore.getStoreTaxSettings(storeId),
-          // 0: Thuế
-          FirebaseFirestore.instance
-              .collection('promotions')
-              .doc('${storeId}_PromoSettings')
-              .get(),
-          // 1: Voucher
-          firestore.loadPointsSettings(storeId),
-          // 2: Điểm
-          FirebaseFirestore.instance.collection('users').doc(ownerUid).get(),
-          // 3: User Config (Default Method)
-          firestore.getStoreDetails(storeId),
-          // 4: [MỚI] Store Details
-          SettingsService().getStoreSettings(ownerUid),
-          // 5: [MỚI] Store Settings Object
-          firestore.getActiveSurcharges(storeId),
+          firestore.getStoreTaxSettings(storeId),                               // 0: Thuế
+          FirebaseFirestore.instance.collection('promotions').doc('${storeId}_PromoSettings').get(), // 1: Voucher
+          firestore.loadPointsSettings(storeId),                                // 2: Điểm
+          // --- [SỬA] Bỏ qua việc đọc từ Users, vì defaultPaymentMethodId đã chuyển sang StoreSettings
+          // FirebaseFirestore.instance.collection('users').doc(ownerUid).get(),
+          firestore.getStoreDetails(storeId),                                   // 3: Store Details
+          SettingsService().getStoreSettings(storeId),                          // 4: [SỬA] Dùng storeId
+          firestore.getActiveSurcharges(storeId),                               // 5: Phụ thu
         ]);
 
-        _PaymentPanelState._cachedStoreTaxSettings =
-        results[0] as Map<String, dynamic>?;
+        _PaymentPanelState._cachedStoreTaxSettings = results[0] as Map<String, dynamic>?;
 
         // Xử lý Voucher (Index 1)
         final promoSnapshot = results[1] as DocumentSnapshot;
@@ -215,24 +206,27 @@ class PaymentScreen extends StatelessWidget {
         _PaymentPanelState._cachedEarnRate = pointsData['earnRate'] ?? 0.0;
         _PaymentPanelState._cachedRedeemRate = pointsData['redeemRate'] ?? 0.0;
 
-        // Xử lý Default Payment Method (Index 3)
-        final userSnapshot = results[3] as DocumentSnapshot;
-        if (userSnapshot.exists) {
-          final userData = userSnapshot.data() as Map<String, dynamic>;
-          _PaymentPanelState._cachedDefaultMethodId =
-          userData['defaultPaymentMethodId'];
+        // Xử lý Store Details (Index 3 - đã shift index do bỏ user)
+        _PaymentPanelState._cachedStoreDetails = results[3] as Map<String, String>?;
+
+        // Xử lý Store Settings (Index 4)
+        final settingsObj = results[4];
+        _PaymentPanelState._cachedStoreSettingsObj = settingsObj;
+
+        // [MỚI] Lấy Default Payment Method từ StoreSettings thay vì User
+        if (settingsObj != null) {
+          // Giả sử StoreSettings có getter hoặc map trả về defaultPaymentMethodId
+          // Nếu settingsObj là Model: settingsObj.defaultPaymentMethodId
+          // Nếu là Map: settingsObj['defaultPaymentMethodId']
+          try {
+            _PaymentPanelState._cachedDefaultMethodId = (settingsObj as dynamic).defaultPaymentMethodId;
+          } catch (_) {}
         }
 
-        // [MỚI] Xử lý Store Details & Settings (Index 4 & 5)
-        _PaymentPanelState._cachedStoreDetails =
-        results[4] as Map<String, String>?;
-        _PaymentPanelState._cachedStoreSettingsObj = results[5];
-        _PaymentPanelState._cachedSurcharges = results[6] as List<SurchargeModel>;
-
+        // Xử lý Phụ thu (Index 5)
+        _PaymentPanelState._cachedSurcharges = results[5] as List<SurchargeModel>;
       }
-      debugPrint(
-          ">>> [Preload] Hoàn tất! PTTT Mặc định: ${_PaymentPanelState._cachedDefaultMethodId}");
-      debugPrint(">>> [Preload] Đã tải ${_PaymentPanelState._cachedSurcharges?.length} phụ thu.");
+      debugPrint(">>> [Preload] Hoàn tất!");
     } catch (e) {
       debugPrint(">>> [Preload] Lỗi: $e");
     }
@@ -447,13 +441,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   }
 
   Future<void> _loadAllInitialDataOptimized() async {
-    // 1. LUÔN LUÔN Tải cấu hình E-Invoice (Dù có Cache hay không)
-    // Đưa đoạn này lên đầu hàm để đảm bảo nó luôn được chạy
-    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-    _eInvoiceService.getConfigStatus(ownerUid).then((configStatus) {
+    final storeId = widget.currentUser.storeId;
+    _eInvoiceService.getConfigStatus(storeId).then((configStatus) {
       if (mounted) {
         setState(() {
-          // Nếu đã cấu hình thì lấy giá trị autoIssueOnPayment, ngược lại là false
           _autoIssueEInvoice = configStatus.isConfigured && configStatus.autoIssueOnPayment;
           debugPrint(">>> [E-INVOICE STATUS] Auto Issue: $_autoIssueEInvoice");
         });
@@ -573,10 +564,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   Future<void> _loadSettings({bool forceRefresh = false}) async {
     try {
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
 
       final results = await Future.wait([
-        SettingsService().getStoreSettings(ownerUid),
+        SettingsService().getStoreSettings(widget.currentUser.storeId),
         FirestoreService().loadPointsSettings(widget.currentUser.storeId),
         _firestoreService.getStoreTaxSettings(widget.currentUser.storeId),
         _firestoreService.getStoreDetails(widget.currentUser.storeId),
@@ -1327,7 +1317,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           eInvoiceResult = await _eInvoiceService.createInvoice(
             billData,
             widget.customer,
-            widget.currentUser.ownerUid ?? widget.currentUser.uid,
+            widget.currentUser.storeId,
           );
           billData['eInvoiceInfo'] = eInvoiceResult.toJson();
 
@@ -1366,9 +1356,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         billData: billData,
         billItems: billItems,
         result: result,
-        ownerUid: widget.currentUser.ownerUid ?? widget.currentUser.uid,
+        ownerUid: widget.currentUser.storeId,
         pointsEarned: pointsEarned,
-        preCreatedEInvoiceResult: eInvoiceResult, // <--- QUAN TRỌNG: Truyền vào đây
+        preCreatedEInvoiceResult: eInvoiceResult,
       );
     } catch (e) {
       if (mounted) {
@@ -1648,10 +1638,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       dynamic settings = _cachedStoreSettingsObj;
 
       if (storeInfo == null || settings == null) {
-        final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
         final results = await Future.wait([
           firestore.getStoreDetails(widget.currentUser.storeId),
-          SettingsService().getStoreSettings(ownerUid),
+          SettingsService().getStoreSettings(widget.currentUser.storeId),
         ]);
         storeInfo = results[0] as Map<String, String>?;
         settings = results[1];

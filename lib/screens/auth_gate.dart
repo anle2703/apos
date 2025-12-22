@@ -220,83 +220,85 @@ class QrOrderLoader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tableFuture = FirebaseFirestore.instance
-        .collection('tables')
-        .where('storeId', isEqualTo: storeId)
-        .where('qrToken', isEqualTo: token)
-        .limit(1)
-        .get();
-
-    final ownerFuture = FirebaseFirestore.instance
-        .collection('users')
-        .where('storeId', isEqualTo: storeId)
-        .where('role', isEqualTo: 'owner')
-        .limit(1)
-        .get();
-
-    final settingsFuture = ownerFuture.then((ownerSnap) {
-      if (ownerSnap.docs.isEmpty) throw Exception("Không tìm thấy chủ sở hữu");
-      final ownerId = ownerSnap.docs.first.id;
-      return SettingsService().watchStoreSettings(ownerId).first;
-    });
-
+    // Sử dụng FutureBuilder để xử lý trạng thái
     return FutureBuilder<List<dynamic>>(
-      future: Future.wait([tableFuture, ownerFuture, settingsFuture]),
+      // Dùng Future.wait nhưng bọc try-catch bên trong builder hoặc đảm bảo Rules đã mở
+      future: Future.wait([
+        // 1. Lấy thông tin bàn
+        FirebaseFirestore.instance
+            .collection('tables')
+            .where('storeId', isEqualTo: storeId)
+            .where('qrToken', isEqualTo: token)
+            .limit(1)
+            .get(),
+        // 2. Lấy cài đặt cửa hàng (Code SettingsService của bạn đã đúng)
+        SettingsService().getStoreSettings(storeId),
+      ]),
       builder: (context, snapshot) {
+        // ĐANG TẢI
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
-        if (snapshot.hasError || !snapshot.hasData) {
-          return _buildErrorScreen(
-              'Lỗi kết nối. Vui lòng thử lại. ${snapshot.error}');
+        // CÓ LỖI (VÍ DỤ: CHẶN QUYỀN ĐỌC) -> HIỆN LỖI CHỨ KHÔNG TRẮNG MÀN HÌNH
+        if (snapshot.hasError) {
+          debugPrint("Lỗi QR Loader: ${snapshot.error}");
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 50, color: Colors.red),
+                    const SizedBox(height: 10),
+                    const Text("Không thể tải dữ liệu.", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 5),
+                    Text("Lỗi: ${snapshot.error}", textAlign: TextAlign.center),
+                    const SizedBox(height: 20),
+                    const Text("Gợi ý: Kiểm tra Firestore Rules đã mở quyền đọc cho 'tables' và 'store_settings' chưa."),
+                  ],
+                ),
+              ),
+            ),
+          );
         }
 
-        final tableSnapshot = snapshot.data![0] as QuerySnapshot;
-        final ownerSnapshot = snapshot.data![1] as QuerySnapshot;
-        final settings = snapshot.data![2] as StoreSettings;
+        // XỬ LÝ DỮ LIỆU
+        try {
+          final tableSnapshot = snapshot.data![0] as QuerySnapshot;
+          final settings = snapshot.data![1] as StoreSettings;
 
-        if (tableSnapshot.docs.isEmpty) {
-          return _buildErrorScreen('Mã QR không hợp lệ hoặc đã hết hạn.');
+          if (tableSnapshot.docs.isEmpty) {
+            return const Scaffold(body: Center(child: Text("Mã QR không hợp lệ (Bàn không tồn tại).")));
+          }
+
+          final table = TableModel.fromFirestore(tableSnapshot.docs.first);
+
+          // Tạo user ảo cho khách
+          final guestUser = UserModel(
+            uid: 'guest_${DateTime.now().millisecondsSinceEpoch}',
+            role: 'guest',
+            name: 'Khách order',
+            phoneNumber: '',
+            storeId: storeId,
+            storeName: settings.storeName ?? 'Cửa hàng',
+            businessType: settings.businessType ?? 'fnb',
+            active: true,
+            permissions: {},
+            createdAt: Timestamp.now(),
+          );
+
+          return GuestOrderScreen(
+            currentUser: guestUser,
+            table: table,
+            initialOrder: null,
+            settings: settings,
+          );
+        } catch (e) {
+          return Scaffold(body: Center(child: Text("Lỗi xử lý dữ liệu: $e")));
         }
-
-        if (ownerSnapshot.docs.isEmpty) {
-          return _buildErrorScreen('Lỗi cấu hình cửa hàng (ERR:OWNR).');
-        }
-
-        final table = TableModel.fromFirestore(tableSnapshot.docs.first);
-        final ownerUser = UserModel.fromFirestore(ownerSnapshot.docs.first);
-
-        final guestUser = ownerUser.copyWith(
-          uid: 'guest_${DateTime.now().millisecondsSinceEpoch}',
-          role: 'guest',
-          name: 'Khách order',
-          permissions: {},
-          email: null,
-          phoneNumber: null,
-          password: null,
-          ownerUid: null,
-        );
-
-        return GuestOrderScreen(
-          currentUser: guestUser,
-          table: table,
-          initialOrder: null,
-          settings: settings,
-        );
       },
-    );
-  }
-
-  Widget _buildErrorScreen(String message) {
-    return Scaffold(
-      body: Center(
-        child: Text(
-          message,
-          style: const TextStyle(fontSize: 18, color: Colors.red),
-        ),
-      ),
     );
   }
 }
@@ -309,73 +311,60 @@ class QrWebOrderLoader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ownerFuture = FirebaseFirestore.instance
-        .collection('users')
-        .where('storeId', isEqualTo: storeId)
-        .where('role', isEqualTo: 'owner')
-        .limit(1)
-        .get();
+    final settingsFuture = SettingsService().getStoreSettings(storeId);
 
-    final settingsFuture = ownerFuture.then((ownerSnap) {
-      if (ownerSnap.docs.isEmpty) {
-        throw Exception("Không tìm thấy chủ sở hữu (storeId: $storeId)");
-      }
-      final ownerId = ownerSnap.docs.first.id;
-      return SettingsService().watchStoreSettings(ownerId).first;
-    });
-
-    return FutureBuilder<List<dynamic>>(
-      future: Future.wait([ownerFuture, settingsFuture]),
+    return FutureBuilder<StoreSettings>(
+      future: settingsFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
-        if (snapshot.hasError || !snapshot.hasData) {
-          return _buildErrorScreen(
-              'Lỗi kết nối hoặc cấu hình cửa hàng. ${snapshot.error}');
+        if (snapshot.hasError) {
+          return _buildErrorScreen('Lỗi tải cấu hình: ${snapshot.error}');
         }
 
-        final ownerSnapshot = snapshot.data![0] as QuerySnapshot;
-        final settings = snapshot.data![1] as StoreSettings;
+        // SỬA Ở ĐÂY: Truyền tham số bắt buộc nếu data null
+        final settings = snapshot.data ?? const StoreSettings(
+          printBillAfterPayment: true,
+          allowProvisionalBill: true,
+          notifyKitchenAfterPayment: false,
+          showPricesOnProvisional: false,
+        );
 
-        if (ownerSnapshot.docs.isEmpty) {
-          return _buildErrorScreen('Lỗi cấu hình cửa hàng (ERR:OWNR).');
+        try {
+          final String guestName = (type == 'ship') ? 'Đặt giao hàng' : 'Đặt lịch hẹn';
+
+          final guestUser = UserModel(
+            uid: 'guest_${type}_${DateTime.now().millisecondsSinceEpoch}',
+            role: 'guest',
+            name: guestName,
+            phoneNumber: '',
+            storeId: storeId,
+            businessType: settings.businessType ?? 'fnb',
+            active: true,
+            permissions: {},
+            createdAt: Timestamp.now(),
+          );
+
+          final placeholderTable = TableModel(
+            id: 'web_${type}_order',
+            tableName: guestName,
+            storeId: storeId,
+            tableGroup: 'Web Order',
+            stt: 999,
+            serviceId: '',
+          );
+
+          return GuestOrderScreen(
+            currentUser: guestUser,
+            table: placeholderTable,
+            initialOrder: null,
+            settings: settings,
+          );
+        } catch (e) {
+          return _buildErrorScreen('Lỗi khởi tạo màn hình: $e');
         }
-
-        final ownerUser = UserModel.fromFirestore(ownerSnapshot.docs.first);
-        final String guestName =
-        (type == 'ship') ? 'Đặt giao hàng' : 'Đặt lịch hẹn';
-
-        final guestUser = ownerUser.copyWith(
-          uid: 'guest_${type}_${DateTime.now().millisecondsSinceEpoch}',
-          role: 'guest',
-          name: guestName,
-          permissions: {},
-          email: null,
-          phoneNumber: null,
-          password: null,
-          ownerUid: null,
-        );
-
-        // SỬA LỖI 2: Thay 'TableModel.fromMap' bằng 'TableModel'
-        final placeholderTable = TableModel(
-          id: 'web_${type}_order',
-          tableName: guestName,
-          storeId: storeId,
-          tableGroup: 'Web Order',
-          stt: 999,
-          qrToken: null,
-          serviceId: '',
-        );
-
-        return GuestOrderScreen(
-          currentUser: guestUser,
-          table: placeholderTable,
-          initialOrder: null,
-          settings: settings,
-        );
       },
     );
   }
@@ -385,10 +374,17 @@ class QrWebOrderLoader extends StatelessWidget {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Text(
-            message,
-            style: const TextStyle(fontSize: 18, color: Colors.red),
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warning_amber_rounded, size: 50, color: Colors.orange),
+              const SizedBox(height: 10),
+              Text(
+                message,
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
       ),

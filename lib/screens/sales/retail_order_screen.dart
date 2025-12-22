@@ -290,7 +290,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
     }
     _settingsService = SettingsService();
 
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
     _settingsSub = _settingsService.watchStoreSettings(settingsId).listen((s) {
       if (!mounted) return;
       setState(() {
@@ -327,8 +327,7 @@ class _RetailOrderScreenState extends State<RetailOrderScreen> {
       }
     });
 
-    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-    PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
+    PaymentScreen.preloadData(widget.currentUser.storeId);
 
     _buyXGetYSub = _firestoreService
         .getActiveBuyXGetYPromotionsStream(widget.currentUser.storeId)

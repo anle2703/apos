@@ -1,10 +1,13 @@
+// File: lib/screens/signup_screen.dart
+
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/toast_service.dart';
 import '../theme/responsive_helper.dart';
 import '../widgets/custom_text_form_field.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'home_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -23,6 +26,8 @@ class _SignupScreenState extends State<SignupScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _agentIdController = TextEditingController();
+
   bool _isLoading = false;
 
   @override
@@ -32,6 +37,7 @@ class _SignupScreenState extends State<SignupScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _agentIdController.dispose();
     super.dispose();
   }
 
@@ -59,20 +65,44 @@ class _SignupScreenState extends State<SignupScreen> {
     final phoneNumber = _phoneController.text.trim();
     final password = _passwordController.text.trim();
 
-    try {
-      // 1. GỌI SERVER KIỂM TRA TRÙNG LẶP (SĐT & SHOP ID)
-      // (Bước này giờ đã an toàn và chính xác)
-      await FirebaseFunctions.instanceFor(region: 'asia-southeast1')
-          .httpsCallable('checkRegisterInfo')
-          .call({
-        'phoneNumber': phoneNumber,
-        'storeId': shopId,
-      });
+    String? finalAgentId;
 
-      // 2. Nếu Server ok (không lỗi), tiếp tục tạo Auth
+    try {
+      // --- 1. KIỂM TRA MÃ ĐẠI LÝ ---
+      if (_agentIdController.text.trim().isNotEmpty) {
+        final rawAgentId = _generateStoreId(_agentIdController.text.trim());
+        final agentDoc = await FirebaseFirestore.instance
+            .collection('app_config')
+            .doc(rawAgentId)
+            .get();
+
+        if (!agentDoc.exists) {
+          _toastService.show(
+              message: 'Mã đại lý "$rawAgentId" không tồn tại.',
+              type: ToastType.error);
+          setState(() => _isLoading = false);
+          return;
+        }
+        finalAgentId = rawAgentId;
+      }
+
+      // --- 2. KIỂM TRA TRÙNG STORE ID ---
+      bool shopIdExists = await _firestoreService.isFieldInUse(field: 'storeId', value: shopId);
+      if (shopIdExists) {
+        throw Exception('Tên cửa hàng này tạo ra ID "$shopId" đã bị trùng. Vui lòng chọn tên khác.');
+      }
+
+      // --- 3. [KHÔI PHỤC] KIỂM TRA TRÙNG SỐ ĐIỆN THOẠI ---
+      bool phoneExists = await _firestoreService.isFieldInUse(field: 'phoneNumber', value: phoneNumber);
+      if (phoneExists) {
+        throw Exception('Số điện thoại này đã được sử dụng bởi một tài khoản khác.');
+      }
+
+      // --- 4. TẠO TÀI KHOẢN AUTH ---
       final user = await _authService.signUpWithEmailPassword(email, password);
 
       if (user != null) {
+        // --- 5. TẠO PROFILE FIRESTORE ---
         await _firestoreService.createUserProfile(
           uid: user.uid,
           email: user.email!,
@@ -81,27 +111,29 @@ class _SignupScreenState extends State<SignupScreen> {
           phoneNumber: phoneNumber,
           role: 'owner',
           name: 'admin',
+          agentId: finalAgentId,
+          storePhone: phoneNumber,
         );
 
-        await _authService.signOut();
+        // --- 6. RELOAD TOKEN (Để fix lỗi permission) ---
+        await user.reload();
+        await user.getIdToken(true);
 
         if (mounted) {
           _toastService.show(
-              message: 'Đăng ký thành công! Vui lòng đăng nhập.',
+              message: 'Đăng ký thành công!',
               type: ToastType.success
           );
-          Navigator.of(context).pop();
+
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+                (route) => false,
+          );
         }
       }
     } catch (e) {
       String errorMessage = 'Đăng ký thất bại.';
-
-      // Bắt lỗi từ Cloud Function trả về
-      if (e is FirebaseFunctionsException) {
-        errorMessage = e.message ?? errorMessage;
-      }
-      // Bắt lỗi từ Firebase Auth
-      else if (e.toString().contains('email-already-in-use')) {
+      if (e.toString().contains('email-already-in-use') || e.toString().contains('email-already-exists')) {
         errorMessage = 'Email này đã được sử dụng.';
       } else {
         errorMessage = e.toString().replaceAll("Exception: ", "");
@@ -115,6 +147,7 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
+  // ... (Giữ nguyên các hàm validate)
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) return 'Vui lòng nhập mật khẩu';
     if (value.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';
@@ -185,6 +218,14 @@ class _SignupScreenState extends State<SignupScreen> {
                   decoration: const InputDecoration(labelText: 'Xác nhận mật khẩu', prefixIcon: Icon(Icons.lock_outline)),
                   obscureText: true,
                   validator: _validateConfirmPassword,
+                ),
+                const SizedBox(height: 16),
+                CustomTextFormField(
+                  controller: _agentIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Mã đại lý (Nếu có)',
+                    prefixIcon: Icon(Icons.confirmation_number_outlined),
+                  ),
                 ),
                 const SizedBox(height: 30),
                 _isLoading

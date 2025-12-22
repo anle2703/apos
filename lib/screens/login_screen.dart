@@ -116,9 +116,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     } catch (e) {
       String msg = e.toString().replaceAll("Exception: ", "");
-      // Việt hóa một số lỗi Auth thường gặp của chủ
-      if (msg.contains("INVALID_LOGIN_CREDENTIALS") || msg.contains("wrong-password")) {
-        msg = "Sai mật khẩu!";
+      if (msg.contains("INVALID_LOGIN_CREDENTIALS") ||
+          msg.contains("wrong-password") ||
+          msg.contains("user-not-found") ||
+          msg.contains("unknown-error") ||
+          msg.contains("internal-error")) {
+        msg = "Sai SĐT hoặc mật khẩu!";
       }
       ToastService().show(message: msg, type: ToastType.error);
     } finally {
@@ -216,7 +219,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: const Text('Đăng nhập'),
                             ),
                             const SizedBox(height: 12),
-                            if (!isDesktop && !Platform.isIOS)
+                            if (kIsWeb || (!isDesktop && !Platform.isIOS))
                               OutlinedButton.icon(
                                 icon: const FaIcon(FontAwesomeIcons.google,
                                     color: Colors.red, size: 18),

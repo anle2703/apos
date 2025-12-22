@@ -21,7 +21,6 @@ import 'report/report_screen.dart';
 import 'contacts/contacts_screen.dart';
 import '../screens/payment_methods_screen.dart';
 import 'invoice/e_invoice_settings_screen.dart';
-import '../tables/qr_order_management_screen.dart';
 import 'tax_management_screen.dart';
 import 'sales/retail_order_screen.dart';
 import '../products/labels/product_label_print_screen.dart';
@@ -31,6 +30,11 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'subscription_expired_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
+import 'package:package_info_plus/package_info_plus.dart';
+import '../services/settings_service.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -52,6 +56,7 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
 class _HomeScreenState extends State<HomeScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService();
+  final SettingsService _settingsService = SettingsService();
 
   UserModel? _currentUser;
   int _selectedIndex = 2;
@@ -67,13 +72,31 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isShowingTypePicker = false;
   bool _canViewContacts = false;
   bool _isNotificationSetup = false;
-  final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
+  Map<String, dynamic>? _contactInfo;
+  String _appVersion = '';
+  final Map<String, dynamic> _adminContact = {
+    'phone': '0935417776',
+    'facebook': 'https://www.facebook.com/anlee2502',
+    'zalo': '0935417776',
+  };
+  final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
     super.initState();
     _initializationFuture = _initializeUserAndSettings();
+    _getAppVersion();
     _setupNotificationSystem();
+  }
+
+  Future<void> _getAppVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() {
+        _appVersion = info.version;
+      });
+    }
   }
 
   @override
@@ -85,26 +108,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _setupNotificationSystem() async {
-    if (_isNotificationSetup) {
-      return;
-    }
+    if (_isNotificationSetup || _currentUser == null) return;
     _isNotificationSetup = true;
-    if (_currentUser == null) return;
 
     final prefs = await SharedPreferences.getInstance();
     bool isDeviceEnabled = prefs.getBool('device_notify_enabled') ?? false;
 
-    // Nếu trong cài đặt đã tắt -> Không làm gì cả (hoặc đảm bảo token bị xóa)
+    // Nếu đã tắt trong cài đặt -> Xóa token khỏi store_settings
     if (!isDeviceEnabled) {
-      debugPrint(">>> [DEBUG] Thông báo đang tắt trên thiết bị này.");
-      // Tùy chọn: Xóa token để chắc chắn (đề phòng trường hợp cache lệch)
       try {
         String? token = await FirebaseMessaging.instance.getToken();
         if (token != null) {
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(_currentUser!.uid)
-              .update({'fcmTokens': FieldValue.arrayRemove([token])});
+          await _settingsService.updateStoreSettings(
+              _currentUser!.storeId,
+              {'fcmTokens': FieldValue.arrayRemove([token])}
+          );
         }
       } catch (e) {
         debugPrint("Lỗi xóa token cache: $e");
@@ -132,22 +150,24 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     const AndroidInitializationSettings initializationSettingsAndroid =
-    AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('@mipmap/ic_launcher');
 
     final DarwinInitializationSettings initializationSettingsDarwin =
-    DarwinInitializationSettings(
+        DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
 
-    final InitializationSettings initializationSettings = InitializationSettings(
+    final InitializationSettings initializationSettings =
+        InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsDarwin,
     );
 
     await _localNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
 
     await _localNotificationsPlugin.initialize(
@@ -161,30 +181,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     try {
-      final currentUserUid = _currentUser!.uid;
-      String? token = await messaging.getToken();
-      if (token != null) {
-        await FirebaseFirestore.instance.collection('users').doc(currentUserUid).update({
-          'fcmTokens': FieldValue.arrayUnion([token]),
-          'receivePaymentNotification': true,
-        });
-      }
+      String? token = await FirebaseMessaging.instance.getToken();
+      await _settingsService.updateStoreSettings(
+          _currentUser!.storeId,
+          {'fcmTokens': FieldValue.arrayUnion([token])}
+      );
     } catch (e) {
       debugPrint(">>> [DEBUG] Lỗi đồng bộ Token: $e");
     }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      debugPrint(">>> [DEBUG] TIN NHẮN ĐẾN KHI APP MỞ: ${message.notification?.title}");
+      debugPrint(
+          ">>> [DEBUG] TIN NHẮN ĐẾN KHI APP MỞ: ${message.notification?.title}");
 
       RemoteNotification? notification = message.notification;
       AndroidNotification? android = message.notification?.android;
 
-      if (notification != null && android != null) { // Thêm check android != null
+      if (notification != null && android != null) {
+        // Thêm check android != null
         _localNotificationsPlugin.show(
           notification.hashCode,
           notification.title,
           notification.body,
-          NotificationDetails( // Bỏ const vì channel.id không phải hằng số biên dịch
+          NotificationDetails(
+            // Bỏ const vì channel.id không phải hằng số biên dịch
             android: AndroidNotificationDetails(
               channel.id, // Sử dụng ID từ channel đã tạo phía trên
               channel.name,
@@ -192,7 +212,8 @@ class _HomeScreenState extends State<HomeScreen> {
               importance: Importance.max,
               priority: Priority.high,
               icon: '@mipmap/ic_launcher',
-              largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+              largeIcon:
+                  const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
             ),
           ),
         );
@@ -233,26 +254,48 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (loadedUser == null) return;
 
-    if (loadedUser.role != 'owner' && loadedUser.ownerUid != null) {
-      final ownerProfile =
-          await _firestoreService.getUserProfile(loadedUser.ownerUid!);
-      if (ownerProfile != null) {
-        loadedUser =
-            loadedUser.copyWith(businessType: ownerProfile.businessType);
-      }
-    }
-
     if (mounted) {
       setState(() {
         _currentUser = loadedUser;
       });
     }
 
+    if (_currentUser != null) {
+      try {
+        // Lấy Store Settings
+        final settings = await _settingsService.getStoreSettings(_currentUser!.storeId);
+
+        // --- THÊM ĐOẠN NÀY: Cập nhật businessType từ Store Settings vào User Model trong Ram ---
+        if (settings.businessType != null && settings.businessType!.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _currentUser = _currentUser!.copyWith(businessType: settings.businessType);
+            });
+          }
+        }
+
+        final String? agentId = settings.agentId;
+
+        if (agentId != null && agentId.isNotEmpty) {
+          final doc = await FirebaseFirestore.instance.collection('app_config').doc(agentId).get();
+          if (doc.exists && doc.data() != null) {
+            if (mounted) setState(() => _contactInfo = doc.data());
+          } else {
+            if (mounted) setState(() => _contactInfo = _adminContact);
+          }
+        } else {
+          if (mounted) setState(() => _contactInfo = _adminContact);
+        }
+      } catch (e) {
+        debugPrint("Lỗi lấy thông tin đại lý/settings: $e");
+        if (mounted) setState(() => _contactInfo = _adminContact);
+      }
+    }
+
     _listenForUserStatusChanges();
 
     if (_currentUser != null) {
       await PrintQueueService().initialize(_currentUser!.storeId);
-      _checkAndShowBusinessTypePicker();
     }
 
     if (_currentUser!.role != 'guest') {
@@ -267,6 +310,125 @@ class _HomeScreenState extends State<HomeScreen> {
         realOwnerUid,
       );
     }
+  }
+
+  Future<void> _handleContactAction(String type, String value) async {
+    if (value.isEmpty) {
+      ToastService().show(
+          message: 'Chưa cập nhật thông tin này.', type: ToastType.warning);
+      return;
+    }
+
+    // 1. Kiểm tra xem đang chạy trên Mobile hay Desktop
+    bool isMobile = false;
+    try {
+      isMobile = Platform.isAndroid || Platform.isIOS;
+    } catch (e) {
+      isMobile = false; // Fallback (ví dụ chạy web)
+    }
+
+    try {
+      // --- XỬ LÝ FACEBOOK ---
+      if (type == 'facebook') {
+        String urlString = value;
+        if (!urlString.startsWith('http')) {
+          urlString = 'https://www.facebook.com/$value';
+        }
+        final Uri uri = Uri.parse(urlString);
+
+        if (isMobile) {
+          // Mobile: Thử mở bằng App Facebook trước (externalApplication)
+          // Nếu không được (chưa cài App) -> Tự động fallback sang trình duyệt
+          bool launched =
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+          if (!launched) {
+            await launchUrl(uri, mode: LaunchMode.platformDefault);
+          }
+        } else {
+          // Desktop: Mở trình duyệt luôn
+          await launchUrl(uri, mode: LaunchMode.platformDefault);
+        }
+        return;
+      }
+
+      // --- XỬ LÝ SỐ ĐIỆN THOẠI ---
+      if (type == 'phone') {
+        if (!isMobile) {
+          // Desktop: Luôn hiện Popup
+          _showInfoPopup('Số điện thoại', value);
+          return;
+        }
+
+        // Mobile: Thử gọi điện
+        final Uri uri = Uri(scheme: 'tel', path: value);
+        bool canCall = await canLaunchUrl(uri);
+
+        if (canCall) {
+          await launchUrl(uri);
+        } else {
+          // Mobile không gọi được (ví dụ iPad, máy ảo) -> Hiện Popup
+          if (mounted) _showInfoPopup('Số điện thoại', value);
+        }
+        return;
+      }
+
+      // --- XỬ LÝ ZALO ---
+      if (type == 'zalo') {
+        if (!isMobile) {
+          // Desktop: Luôn hiện Popup
+          _showInfoPopup('Zalo', value);
+          return;
+        }
+
+        // Mobile: Dùng link https chuẩn
+        final Uri uri = Uri.parse("https://zalo.me/$value");
+
+        bool launched =
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+        if (!launched) {
+          if (mounted) _showInfoPopup('Zalo', value);
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint("Lỗi Contact: $e");
+      // Fallback an toàn cuối cùng: Hiện popup nếu là sdt/zalo
+      if (mounted && (type == 'phone' || type == 'zalo')) {
+        _showInfoPopup(type == 'zalo' ? 'Zalo' : 'Thông tin liên hệ', value);
+      }
+    }
+  }
+
+  void _showInfoPopup(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontSize: 18)),
+        content: Row(
+          children: [
+            Expanded(
+                child: Text(content,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold))),
+            IconButton(
+              icon: const Icon(Icons.copy, color: Colors.blue),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: content));
+                Navigator.of(ctx).pop();
+                ToastService().show(
+                    message: 'Đã sao chép $content', type: ToastType.success);
+              },
+            )
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Đóng'))
+        ],
+      ),
+    );
   }
 
   void _checkAndShowBusinessTypePicker() {
@@ -295,8 +457,9 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(
-                  builder: (context) => SubscriptionExpiredScreen(expiryDate: expiry)),
-                  (route) => false);
+                  builder: (context) =>
+                      SubscriptionExpiredScreen(expiryDate: expiry)),
+              (route) => false);
         }
       });
     }
@@ -305,10 +468,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startListeningToOwnerStatus(String ownerUid) {
     if (_ownerStatusSubscription != null) return;
 
-    _ownerStatusSubscription = _firestoreService.streamUserProfile(ownerUid).listen((ownerProfile) {
+    _ownerStatusSubscription =
+        _firestoreService.streamUserProfile(ownerUid).listen((ownerProfile) {
       if (ownerProfile != null) {
         _processExpiredUser(ownerProfile.subscriptionExpiryDate);
-
       }
     });
   }
@@ -320,119 +483,129 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (_currentUser != null) {
       final navigator = Navigator.of(context);
+
       _userStatusSubscription = _firestoreService
           .streamUserProfile(_currentUser!.uid)
           .listen((userProfile) {
-        if (userProfile == null) {
-          _authService.signOut().then((_) {
-            navigator.pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const AuthGate()),
-                (route) => false);
-          });
-          return;
-        }
+        // --- [SỬA LỖI CRASH WINDOWS TẠI ĐÂY] ---
+        // Bao bọc logic bằng Future.delayed để ép nó chạy trên UI Thread
+        Future.delayed(Duration.zero, () {
+          if (!mounted) return; // Kiểm tra lại mounted sau khi delay
 
-        if (!userProfile.active) {
-          bool isExpired = false;
-          if (userProfile.inactiveReason == 'store_expired' ||
-              userProfile.inactiveReason == 'expired_subscription') {
-            isExpired = true;
-          } else if (userProfile.role == 'owner' &&
-              userProfile.subscriptionExpiryDate != null &&
-              DateTime.now().isAfter(userProfile.subscriptionExpiryDate!.toDate())) {
-            isExpired = true;
-          }
-
-          if (isExpired) {
-            // A. Xử lý cho NHÂN VIÊN
-            if (userProfile.role != 'owner' && userProfile.ownerUid != null) {
-              // Gọi hàm lấy thông tin chủ
-              _firestoreService.getUserProfile(userProfile.ownerUid!).then((owner) {
-                DateTime expiryDisplay = DateTime.now();
-                if (owner != null && owner.subscriptionExpiryDate != null) {
-                  expiryDisplay = owner.subscriptionExpiryDate!.toDate();
-                }
-                // Chuyển màn hình
-                _executeLogoutAndShowExpiry(navigator, expiryDisplay);
-              });
-
-              // [QUAN TRỌNG !!!] Phải có return ở đây để code KHÔNG chạy xuống đoạn Toast báo lỗi bên dưới
-              return;
-            }
-
-            // B. Xử lý cho CHỦ
-            if (userProfile.role == 'owner' && userProfile.subscriptionExpiryDate != null) {
-              final expiryDisplay = userProfile.subscriptionExpiryDate!.toDate();
-              _executeLogoutAndShowExpiry(navigator, expiryDisplay);
-
-              // [QUAN TRỌNG !!!] Return để dừng
-              return;
-            }
-          }
-
-          ToastService().show(
-              message: 'Tài khoản của bạn đã bị quản trị viên vô hiệu hóa.',
-              type: ToastType.error,
-              duration: const Duration(seconds: 4));
-
-          Future.delayed(const Duration(milliseconds: 500), () {
+          if (userProfile == null) {
             _authService.signOut().then((_) {
               navigator.pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const AuthGate()),
                   (route) => false);
             });
-          });
-          return;
-        }
+            return;
+          }
 
-        if (userProfile.role == 'owner') {
-          _processExpiredUser(userProfile.subscriptionExpiryDate);
-        } else if (userProfile.ownerUid != null) {
-          _startListeningToOwnerStatus(userProfile.ownerUid!);
-        }
+          if (!userProfile.active) {
+            bool isExpired = false;
+            if (userProfile.inactiveReason == 'store_expired' ||
+                userProfile.inactiveReason == 'expired_subscription') {
+              isExpired = true;
+            } else if (userProfile.role == 'owner' &&
+                userProfile.subscriptionExpiryDate != null &&
+                DateTime.now()
+                    .isAfter(userProfile.subscriptionExpiryDate!.toDate())) {
+              isExpired = true;
+            }
 
-        if (userProfile.role == 'owner') {
-          _canViewPurchaseOrder = true;
-          _canViewPromotions = true;
-          _canViewListTable = true;
-          _canViewEmployee = true;
-          _canPrintLabel = true;
-          _canEditTax = true;
-          _canViewContacts = true;
-        } else {
-          _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']
-                  ?['canViewPurchaseOrder'] ??
-              false;
-          _canViewPromotions = userProfile.permissions?['promotions']
-                  ?['canViewPromotions'] ??
-              false;
-          _canViewListTable = userProfile.permissions?['listTable']
-                  ?['canViewListTable'] ??
-              false;
-          _canViewEmployee =
-              userProfile.permissions?['employee']?['canViewEmployee'] ?? false;
-          _canPrintLabel =
-              userProfile.permissions?['products']?['canPrintLabel'] ?? false;
-          _canEditTax =
-              userProfile.permissions?['products']?['canEditTax'] ?? false;
-          _canViewContacts =
-              userProfile.permissions?['contacts']?['canViewContacts'] ?? false;
-        }
+            if (isExpired) {
+              // A. Xử lý cho NHÂN VIÊN
+              if (userProfile.role != 'owner' && userProfile.ownerUid != null) {
+                _firestoreService
+                    .getUserProfile(userProfile.ownerUid!)
+                    .then((owner) {
+                  DateTime expiryDisplay = DateTime.now();
+                  if (owner != null && owner.subscriptionExpiryDate != null) {
+                    expiryDisplay = owner.subscriptionExpiryDate!.toDate();
+                  }
+                  _executeLogoutAndShowExpiry(navigator, expiryDisplay);
+                });
+                return;
+              }
 
-        if (mounted) {
-          setState(() {
-            _currentUser = userProfile.copyWith(
-              businessType:
-                  userProfile.businessType ?? _currentUser?.businessType,
-            );
-          });
-          _checkAndShowBusinessTypePicker();
-        }
+              // B. Xử lý cho CHỦ
+              if (userProfile.role == 'owner' &&
+                  userProfile.subscriptionExpiryDate != null) {
+                final expiryDisplay =
+                    userProfile.subscriptionExpiryDate!.toDate();
+                _executeLogoutAndShowExpiry(navigator, expiryDisplay);
+                return;
+              }
+            }
+
+            ToastService().show(
+                message: 'Tài khoản của bạn đã bị quản trị viên vô hiệu hóa.',
+                type: ToastType.error,
+                duration: const Duration(seconds: 4));
+
+            Future.delayed(const Duration(milliseconds: 500), () {
+              _authService.signOut().then((_) {
+                navigator.pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const AuthGate()),
+                    (route) => false);
+              });
+            });
+            return;
+          }
+
+          if (userProfile.role == 'owner') {
+            _processExpiredUser(userProfile.subscriptionExpiryDate);
+          } else if (userProfile.ownerUid != null) {
+            _startListeningToOwnerStatus(userProfile.ownerUid!);
+          }
+
+          // Cập nhật quyền hạn
+          if (userProfile.role == 'owner') {
+            _canViewPurchaseOrder = true;
+            _canViewPromotions = true;
+            _canViewListTable = true;
+            _canViewEmployee = true;
+            _canPrintLabel = true;
+            _canEditTax = true;
+            _canViewContacts = true;
+          } else {
+            _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']
+                    ?['canViewPurchaseOrder'] ??
+                false;
+            _canViewPromotions = userProfile.permissions?['promotions']
+                    ?['canViewPromotions'] ??
+                false;
+            _canViewListTable = userProfile.permissions?['listTable']
+                    ?['canViewListTable'] ??
+                false;
+            _canViewEmployee = userProfile.permissions?['employee']
+                    ?['canViewEmployee'] ??
+                false;
+            _canPrintLabel =
+                userProfile.permissions?['products']?['canPrintLabel'] ?? false;
+            _canEditTax =
+                userProfile.permissions?['products']?['canEditTax'] ?? false;
+            _canViewContacts = userProfile.permissions?['contacts']
+                    ?['canViewContacts'] ??
+                false;
+          }
+
+          if (mounted) {
+            setState(() {
+              _currentUser = userProfile.copyWith(
+                businessType:
+                    userProfile.businessType ?? _currentUser?.businessType,
+              );
+            });
+            _checkAndShowBusinessTypePicker();
+          }
+        });
       });
     }
   }
 
-  void _executeLogoutAndShowExpiry(NavigatorState navigator, DateTime expiryDate) {
+  void _executeLogoutAndShowExpiry(
+      NavigatorState navigator, DateTime expiryDate) {
     _userStatusSubscription?.cancel();
     _ownerStatusSubscription?.cancel();
     _ownerStatusSubscription = null;
@@ -441,12 +614,14 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         navigator.pushAndRemoveUntil(
             MaterialPageRoute(
-                builder: (context) => SubscriptionExpiredScreen(expiryDate: expiryDate)),
-                (route) => false);
+                builder: (context) =>
+                    SubscriptionExpiredScreen(expiryDate: expiryDate)),
+            (route) => false);
       }
     });
   }
 
+  // Tìm hàm này ở cuối file home_screen.dart
   void _showBusinessTypePicker(BuildContext context) {
     showDialog(
       context: context,
@@ -456,8 +631,10 @@ class _HomeScreenState extends State<HomeScreen> {
           onConfirm: (type) async {
             final navigator = Navigator.of(dialogContext);
             try {
-              await _firestoreService
-                  .updateUserField(_currentUser!.uid, {'businessType': type});
+              await _settingsService.updateStoreSettings(
+                  _currentUser!.storeId,
+                  {'businessType': type}
+              );
 
               navigator.pop();
 
@@ -519,47 +696,117 @@ class _HomeScreenState extends State<HomeScreen> {
       case 4:
         return Scaffold(
           appBar: AppBar(
-            // [SỬA ĐỔI] Icon + Text nằm cùng 1 dòng
-            title: (_currentUser?.role == 'owner' && _currentUser?.subscriptionExpiryDate != null)
+            automaticallyImplyLeading: false,
+            titleSpacing: 0,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            elevation: 0,
+
+            title: (_currentUser?.role == 'owner' &&
+                    _currentUser?.subscriptionExpiryDate != null)
                 ? Builder(builder: (context) {
-              final expiry = _currentUser!.subscriptionExpiryDate!.toDate();
+                    final expiry =
+                        _currentUser!.subscriptionExpiryDate!.toDate();
 
-              // Format giờ phút ngày tháng
-              final hour = expiry.hour.toString().padLeft(2, '0');
-              final minute = expiry.minute.toString().padLeft(2, '0');
-              final day = expiry.day.toString().padLeft(2, '0');
-              final month = expiry.month.toString().padLeft(2, '0');
-              final year = expiry.year;
+                    // Format thời gian
+                    final hour = expiry.hour.toString().padLeft(2, '0');
+                    final minute = expiry.minute.toString().padLeft(2, '0');
+                    final day = expiry.day.toString().padLeft(2, '0');
+                    final month = expiry.month.toString().padLeft(2, '0');
+                    final year = expiry.year;
 
-              // Logic màu sắc (dưới 7 ngày là báo động đỏ)
-              final daysLeft = expiry.difference(DateTime.now()).inDays;
-              final isUrgent = daysLeft <= 7;
-              final displayColor = isUrgent ? Colors.red : Colors.green[700];
+                    // Logic màu
+                    final daysLeft = expiry.difference(DateTime.now()).inDays;
+                    final isUrgent = daysLeft <= 30;
+                    final Color displayColor =
+                        isUrgent ? Colors.red : Theme.of(context).primaryColor;
 
-              return Row(
-                children: [
-                  // 1. Icon lúc nãy
-                  Icon(Icons.workspace_premium, color: displayColor),
-
-                  const SizedBox(width: 8), // Khoảng cách
-
-                  // 2. Dòng chữ nằm cùng hàng
-                  Text(
-                    'Hạn sử dụng: $hour:$minute $day/$month/$year',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: displayColor,
-                    ),
-                  ),
-                ],
-              );
-            })
-                : const Text('Khác'),
-            centerTitle: false,
+                    // Container đóng vai trò là dải nền cắt ngang
+                    return Container(
+                      width: double.infinity,
+                      // Full chiều ngang
+                      height: kToolbarHeight,
+                      // Chiều cao bằng đúng AppBar (56.0)
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      // Padding nội dung bên trong
+                      color: displayColor.withAlpha(12),
+                      // Màu nền mờ
+                      alignment: Alignment.centerLeft,
+                      // Căn nội dung sang trái
+                      child: Row(
+                        children: [
+                          Icon(Icons.workspace_premium, color: displayColor),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Hạn sử dụng: $hour:$minute $day/$month/$year',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: displayColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  })
+                : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Tài khoản: ${_currentUser?.name ?? "Lỗi hiển thị tên TK"}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ),
           body: ListView(
             children: [
+              if (_contactInfo != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8), // Padding nhỏ
+                  child: Row(
+                    children: [
+                      // Tiêu đề nhỏ gọn bên trái
+                      Text(
+                        'V$_appVersion - Liên hệ hỗ trợ:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Icon Phone
+                      _buildCompactIcon(
+                          icon: Icons.phone,
+                          color: Colors.blue,
+                          onTap: () => _handleContactAction(
+                              'phone', _contactInfo!['phone'] ?? '')),
+                      const SizedBox(width: 8),
+
+                      // Icon Facebook
+                      _buildCompactIcon(
+                          icon: Icons.facebook,
+                          color: Colors.blue[800]!, // Màu xanh đậm FB
+                          onTap: () => _handleContactAction(
+                              'facebook', _contactInfo!['facebook'] ?? '')),
+                      const SizedBox(width: 8),
+
+                      // Icon Zalo (Dùng Icon chat + Chữ Z để giả lập)
+                      _buildCompactIcon(
+                        icon: Icons.circle,
+                        color: const Color(0xFF0068FF),
+                        onTap: () => _handleContactAction(
+                            'zalo', _contactInfo!['zalo'] ?? ''),
+                        isZalo: true, // Cờ đánh dấu để xử lý hiển thị đặc biệt
+                      ),
+                    ],
+                  ),
+                ),
+              const Divider(height: 1, thickness: 0.5, color: Colors.grey),
+              // --- KẾT THÚC ĐOẠN UI MỚI ---
               if (_currentUser?.role != 'order') ...[
                 ListTile(
                   leading: const Icon(Icons.add_business_outlined),
@@ -574,7 +821,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     } else {
                       ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
@@ -593,7 +841,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         );
                       } else {
                         ToastService().show(
-                            message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                            message:
+                                'Bạn chưa được cấp quyền sử dụng tính năng này.',
                             type: ToastType.warning);
                       }
                     },
@@ -611,12 +860,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     } else {
                       ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
                 ),
-                if (_currentUser?.businessType == 'fnb')...[
+                if (_currentUser?.businessType == 'fnb')
                   ListTile(
                     leading: const Icon(Icons.chair_outlined),
                     title: const Text('Quản lý phòng bàn'),
@@ -631,31 +881,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         );
                       } else {
                         ToastService().show(
-                            message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                            message:
+                                'Bạn chưa được cấp quyền sử dụng tính năng này.',
                             type: ToastType.warning);
                       }
                     },
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.qr_code_2_outlined),
-                    title: const Text('Quản lý QR Order'),
-                    onTap: () {
-                      if (_currentUser != null && _canViewListTable) {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => QrOrderManagementScreen(
-                              currentUser: _currentUser!,
-                            ),
-                          ),
-                        );
-                      } else {
-                        ToastService().show(
-                            message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                            type: ToastType.warning);
-                      }
-                    },
-                  ),
-                ],
                 ListTile(
                   leading: const Icon(Icons.people_alt_outlined),
                   title: const Text('Quản lý nhân viên'),
@@ -670,7 +901,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     } else {
                       ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
@@ -689,7 +921,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     } else {
                       ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
@@ -718,7 +951,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ));
                     } else {
                       ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
@@ -734,7 +968,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ));
                     } else {
                       ToastService().show(
-                          message: 'Bạn chưa được cấp quyền sử dụng tính năng này.',
+                          message:
+                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
                           type: ToastType.warning);
                     }
                   },
@@ -768,7 +1003,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _authService.signOut();
                   navigator.pushAndRemoveUntil(
                     MaterialPageRoute(builder: (context) => const AuthGate()),
-                        (route) => false,
+                    (route) => false,
                   );
                 },
               ),
@@ -776,13 +1011,55 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       default:
-      // Default trả về Bán hàng để an toàn
+        // Default trả về Bán hàng để an toàn
         if (_currentUser!.businessType == 'fnb') {
           return TableSelectionScreen(currentUser: _currentUser!);
         } else {
           return RetailOrderScreen(currentUser: _currentUser!);
         }
     }
+  }
+
+  Widget _buildCompactIcon({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+    bool isZalo = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(6), // Padding nhỏ quanh icon
+        decoration: BoxDecoration(
+          color: color.withAlpha(25),
+          shape: BoxShape.circle,
+        ),
+        child: isZalo
+            ? Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(icon, color: color, size: 23), // Icon nhỏ size 20
+                  Text(
+                    'Zalo',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 7,
+                      fontWeight: FontWeight.bold,
+                      shadows: [
+                        Shadow(
+                            offset: const Offset(1, 1),
+                            blurRadius: 2,
+                            color: color)
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Icon(icon,
+                color: color, size: 23), // Icon bình thường nhỏ size 20
+      ),
+    );
   }
 
   @override

@@ -87,7 +87,7 @@ class SalesReportTabState extends State<SalesReportTab> {
 
   Future<void> _loadSettingsAndFetchData() async {
     final settingsService = SettingsService();
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
 
     try {
       final settings = await settingsService.watchStoreSettings(settingsId).first;

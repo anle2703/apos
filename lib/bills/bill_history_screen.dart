@@ -504,7 +504,7 @@ class _BillHistoryScreenState extends State<BillHistoryScreen> {
     _storeInfoFuture = FirestoreService().getStoreDetails(widget.currentUser.storeId);
     _fetchBusinessType();
 
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
 
     _settingsSub = SettingsService().watchStoreSettings(settingsId).listen((settings) {
       if (!mounted) return;
@@ -1368,8 +1368,6 @@ class _BillReceiptDialogState extends State<BillReceiptDialog> {
       }
     }
 
-    // [FIX QUAN TRỌNG] Đảm bảo cập nhật Ca làm việc mới nhất trước khi lấy ID
-    // Nếu ca cũ đã qua giờ chốt sổ, hàm này sẽ đóng ca cũ và tạo ca mới
     try {
       await ShiftService().ensureShiftOpen(
           widget.currentUser.storeId,

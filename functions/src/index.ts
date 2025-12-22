@@ -54,6 +54,8 @@ type ProductSaleData = {
 // ============================================================================
 // HÀM TRỢ GIÚP: LẤY NGÀY BÁO CÁO
 // ============================================================================
+// Tìm đến hàm getReportDateInfoMoment và thay thế toàn bộ nội dung hàm đó bằng đoạn này:
+
 async function getReportDateInfoMoment(billData: {
   storeId: string,
   createdByUid: string,
@@ -64,23 +66,19 @@ async function getReportDateInfoMoment(billData: {
   reportDayStartTimestamp: admin.firestore.Timestamp;
 }> {
   const storeId = billData.storeId as string;
-  const createdByUid = billData.createdByUid as string;
   const paymentTimestamp = billData.createdAt as admin.firestore.Timestamp;
   const timeZone = "Asia/Ho_Chi_Minh";
 
   let cutoffHour = 0;
   let cutoffMinute = 0;
-  let ownerUidToReadSettings = createdByUid;
   
   try {
-    const creatorUserDoc = await db.collection("users").doc(createdByUid).get();
-    if (creatorUserDoc.exists && creatorUserDoc.data()?.ownerUid) {
-      ownerUidToReadSettings = creatorUserDoc.data()?.ownerUid;
-    }
-    const ownerSettingsDoc = await db.collection("users").doc(ownerUidToReadSettings).get();
-    if (ownerSettingsDoc.exists) {
-      cutoffHour = ownerSettingsDoc.data()?.reportCutoffHour ?? 0;
-      cutoffMinute = ownerSettingsDoc.data()?.reportCutoffMinute ?? 0;
+    // Thay đổi: Đọc trực tiếp từ store_settings/{storeId}
+    const settingsDoc = await db.collection("store_settings").doc(storeId).get();
+    if (settingsDoc.exists) {
+      const data = settingsDoc.data();
+      cutoffHour = data?.reportCutoffHour ?? 0;
+      cutoffMinute = data?.reportCutoffMinute ?? 0;
     }
   } catch (e) {
     console.warn(`[getReportDateInfoMoment] Lỗi tải cài đặt store: ${storeId}. Dùng 00:00.`, e);
@@ -699,41 +697,20 @@ export const sendPaymentNotification = onDocumentWritten("bills/{billId}",
     const formattedMoney = new Intl.NumberFormat('vi-VN').format(totalPayable);
 
     try {
-      // 3. Tìm User
-      const usersSnap = await db.collection("users")
-        .where("storeId", "==", storeId)
-        .where("receivePaymentNotification", "==", true)
-        .get();
+      // 3. Tìm User (Lấy Token từ Store Settings)
+      const settingsDoc = await db.collection("store_settings").doc(storeId).get();
+    
+      if (!settingsDoc.exists) return;
+      
+      const settingsData = settingsDoc.data();
+      const rawTokens = settingsData?.fcmTokens; // Mảng tokens nằm ở đây
 
-      if (usersSnap.empty) return;
+      if (!rawTokens || !Array.isArray(rawTokens) || rawTokens.length === 0) return;
 
-      const tokens: string[] = [];
-
-      usersSnap.forEach((doc) => {
-        const userData = doc.data();
-        const tokenData = userData.fcmTokens;
-
-        if (tokenData) {
-          // CASE 1: Dữ liệu cũ (Mảng)
-          if (Array.isArray(tokenData)) {
-            tokenData.forEach((t: any) => {
-              // Kiểm tra kỹ t có phải string không để tránh lỗi crash
-              if (typeof t === 'string' && t.trim() !== '') {
-                tokens.push(t);
-              }
-            });
-          } 
-          // CASE 2: Dữ liệu mới (String) - Logic ghi đè bạn vừa làm
-          else if (typeof tokenData === 'string' && tokenData.trim() !== '') {
-            tokens.push(tokenData);
-          }
-        }
-      });
-
-      if (tokens.length === 0) return;
-
-      // QUAN TRỌNG: Loại bỏ các token trùng lặp (nếu có)
-      const uniqueTokens = [...new Set(tokens)];
+      // Lọc token hợp lệ và loại bỏ trùng lặp
+      const uniqueTokens = [...new Set(rawTokens.filter(t => typeof t === 'string' && t.trim() !== ''))];
+      
+      if (uniqueTokens.length === 0) return;
 
       // 4. Gửi thông báo (Dùng âm thanh mặc định)
       const message = {
@@ -774,90 +751,71 @@ export const sendPaymentNotification = onDocumentWritten("bills/{billId}",
   }
 );
 
-
 // ============================================================================
-// HÀM 4: CHECK TỒN KHO HÀNG NGÀY (CHẠY 8:00 SÁNG)
+// HÀM 4: CHECK TỒN KHO HÀNG NGÀY (CHẠY 08:00 SÁNG)
 // ============================================================================
 export const checkLowStockDaily = onSchedule(
   {
-    schedule: "every day 08:00", // Chạy lúc 8h sáng mỗi ngày
+    schedule: "every day 08:00",
     timeZone: "Asia/Ho_Chi_Minh",
     region: "asia-southeast1",
-    timeoutSeconds: 540, // Tăng thời gian timeout vì phải quét nhiều store
+    timeoutSeconds: 540,
   },
   async (event) => {
     console.log("--- BẮT ĐẦU CHECK TỒN KHO HÀNG NGÀY ---");
 
     try {
-      // 1. Lấy danh sách Users có bật thông báo và có Token
-      const usersSnap = await db.collection("users")
-        .where("receivePaymentNotification", "==", true) // Tận dụng cờ này hoặc tạo cờ mới tùy bạn
-        .get();
+      // 1. Quét tất cả store_settings
+      const settingsSnap = await db.collection("store_settings").get();
 
-      if (usersSnap.empty) {
-        console.log("Không có user nào bật thông báo.");
+      if (settingsSnap.empty) {
+        console.log("Không có store nào.");
         return;
       }
 
-      // 2. Gom nhóm Token theo StoreID để tránh query DB nhiều lần cho cùng 1 cửa hàng
-      // Map<StoreId, List<Tokens>>
-      const storeTokensMap = new Map<string, string[]>();
-
-      usersSnap.forEach((doc) => {
+      // 2. Duyệt từng Store
+      for (const doc of settingsSnap.docs) {
+        const storeId = doc.id;
         const data = doc.data();
-        const storeId = data.storeId;
-        const tokenData = data.fcmTokens;
         
-        if (storeId && tokenData) {
-            let tokens: string[] = [];
-            // Logic lấy token giống hàm sendPaymentNotification
-            if (Array.isArray(tokenData)) {
-                tokens = tokenData.filter(t => typeof t === 'string' && t.trim() !== '');
-            } else if (typeof tokenData === 'string' && tokenData.trim() !== '') {
-                tokens = [tokenData];
-            }
+        // Lấy tokens từ store_settings
+        const rawTokens = data.fcmTokens;
 
-            if (tokens.length > 0) {
-                const existing = storeTokensMap.get(storeId) || [];
-                storeTokensMap.set(storeId, [...existing, ...tokens]);
-            }
+        // Nếu store không có token nào thì bỏ qua
+        if (!rawTokens || !Array.isArray(rawTokens) || rawTokens.length === 0) {
+            continue;
         }
-      });
 
-      // 3. Duyệt từng Store để kiểm tra sản phẩm
-      for (const [storeId, tokens] of storeTokensMap.entries()) {
-        const uniqueTokens = [...new Set(tokens)];
+        // Lọc token hợp lệ (Dùng uniqueTokens MỚI)
+        const uniqueTokens = [...new Set(rawTokens.filter((t: any) => typeof t === 'string' && t.trim() !== ''))];
+        
         if (uniqueTokens.length === 0) continue;
 
-        // Lấy tất cả sản phẩm của Store (Firestore không hỗ trợ so sánh 2 field stock < minStock trực tiếp)
-        // Nên ta phải lấy về và lọc bằng code
+        // 3. Kiểm tra sản phẩm của store này
         const productsSnap = await db.collection("products")
             .where("storeId", "==", storeId)
-            // Chỉ lấy sp có quản lý tồn kho (nếu có field này)
-            // .where("manageStockSeparately", "==", true) 
             .get();
 
         let lowStockCount = 0;
         let exampleProductName = "";
 
-        productsSnap.forEach(doc => {
-            const p = doc.data();
+        productsSnap.forEach((pDoc: QueryDocumentSnapshot) => {
+            const p = pDoc.data();
             const stock = Number(p.stock || 0);
             const minStock = Number(p.minStock || 0);
 
-            // Kiểm tra điều kiện tồn kho thấp
             if (minStock > 0 && stock < minStock) {
                 lowStockCount++;
                 if (exampleProductName === "") exampleProductName = p.productName;
             }
         });
 
-        // 4. Gửi thông báo nếu có hàng sắp hết
+        // 4. Gửi thông báo
         if (lowStockCount > 0) {
             const title = "⚠️ Cảnh báo tồn kho";
             const body = lowStockCount === 1
-                ? `"${exampleProductName}" sắp hết hàng rồi kìa người đẹp.`
-                : `Có ${lowStockCount} sản phẩm sắp hết hàng (${exampleProductName},...). Kiểm tra ngay!`;
+                ? `"${exampleProductName}" sắp hết hàng.`
+                : `Có ${lowStockCount} sản phẩm sắp hết hàng (${exampleProductName},...).`;
 
             const message = {
                 notification: {
@@ -866,7 +824,7 @@ export const checkLowStockDaily = onSchedule(
                 },
                 android: {
                     notification: {
-                        channelId: 'high_importance_channel_v4', // Dùng chung channel ID
+                        channelId: 'high_importance_channel_v4',
                         priority: 'high' as 'high',
                         visibility: 'public' as 'public',
                     }
@@ -881,14 +839,14 @@ export const checkLowStockDaily = onSchedule(
                 },
                 data: {
                     click_action: 'FLUTTER_NOTIFICATION_CLICK',
-                    type: 'low_stock', // Loại thông báo mới
+                    type: 'low_stock',
                     storeId: storeId,
                 },
                 tokens: uniqueTokens,
             };
 
             await admin.messaging().sendEachForMulticast(message);
-            console.log(`[LowStock] Đã gửi cảnh báo cho store ${storeId}: ${lowStockCount} sản phẩm.`);
+            console.log(`[LowStock] Đã gửi cho store ${storeId}: ${lowStockCount} sp.`);
         }
       }
 
@@ -899,7 +857,7 @@ export const checkLowStockDaily = onSchedule(
 );
 
 // ============================================================================
-// HÀM 5: QUÉT VÀ KHÓA TÀI KHOẢN HẾT HẠN (CHẠY 08:01 SÁNG HÀNG NGÀY)
+// HÀM 5: QUÉT VÀ KHÓA TÀI KHOẢN HẾT HẠN (CHẠY 12:00 SÁNG HÀNG NGÀY)
 // ============================================================================
 export const checkExpiredSubscriptions = onSchedule(
   {
@@ -1003,7 +961,7 @@ export const loginEmployee = onCall(
       .get();
 
     if (userQuery.empty) {
-      throw new HttpsError('not-found', 'Số điện thoại này chưa được đăng ký.');
+      throw new HttpsError('not-found', 'Sai SĐT hoặc mật khẩu!');
     }
 
     const userDoc = userQuery.docs[0];

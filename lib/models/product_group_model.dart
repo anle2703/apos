@@ -12,7 +12,7 @@ class ProductGroupModel {
     return ProductGroupModel(
       id: doc.id,
       name: data['name'] ?? '',
-      stt: data['stt'] ?? 999,
+      stt: (data['stt'] as num?)?.toInt() ?? 999,
     );
   }
 }

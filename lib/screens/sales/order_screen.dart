@@ -196,7 +196,7 @@ class _OrderScreenState extends State<OrderScreen> {
           widget.currentUser.permissions?['sales']?['canEditNotes'] ?? false;
     }
     // 1. Lắng nghe Settings
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
     _settingsSub = _settingsService.watchStoreSettings(settingsId).listen((s) {
       if (!mounted) return;
       setState(() {
@@ -285,9 +285,8 @@ class _OrderScreenState extends State<OrderScreen> {
       }
     });
 
-    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
+      PaymentScreen.preloadData(widget.currentUser.storeId);
     });
   }
 

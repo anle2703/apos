@@ -182,6 +182,8 @@ class FirestoreService {
     }
   }
 
+  // Tìm đến hàm createUserProfile và sửa lại đoạn batch.set:
+
   Future<void> createUserProfile({
     required String uid,
     required String email,
@@ -191,28 +193,60 @@ class FirestoreService {
     required String role,
     String? name,
     String? storePhone,
+    String? agentId, // Vẫn nhận tham số này
+    String? businessType,
+    String? storeAddress,
   }) async {
     try {
       final DateTime now = DateTime.now();
       final DateTime expiryDate = now.add(const Duration(days: 7));
 
-      await _db.collection('users').doc(uid).set({
+      final batch = _db.batch();
+
+      // 1. USER: Bỏ agentId và fcmTokens, bỏ receivePaymentNotification (vì cái này đi theo thiết bị/store)
+      final userRef = _db.collection('users').doc(uid);
+      batch.set(userRef, {
         'uid': uid,
         'email': email,
-        'storeId': storeId,
-        'storeName': _toTitleCase(storeName),
-        'storeAddress': null,
         'phoneNumber': phoneNumber,
-        'storePhone': storePhone,
-        'role': role,
         'name': _toTitleCase(name),
-        'createdAt': FieldValue.serverTimestamp(),
-        'businessType': null,
+        'role': role,
         'active': true,
+        'storeId': storeId,
         'subscriptionExpiryDate': Timestamp.fromDate(expiryDate),
+        'createdAt': FieldValue.serverTimestamp(),
       });
+
+      final settingsRef = _db.collection('store_settings').doc(storeId);
+      batch.set(settingsRef, {
+        'storeName': _toTitleCase(storeName),
+        'storeAddress': _toTitleCase(storeAddress),
+        'storePhone': storePhone,
+        'businessType': businessType ?? 'retail',
+        'agentId': agentId,
+        'fcmTokens': [],
+        'printBillAfterPayment': true,
+        'allowProvisionalBill': true,
+        'notifyKitchenAfterPayment': false,
+        'showPricesOnProvisional': false,
+        'reportCutoffHour': 0,
+        'reportCutoffMinute': 0,
+        'promptForCash': true,
+        'qrOrderRequiresConfirmation': true,
+        'enableShip': true,
+        'enableBooking': true,
+        'printLabelOnKitchen': false,
+        'printLabelOnPayment': false,
+        'labelWidth': 50,
+        'labelHeight': 30,
+        'skipKitchenPrint': false,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
+
     } catch (e) {
-      throw Exception('Không thể tạo hồ sơ người dùng: $e');
+      throw Exception('Không thể tạo hồ sơ người dùng và cửa hàng: $e');
     }
   }
 
@@ -249,7 +283,7 @@ class FirestoreService {
       _db.collection('counters').doc('product_codes_$storeId');
       final String counterField = '${prefix}_count';
       int? nextNumber;
-      if (Platform.isWindows) {
+      if (!kIsWeb && Platform.isWindows) {
         final counterSnapshot = await counterDocRef.get();
         if (!counterSnapshot.exists) {
           await counterDocRef.set({counterField: 1});
@@ -645,25 +679,23 @@ class FirestoreService {
 
   Future<Map<String, String>?> getStoreDetails(String storeId) async {
     try {
-      final querySnapshot = await _db
-          .collection('users')
-          .where('storeId', isEqualTo: storeId)
-          .where('role', isEqualTo: 'owner')
-          .limit(1)
-          .get();
+      // SỬA: Đọc trực tiếp từ 'store_settings' thay vì tìm trong 'users'
+      final docSnapshot = await _db.collection('store_settings').doc(storeId).get();
 
-      if (querySnapshot.docs.isNotEmpty) {
-        final ownerDoc = querySnapshot.docs.first;
-        final data = ownerDoc.data();
+      if (docSnapshot.exists) {
+        final data = docSnapshot.data();
         return {
-          'name': data['storeName'] as String? ?? '',
-          'phone': data['storePhone'] as String? ?? '',
-          'address': data['storeAddress'] as String? ?? '',
+          'name': data?['storeName'] as String? ?? '',
+          'phone': data?['storePhone'] as String? ?? '',
+          'address': data?['storeAddress'] as String? ?? '',
         };
       }
+
+      // Fallback (Tuỳ chọn): Nếu chưa có trong settings thì tìm lại trong users (cho tk cũ chưa migrate)
+      // Nhưng nếu bạn đã migrate hết thì có thể bỏ đoạn else này
       return null;
     } catch (e) {
-      debugPrint("Lỗi khi lấy thông tin cửa hàng từ user owner: $e");
+      debugPrint("Lỗi khi lấy thông tin cửa hàng: $e");
       return null;
     }
   }

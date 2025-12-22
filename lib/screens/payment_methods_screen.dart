@@ -37,26 +37,24 @@ class PaymentMethodsScreen extends StatefulWidget {
 
 class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
   final FirestoreService _firestoreService = FirestoreService();
-  // Thêm SettingsService
   final SettingsService _settingsService = SettingsService();
 
   Future<void> _setDefaultPaymentMethod(String methodId, bool isCurrentlyDefault) async {
     try {
       final dynamic newDefaultId = isCurrentlyDefault ? null : methodId;
 
-      // 1. Cập nhật Settings trên Firestore
+      // --- [SỬA THÀNH] ---
+      final settingsId = widget.currentUser.storeId; // Dùng storeId
+
+      // 1. Cập nhật Settings trên Firestore theo storeId
       await _settingsService.updateStoreSettings(
-          widget.currentUser.ownerUid ?? widget.currentUser.uid,
+          settingsId,
           {'defaultPaymentMethodId': newDefaultId}
       );
 
-      // 2. [QUAN TRỌNG] Xóa cache bên màn hình thanh toán
-      // Để lần sau mở PaymentScreen lên, nó buộc phải tải lại Settings mới nhất
+      // 2. Xóa cache và nạp lại (Chỉ truyền 1 tham số storeId như ta đã sửa ở các bước trước)
       PaymentScreen.clearCache();
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
-      // 3. Nếu bạn đã thêm hàm preloadData, hãy gọi luôn để nạp cache mới (Optional nhưng tốt hơn)
-      // await PaymentScreen.preloadData(widget.currentUser.storeId);
+      PaymentScreen.preloadData(settingsId);
 
       ToastService().show(
           message: isCurrentlyDefault ? "Đã gỡ PTTT mặc định" : "Đã đặt làm PTTT mặc định",
@@ -66,7 +64,6 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       ToastService().show(message: "Lỗi khi cập nhật: $e", type: ToastType.error);
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -82,8 +79,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
         ],
       ),
       body: StreamBuilder<StoreSettings>(
-        // Giả sử storeId là ID để lấy settings
-        stream: _settingsService.watchStoreSettings(widget.currentUser.ownerUid ?? widget.currentUser.uid),
+        stream: _settingsService.watchStoreSettings(widget.currentUser.storeId),
         builder: (context, settingsSnapshot) {
           if (!settingsSnapshot.hasData && settingsSnapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -329,8 +325,7 @@ class _PaymentMethodFormState extends State<_PaymentMethodForm> {
       }
 
       PaymentScreen.clearCache();
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      PaymentScreen.preloadData(widget.currentUser.storeId, ownerUid);
+      PaymentScreen.preloadData(widget.currentUser.storeId);
       ToastService()
           .show(message: 'Đã lưu PTTT thành công', type: ToastType.success);
       if (mounted) Navigator.of(context).pop();

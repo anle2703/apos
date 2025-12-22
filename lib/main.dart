@@ -34,7 +34,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 Future<void> _createNotificationChannel() async {
-  if (Platform.isAndroid) {
+  if (!kIsWeb && Platform.isAndroid) {
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       'high_importance_channel_v4', // ID Kênh V4
       'Thông báo thanh toán', // Tên hiển thị trong Cài đặt
@@ -55,8 +55,9 @@ void main() async {
     WidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-    // 1. Cài đặt Crashlytics
-    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    if (!kIsWeb) {
+      FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    }
 
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
     await _createNotificationChannel();
@@ -72,10 +73,15 @@ void main() async {
     await initializeDateFormatting('vi_VN', null);
 
     runApp(const MyApp());
-  }, (error, stack) => FirebaseCrashlytics.instance.recordError(error, stack, fatal: true));
+  }, (error, stack) {
+    if (!kIsWeb) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    }
+  });
 }
 
 Future<void> startPrintServerForUser(UserModel user) async {
+  if (kIsWeb && user.role == 'guest') return;
   try {
     final prefs = await SharedPreferences.getInstance();
     final bool isServerMode = prefs.getBool('is_print_server') ?? false;

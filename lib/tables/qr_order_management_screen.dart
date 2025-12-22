@@ -65,7 +65,7 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
   }
 
   void _loadSettings() {
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
     _settingsSub =
         _settingsService.watchStoreSettings(settingsId).listen((settings) {
       if (mounted) {
@@ -86,9 +86,8 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
   Future<void> _updateShipSetting(bool val) async {
     setState(() => _enableShip = val);
     try {
-      final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      await _settingsService
-          .updateStoreSettings(settingsId, {'enableShip': val});
+      final settingsId = widget.currentUser.storeId;
+      await _settingsService.updateStoreSettings(settingsId, {'enableShip': val});
     } catch (e) {
       ToastService().show(message: "Lỗi cập nhật: $e", type: ToastType.error);
       setState(() => _enableShip = !val);
@@ -98,9 +97,8 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
   Future<void> _updateBookingSetting(bool val) async {
     setState(() => _enableBooking = val);
     try {
-      final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      await _settingsService
-          .updateStoreSettings(settingsId, {'enableBooking': val});
+      final settingsId = widget.currentUser.storeId;
+      await _settingsService.updateStoreSettings(settingsId, {'enableBooking': val});
     } catch (e) {
       ToastService().show(message: "Lỗi cập nhật: $e", type: ToastType.error);
       setState(() => _enableBooking = !val);
@@ -110,7 +108,7 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
   Future<void> _updateQrConfirmationMode(bool newValue) async {
     setState(() => _isQrOrderRequiresConfirmation = newValue);
     try {
-      final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      final settingsId = widget.currentUser.storeId;
       await _settingsService.updateStoreSettings(settingsId, {
         'qrOrderRequiresConfirmation': newValue,
       });

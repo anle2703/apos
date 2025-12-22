@@ -11,8 +11,8 @@ class EInvoiceService {
   final _db = FirebaseFirestore.instance;
   static const String _mainConfigCollection = 'e_invoice_main_configs';
 
-  Future<EInvoiceProvider?> _getActiveProvider(String ownerUid) async {
-    final doc = await _db.collection(_mainConfigCollection).doc(ownerUid).get();
+  Future<EInvoiceProvider?> _getActiveProvider(String storeId) async {
+    final doc = await _db.collection(_mainConfigCollection).doc(storeId).get();
     if (!doc.exists) return null;
 
     final providerName = doc.data()?['activeProvider'] as String?;
@@ -31,10 +31,10 @@ class EInvoiceService {
     }
   }
 
-  Future<EInvoiceConfigStatus> getConfigStatus(String ownerUid) async {
-    final provider = await _getActiveProvider(ownerUid);
+  Future<EInvoiceConfigStatus> getConfigStatus(String storeId) async {
+    final provider = await _getActiveProvider(storeId);
     if (provider != null) {
-      return await provider.getConfigStatus(ownerUid);
+      return await provider.getConfigStatus(storeId);
     }
     return EInvoiceConfigStatus();
   }
@@ -42,18 +42,19 @@ class EInvoiceService {
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
       CustomerModel? customer,
-      String ownerUid) async {
-    final provider = await _getActiveProvider(ownerUid);
+      String storeId) async {
+
+    final provider = await _getActiveProvider(storeId);
     if (provider == null) {
       throw Exception("Chưa cấu hình nhà cung cấp HĐĐT.");
     }
 
     final EInvoiceResult result =
-    await provider.createInvoice(billData, customer, ownerUid);
+    await provider.createInvoice(billData, customer, storeId);
 
     if (customer?.email != null && customer!.email!.isNotEmpty) {
       try {
-        await provider.sendEmail(ownerUid, result.rawResponse);
+        await provider.sendEmail(storeId, result.rawResponse);
       } catch (e) {
         debugPrint("Lỗi tự động gửi email HĐĐT: $e");
       }

@@ -55,9 +55,8 @@ class _MisaEInvoiceSettingsScreenState
   Future<void> _loadSettings() async {
     setState(() => _isLoading = true);
     try {
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-
-      final config = await _misaService.getMisaConfig(ownerUid);
+      final storeId = widget.currentUser.storeId;
+      final config = await _misaService.getMisaConfig(storeId);
       if (config != null) {
         _taxCodeController.text = config.taxCode;
         _usernameController.text = config.username;
@@ -87,8 +86,8 @@ class _MisaEInvoiceSettingsScreenState
         autoIssueOnPayment: _autoIssueOnPayment,
       );
 
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      await _misaService.saveMisaConfig(config, ownerUid);
+      final storeId = widget.currentUser.storeId;
+      await _misaService.saveMisaConfig(config, storeId);
 
       ToastService().show(message: "Đã lưu cấu hình MISA", type: ToastType.success);
       if (mounted) Navigator.of(context).pop();

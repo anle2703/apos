@@ -54,10 +54,10 @@ abstract class EInvoiceProvider {
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
       CustomerModel? customer,
-      String ownerUid,
+      String storeId,
       );
 
-  Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse);
+  Future<void> sendEmail(String storeId, Map<String, dynamic> rawResponse);
 
-  Future<EInvoiceConfigStatus> getConfigStatus(String ownerUid);
+  Future<EInvoiceConfigStatus> getConfigStatus(String storeId);
 }

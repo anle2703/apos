@@ -1,4 +1,7 @@
+// File: lib/screens/create_profile_screen.dart
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import thêm để check đại lý
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../services/firestore_service.dart';
@@ -20,10 +23,13 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final FirestoreService _firestoreService = FirestoreService();
   final AuthService _authService = AuthService();
+
   final _storeNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _agentIdController = TextEditingController(); // Thêm controller mã đại lý
+
   bool _isLoading = false;
 
   @override
@@ -32,6 +38,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _agentIdController.dispose(); // Dispose controller
     super.dispose();
   }
 
@@ -46,6 +53,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     );
   }
 
+  // Hàm tạo storeId slug
   String _generateStoreId(String storeName) {
     String slug = storeName.toLowerCase();
     slug = slug.replaceAll(RegExp(r'[àáạảãâầấậẩẫăằắặẳẵ]'), 'a');
@@ -62,42 +70,75 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
   void _submitProfile() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
+
     final shopName = _storeNameController.text.trim();
     final shopId = _generateStoreId(shopName);
     final phoneNumber = _phoneController.text.trim();
-    bool shopIdExists =
-        await _firestoreService.isFieldInUse(field: 'storeId', value: shopId);
+
+    // --- 1. XỬ LÝ MÃ ĐẠI LÝ ---
+    String? finalAgentId;
+    if (_agentIdController.text.trim().isNotEmpty) {
+      // Generate ID dạng slug để khớp với database
+      final rawAgentId = _generateStoreId(_agentIdController.text.trim());
+
+      try {
+        final agentDoc = await FirebaseFirestore.instance
+            .collection('app_config')
+            .doc(rawAgentId)
+            .get();
+
+        if (!agentDoc.exists) {
+          if (mounted) {
+            ToastService().show(
+                message: 'Mã đại lý "$rawAgentId" không tồn tại.',
+                type: ToastType.error);
+            setState(() => _isLoading = false);
+            return;
+          }
+        }
+        finalAgentId = rawAgentId; // Mã hợp lệ
+      } catch (e) {
+        // Bỏ qua lỗi kết nối mạng tạm thời, hoặc báo lỗi tùy ý
+      }
+    }
+
+    // --- 2. CHECK TRÙNG LẶP ---
+    bool shopIdExists = await _firestoreService.isFieldInUse(field: 'storeId', value: shopId);
     if (shopIdExists) {
-      if (mounted){
+      if (mounted) {
         ToastService().show(
             message: 'Tên cửa hàng này đã tạo ra một ID bị trùng.',
             type: ToastType.error);
-      setState(() => _isLoading = false);
-      return;}
+        setState(() => _isLoading = false);
+        return;
+      }
     }
 
-    bool phoneExists = await _firestoreService.isFieldInUse(
-        field: 'phoneNumber', value: phoneNumber);
+    bool phoneExists = await _firestoreService.isFieldInUse(field: 'phoneNumber', value: phoneNumber);
     if (phoneExists) {
-      if (mounted){
+      if (mounted) {
         ToastService().show(
             message: 'Số điện thoại này đã được sử dụng.',
             type: ToastType.error);
-      setState(() => _isLoading = false);
-      return;}
+        setState(() => _isLoading = false);
+        return;
+      }
     }
 
     try {
-      bool linkSuccess =
-          await _authService.linkPasswordToAccount(_passwordController.text);
+      // --- 3. TẠO PASSWORD ---
+      bool linkSuccess = await _authService.linkPasswordToAccount(_passwordController.text);
       if (!linkSuccess) {
-        if (mounted){
+        if (mounted) {
           ToastService().show(
               message: 'Không thể tạo mật khẩu. Email này có thể đã được dùng.',
               type: ToastType.error);
-        setState(() => _isLoading = false);
-        return;}
+          setState(() => _isLoading = false);
+          return;
+        }
       }
+
+      // --- 4. TẠO PROFILE ---
       await _firestoreService.createUserProfile(
         uid: widget.user.uid,
         email: widget.user.email!,
@@ -106,11 +147,19 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
         phoneNumber: phoneNumber,
         role: 'owner',
         name: 'admin',
+        agentId: finalAgentId,
+        storePhone: phoneNumber,
       );
+
+      // --- 5. [QUAN TRỌNG] FIX LỖI PERMISSION ---
+      // Refresh token để Firebase nhận diện Role/StoreId mới ngay lập tức
+      await widget.user.reload();
+      await widget.user.getIdToken(true);
+
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (context) => const HomeScreen()),
-            (route) => false);
+                (route) => false);
       }
     } catch (e) {
       setState(() => _isLoading = false);
@@ -122,6 +171,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
     }
   }
 
+  // ... (Các hàm validate giữ nguyên: _validatePassword, _validatePhoneNumber...)
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) return 'Vui lòng tạo một mật khẩu';
     if (value.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';
@@ -167,7 +217,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                       labelText: 'Tên cửa hàng',
                       prefixIcon: Icon(Icons.store_outlined)),
                   validator: (value) =>
-                      value!.isEmpty ? 'Không được để trống' : null,
+                  value!.isEmpty ? 'Không được để trống' : null,
                 ),
                 const SizedBox(height: 16),
                 CustomTextFormField(
@@ -196,24 +246,35 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                   obscureText: true,
                   validator: _validateConfirmPassword,
                 ),
+
+                // --- FIELD NHẬP MÃ ĐẠI LÝ ---
+                const SizedBox(height: 16),
+                CustomTextFormField(
+                  controller: _agentIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'Mã đại lý (Nếu có)',
+                    prefixIcon: Icon(Icons.confirmation_number_outlined),
+                  ),
+                ),
+                // -----------------------------
+
                 const SizedBox(height: 30),
                 _isLoading
                     ? const CircularProgressIndicator()
                     : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          ElevatedButton(
-                            onPressed: _submitProfile,
-                            child: const Text('Lưu và Bắt đầu'),
-                          ),
-                          const SizedBox(height: 12),
-                          // NÚT HỦY ĐƯỢC THÊM VÀO
-                          OutlinedButton(
-                            onPressed: _cancelAndSignOut,
-                            child: const Text('Hủy và Quay lại'),
-                          ),
-                        ],
-                      ),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _submitProfile,
+                      child: const Text('Lưu và Bắt đầu'),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                      onPressed: _cancelAndSignOut,
+                      child: const Text('Hủy và Quay lại'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

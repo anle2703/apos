@@ -73,10 +73,9 @@ class _VnpayEInvoiceSettingsScreenState
   Future<void> _loadSettings() async {
     setState(() => _isLoading = true);
     try {
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-
+      final storeId = widget.currentUser.storeId;
       // Đọc cấu hình VNPAY từ Service
-      final config = await _vnpayService.getVnpayConfig(ownerUid);
+      final config = await _vnpayService.getVnpayConfig(storeId);
 
       if (config != null) {
         _clientIdController.text = config.clientId;
@@ -109,9 +108,8 @@ class _VnpayEInvoiceSettingsScreenState
     try {
       _detectEnvironment(); // Cập nhật trạng thái sandbox trước khi lưu
 
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      final storeId = widget.currentUser.storeId;
 
-      // Tạo object config (Đã xóa invoiceType)
       final config = VnpayConfig(
         clientId: _clientIdController.text.trim(),
         clientSecret: _clientSecretController.text.trim(),
@@ -120,10 +118,9 @@ class _VnpayEInvoiceSettingsScreenState
         autoIssueOnPayment: _autoIssueOnPayment,
         paymentMethodCode: _paymentMethodController.text.trim(),
         isSandbox: _isSandbox,
-        // Đã xóa invoiceType gây lỗi
       );
 
-      await _vnpayService.saveVnpayConfig(config, ownerUid);
+      await _vnpayService.saveVnpayConfig(config, storeId);
 
       ToastService().show(message: "Đã lưu cấu hình VNPay", type: ToastType.success);
 

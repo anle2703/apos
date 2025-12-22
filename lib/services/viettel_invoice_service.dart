@@ -34,7 +34,7 @@ class ViettelEInvoiceService implements EInvoiceProvider {
   final _uuid = const Uuid();
   static const String _viettelBaseUrl = 'https://api-vinvoice.viettel.vn';
 
-  Future<void> saveViettelConfig(ViettelConfig config, String ownerUid) async {
+  Future<void> saveViettelConfig(ViettelConfig config, String storeId) async {
     try {
       final encodedPassword = base64Encode(utf8.encode(config.password));
       final dataToSave = {
@@ -44,11 +44,14 @@ class ViettelEInvoiceService implements EInvoiceProvider {
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
+        'updatedAt': FieldValue.serverTimestamp(), // Thêm trường này nếu muốn theo dõi thời gian sửa
       };
 
-      await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
-      await _db.collection(_mainConfigCollection).doc(ownerUid).set({
-        'activeProvider': 'viettel'
+      await _db.collection(_configCollection).doc(storeId).set(dataToSave);
+
+      await _db.collection(_mainConfigCollection).doc(storeId).set({
+        'activeProvider': 'viettel',
+        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
     } catch (e) {
@@ -57,37 +60,38 @@ class ViettelEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<ViettelConfig?> getViettelConfig(String ownerUid) async {
+  Future<ViettelConfig?> getViettelConfig(String storeId) async {
     try {
-      final doc = await _db.collection(_configCollection).doc(ownerUid).get();
-      if (!doc.exists) return null;
+      // Đọc từ storeId
+      final doc = await _db.collection(_configCollection).doc(storeId).get();
 
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['provider'] != 'viettel') return null;
-
-      String decodedPassword;
-      try {
-        decodedPassword = utf8.decode(base64Decode(data['password'] ?? ''));
-      } catch (e) {
-        decodedPassword = '';
+      // 1. Nếu chưa có dữ liệu -> Trả về null (để UI hiện form nhập mới)
+      if (!doc.exists || doc.data() == null) {
+        return null;
       }
 
+      final data = doc.data()!;
+
+      // 2. Parse dữ liệu an toàn (Dùng ?? '' để chống lỗi null)
       return ViettelConfig(
         username: data['username'] ?? '',
-        password: decodedPassword,
+        // Kiểm tra kỹ password trước khi decode
+        password: data['password'] != null ? utf8.decode(base64Decode(data['password'])) : '',
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
       );
     } catch (e) {
-      debugPrint ("Lỗi khi tải cấu hình Viettel: $e");
-      throw Exception('Không thể tải cấu hình Viettel.');
+      // 3. Nếu lỗi hệ thống (Mạng, sai base64...) -> Báo lỗi đỏ để biết đường sửa
+      debugPrint("Lỗi SYSTEM lấy config Viettel: $e");
+      throw Exception('Lỗi hệ thống khi tải Viettel: $e');
     }
   }
 
   @override
-  Future<EInvoiceConfigStatus> getConfigStatus(String ownerUid) async {
-    final config = await getViettelConfig(ownerUid);
+  Future<EInvoiceConfigStatus> getConfigStatus(String storeId) async {
+    final config = await getViettelConfig(storeId);
+
     if (config == null || config.username.isEmpty) {
       return EInvoiceConfigStatus(isConfigured: false);
     }
@@ -117,8 +121,8 @@ class ViettelEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<String?> _getValidToken(String ownerUid) async {
-    final config = await getViettelConfig(ownerUid);
+  Future<String?> _getValidToken(String storeId) async {
+    final config = await getViettelConfig(storeId);
     if (config == null || config.username.isEmpty) {
       throw Exception('Chưa cấu hình Viettel HĐĐT.');
     }
@@ -172,21 +176,16 @@ class ViettelEInvoiceService implements EInvoiceProvider {
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
       CustomerModel? customer,
-      String ownerUid) async {
+      String storeId) async {
     try {
-      final token = await _getValidToken(ownerUid);
+      final token = await _getValidToken(storeId);
       if (token == null) {
         throw Exception('Không thể lấy token xác thực HĐĐT.');
       }
 
-      final config = (await getViettelConfig(ownerUid))!;
+      final config = (await getViettelConfig(storeId))!;
       final fullUsernameForUrl = config.username;
       final mst = config.username;
-
-      final String storeId = billData['storeId'] ?? '';
-      if (storeId.isEmpty) {
-        throw Exception('Thiếu thông tin Store ID.');
-      }
 
       // Bước này giờ sẽ trả về "1" vì cấu hình của bạn là "high" / "deduction"
       final String determinedInvoiceType = await _determineInvoiceTypeFromSettings(storeId);
@@ -264,12 +263,12 @@ class ViettelEInvoiceService implements EInvoiceProvider {
   }
 
   @override
-  Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
+  Future<void> sendEmail(String storeId, Map<String, dynamic> rawResponse) async {
     final String? transactionUuid = rawResponse['transactionID'] as String?;
     if (transactionUuid == null) return;
 
-    final token = await _getValidToken(ownerUid);
-    final config = (await getViettelConfig(ownerUid))!;
+    final token = await _getValidToken(storeId);
+    final config = (await getViettelConfig(storeId))!;
 
     try {
       final String apiUrl = "$_viettelBaseUrl/services/einvoiceapplication/api/InvoiceAPI/InvoiceUtilsWS/sendHtmlMailProcess";

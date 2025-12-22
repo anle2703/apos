@@ -420,7 +420,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
 
   Future<void> _loadSettingsAndFetchData() async {
     final settingsService = SettingsService();
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
 
     final settings = await settingsService.watchStoreSettings(settingsId).first;
     if (mounted) {
@@ -443,7 +443,7 @@ class InventoryReportTabState extends State<InventoryReportTab> {
         setState(() {
           _reportCutoffTime = newCutoff;
         });
-        _updateDateRangeAndFetch(); // Tải lại báo cáo nếu giờ thay đổi
+        _updateDateRangeAndFetch();
       }
     });
   }

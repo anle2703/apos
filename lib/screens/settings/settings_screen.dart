@@ -10,7 +10,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:collection/collection.dart';
 import '../../models/configured_printer_model.dart';
 import '../../models/user_model.dart';
-import '../../services/firestore_service.dart';
 import '../../services/toast_service.dart';
 import '../../theme/app_theme.dart';
 import '../../services/cloud_print_service.dart';
@@ -36,7 +35,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _firestoreService = FirestoreService();
   final List<ScannedPrinter> _scannedPrinters = [];
   final _serverIpController = TextEditingController();
   final _storeNameController = TextEditingController();
@@ -94,10 +92,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _serverIpController.text = '192.168.1.';
     _settingsService = SettingsService();
-    if (widget.currentUser.role == 'owner') {
+    final role = widget.currentUser.role;
+    if (role == 'owner') {
       _selectedCategory = 'store_info';
-    } else {
+    } else if (role == 'manager') {
       _selectedCategory = 'print_options';
+    } else {
+      _selectedCategory = 'printer_connection';
     }
     _loadAllSettings();
   }
@@ -144,14 +145,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSavedSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-    final userDoc = await _firestoreService.getUserProfile(ownerUid);
 
-    final settingsId = ownerUid;
+    final settingsId = widget.currentUser.storeId; // Dùng storeId thay vì ownerUid
     try {
       final s = await _settingsService.watchStoreSettings(settingsId).first;
       if (mounted) {
         setState(() {
+          // --- Đọc thông tin cửa hàng từ Store Settings ---
+          _storeNameController.text = s.storeName ?? '';
+          _storePhoneController.text = s.storePhone ?? '';
+          _storeAddressController.text = s.storeAddress ?? '';
+          _activeServerListenMode = s.serverListenMode;
+          _serverListenModeOnDevice = s.serverListenMode ?? 'server';
+
+          // --- Các cài đặt khác ---
           _printBillAfterPayment = s.printBillAfterPayment;
           _notifyKitchenAfterPayment = s.notifyKitchenAfterPayment;
           _allowProvisionalBill = s.allowProvisionalBill;
@@ -170,6 +177,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       debugPrint("Lỗi tải cài đặt cửa hàng: $e");
     }
 
+    bool savedIsServer = prefs.getBool('is_print_server') ?? false;
+
+    if (widget.currentUser.role == 'order') {
+      savedIsServer = false;
+      await prefs.setBool('is_print_server', false);
+    }
+    _isThisDeviceTheServer = savedIsServer;
+
     _clientPrintMode = prefs.getString('client_print_mode') ?? 'direct';
     _isThisDeviceTheServer = prefs.getBool('is_print_server') ?? false;
     String? savedIp = prefs.getString('print_server_ip');
@@ -177,16 +192,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _serverIpController.text = savedIp;
     } else {
       _serverIpController.text = '192.168.1.';
-    }
-
-    if (mounted && userDoc != null) {
-      setState(() {
-        _storeNameController.text = userDoc.storeName ?? '';
-        _storePhoneController.text = userDoc.storePhone ?? '';
-        _storeAddressController.text = userDoc.storeAddress ?? '';
-        _activeServerListenMode = userDoc.serverListenMode;
-        _serverListenModeOnDevice = userDoc.serverListenMode ?? 'server';
-      });
     }
 
     if (mounted) {
@@ -201,7 +206,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) {
         setState(() {
           final assignments =
-              jsonList.map((json) => ConfiguredPrinter.fromJson(json)).toList();
+          jsonList.map((json) => ConfiguredPrinter.fromJson(json)).toList();
           _printerAssignments = {for (var v in assignments) v.logicalName: v};
 
           _printerAssignments.values.where((p) => p != null).forEach((p) {
@@ -221,69 +226,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _isSaving = true;
     });
     try {
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+      final storeId = widget.currentUser.storeId;
 
-      final Map<String, dynamic> userUpdateData = {
-        'storeName': _storeNameController.text.trim(),
-        'storePhone': _storePhoneController.text.trim(),
-        'storeAddress': _storeAddressController.text.trim(),
-        // [QUAN TRỌNG] Bỏ dòng 'receivePaymentNotification' để không đồng bộ tắt/bật sang máy khác
-      };
-
-      // 1. Lưu trạng thái Bật/Tắt vào bộ nhớ máy (Cache)
+      // 2. Lưu cài đặt cục bộ (Preferences)
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('device_notify_enabled', _receivePaymentNotification);
-
-      // 2. Xử lý Token với Firestore (Thêm hoặc Xóa khỏi mảng)
-      FirebaseMessaging messaging = FirebaseMessaging.instance;
-      String? token = await messaging.getToken();
-
-      if (token != null) {
-        if (_receivePaymentNotification) {
-          // --- TRƯỜNG HỢP BẬT THÔNG BÁO ---
-          NotificationSettings settings = await messaging.requestPermission(
-            alert: true,
-            badge: true,
-            sound: true,
-          );
-
-          if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-            // [QUAN TRỌNG] Dùng arrayUnion để THÊM token vào danh sách (giữ nguyên token các máy khác)
-            userUpdateData['fcmTokens'] = FieldValue.arrayUnion([token]);
-          } else {
-            // Nếu người dùng từ chối cấp quyền -> Tự động tắt
-            setState(() => _receivePaymentNotification = false);
-            await prefs.setBool('device_notify_enabled', false);
-
-            // Xóa token khỏi danh sách để không gửi rác
-            userUpdateData['fcmTokens'] = FieldValue.arrayRemove([token]);
-
-            ToastService().show(
-                message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.",
-                type: ToastType.warning);
-          }
-        } else {
-          // --- TRƯỜNG HỢP TẮT THÔNG BÁO ---
-          // [QUAN TRỌNG] Dùng arrayRemove để chỉ XÓA token của máy này khỏi danh sách
-          userUpdateData['fcmTokens'] = FieldValue.arrayRemove([token]);
-        }
-      }
-
-      if (_isThisDeviceTheServer) {
-        userUpdateData['serverListenMode'] = _serverListenModeOnDevice;
-      }
-
-      await _firestoreService.updateUserField(ownerUid, userUpdateData);
-
       await prefs.setString('client_print_mode', _clientPrintMode);
       await prefs.setBool('is_print_server', _isThisDeviceTheServer);
       await prefs.setString('print_server_ip', _serverIpController.text.trim());
 
-      final settingsService = SettingsService();
+      // 3. Xử lý FCM Token (Giữ nguyên code cũ)
+      if (!isDesktop) {
+        try {
+          FirebaseMessaging messaging = FirebaseMessaging.instance;
+          String? token = await messaging.getToken();
 
-      await settingsService.updateStoreSettings(
-        widget.currentUser.ownerUid ?? widget.currentUser.uid,
+          if (token != null) {
+            if (_receivePaymentNotification) {
+              NotificationSettings settings = await messaging.requestPermission(
+                alert: true,
+                badge: true,
+                sound: true,
+              );
+
+              if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+                await _settingsService.updateStoreSettings(
+                  storeId,
+                  {'fcmTokens': FieldValue.arrayUnion([token])},
+                );
+              } else {
+                setState(() => _receivePaymentNotification = false);
+                await prefs.setBool('device_notify_enabled', false);
+
+                await _settingsService.updateStoreSettings(
+                  storeId,
+                  {'fcmTokens': FieldValue.arrayRemove([token])},
+                );
+
+                ToastService().show(
+                    message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.",
+                    type: ToastType.warning);
+              }
+            } else {
+              await _settingsService.updateStoreSettings(
+                storeId,
+                {'fcmTokens': FieldValue.arrayRemove([token])},
+              );
+            }
+          }
+        } catch (e) {
+          debugPrint("Lỗi FCM trên thiết bị này: $e");
+        }
+      }
+
+      // 4. Lưu Store Settings (Gộp thông tin cửa hàng và cài đặt in)
+      await _settingsService.updateStoreSettings(
+        storeId,
         {
+          // Thông tin chung
+          'storeName': _storeNameController.text.trim(),
+          'storePhone': _storePhoneController.text.trim(),
+          'storeAddress': _storeAddressController.text.trim(),
+          if (_isThisDeviceTheServer) 'serverListenMode': _serverListenModeOnDevice,
+
+          // Cài đặt in ấn
           'printBillAfterPayment': _printBillAfterPayment,
           'notifyKitchenAfterPayment': _notifyKitchenAfterPayment,
           'allowProvisionalBill': _allowProvisionalBill,
@@ -299,6 +305,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         },
       );
 
+      // 5. Lưu cấu hình máy in (Giữ nguyên code cũ)
       final List<Map<String, dynamic>> listToSave = _printerAssignments.values
           .where((p) => p != null)
           .map((p) => p!.toJson())
@@ -307,19 +314,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       final newPrinterConfig = _printerAssignments.values
           .where((p) => p != null)
-          .cast<ConfiguredPrinter>() // Ép kiểu về non-nullable
+          .cast<ConfiguredPrinter>()
           .toList();
 
       PrintQueueService().updateLocalConfig(newPrinterConfig);
 
       ToastService().show(message: "Đã lưu cài đặt!", type: ToastType.success);
+
+      // 6. Khởi động/Tắt Server in (Giữ nguyên code cũ)
       if (_isThisDeviceTheServer) {
         await CloudPrintService().startListener(
             widget.currentUser.storeId, _serverListenModeOnDevice);
       } else {
         await CloudPrintService().stopListener();
       }
+
       if (mounted) Navigator.of(context).pop(true);
+
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -724,15 +735,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildPrinterConnectionContent() {
+    final bool isOrderAccount = widget.currentUser.role == 'order';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionTitle('Kết nối & Thiết bị'),
+        _buildSectionTitle('Kết nối máy in'),
         ListTile(
           leading: const Icon(Icons.lan_outlined),
           title: const Text('IP của thiết bị này'),
           subtitle: Text(_deviceIp),
         ),
+        if (!isOrderAccount)
         SwitchListTile(
           title: const Text('Kích hoạt chế độ máy chủ'),
           subtitle: const Text('Bật để nhận lệnh in từ các thiết bị khác.'),

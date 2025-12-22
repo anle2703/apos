@@ -289,7 +289,7 @@ class RetailSalesLedgerTabState extends State<RetailSalesLedgerTab>
   Future<void> _loadSettingsAndFetchData() async {
     final settingsService = SettingsService();
     final firestoreService = FirestoreService();
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
     bool isFirstLoad = true;
 
     try {

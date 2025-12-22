@@ -62,9 +62,8 @@ class _VnptEInvoiceSettingsScreenState
   Future<void> _loadSettings() async {
     setState(() => _isLoading = true);
     try {
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-
-      final config = await _vnptService.getVnptConfig(ownerUid);
+      final storeId = widget.currentUser.storeId;
+      final config = await _vnptService.getVnptConfig(storeId);
       if (config != null) {
         _portalUrlController.text = config.portalUrl;
         _appIdController.text = config.appId;
@@ -98,8 +97,8 @@ class _VnptEInvoiceSettingsScreenState
         autoIssueOnPayment: _autoIssueOnPayment,
       );
 
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      await _vnptService.saveVnptConfig(config, ownerUid);
+      final storeId = widget.currentUser.storeId;
+      await _vnptService.saveVnptConfig(config, storeId);
 
       ToastService().show(message: "Đã lưu cấu hình VNPT", type: ToastType.success);
       if (mounted) Navigator.of(context).pop();

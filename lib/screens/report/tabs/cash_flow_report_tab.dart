@@ -115,8 +115,8 @@ class CashFlowReportTabState extends State<CashFlowReportTab> {
 
   Future<void> _loadSettingsAndFetchData() async {
     final settingsService = SettingsService();
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-    bool isFirstLoad = true; // Cờ để chỉ fetch dữ liệu lần đầu
+    final settingsId = widget.currentUser.storeId;
+    bool isFirstLoad = true;
 
     _settingsSub = settingsService.watchStoreSettings(settingsId).listen((settings) {
       if (!mounted) return;

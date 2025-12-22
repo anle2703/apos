@@ -55,11 +55,11 @@ class VnpayEInvoiceService implements EInvoiceProvider {
     return "https://portal.vnpayinvoice.vn/";
   }
 
-  Future<void> saveVnpayConfig(VnpayConfig config, String ownerUid) async {
+  Future<void> saveVnpayConfig(VnpayConfig config, String storeId) async {
     try {
       final encodedSecret = base64Encode(utf8.encode(config.clientSecret));
-      final dataToSave = {
-        'provider': 'vnpay',
+
+      await _db.collection(_configCollection).doc(storeId).set({
         'clientId': config.clientId,
         'clientSecret': encodedSecret,
         'sellerTaxCode': config.sellerTaxCode,
@@ -67,50 +67,51 @@ class VnpayEInvoiceService implements EInvoiceProvider {
         'autoIssueOnPayment': config.autoIssueOnPayment,
         'paymentMethodCode': config.paymentMethodCode,
         'isSandbox': config.isSandbox,
-      };
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
-      await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
-      await _db.collection(_mainConfigCollection).doc(ownerUid).set({
-        'activeProvider': 'vnpay'
+      await _db.collection(_mainConfigCollection).doc(storeId).set({
+        'activeProvider': 'vnpay',
+        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
     } catch (e) {
-      debugPrint("Lỗi lưu cấu hình VNPay: $e");
-      throw Exception('Lỗi lưu cấu hình.');
+      debugPrint("Lỗi khi lưu cấu hình VNPAY: $e");
+      throw Exception('Không thể lưu cấu hình VNPAY.');
     }
   }
 
-  Future<VnpayConfig?> getVnpayConfig(String ownerUid) async {
+  Future<VnpayConfig?> getVnpayConfig(String storeId) async {
     try {
-      final doc = await _db.collection(_configCollection).doc(ownerUid).get();
-      if (!doc.exists) return null;
+      final doc = await _db.collection(_configCollection).doc(storeId).get();
 
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['provider'] != 'vnpay') return null;
-
-      String decodedSecret;
-      try {
-        decodedSecret = utf8.decode(base64Decode(data['clientSecret'] ?? ''));
-      } catch (e) {
-        decodedSecret = '';
+      // 1. Chưa có config
+      if (!doc.exists || doc.data() == null) {
+        return null;
       }
 
+      final data = doc.data()!;
+
+      // 2. Có config
       return VnpayConfig(
         clientId: data['clientId'] ?? '',
-        clientSecret: decodedSecret,
+        clientSecret: data['clientSecret'] != null ? utf8.decode(base64Decode(data['clientSecret'])) : '',
         sellerTaxCode: data['sellerTaxCode'] ?? '',
         invoiceSymbol: data['invoiceSymbol'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
-        paymentMethodCode: data['paymentMethodCode'] ?? 'TM/CK',
+        paymentMethodCode: data['paymentMethodCode'] ?? "TM/CK",
         isSandbox: data['isSandbox'] ?? false,
       );
     } catch (e) {
-      return null;
+      // 3. Lỗi hệ thống
+      debugPrint("Lỗi SYSTEM lấy config VNPAY: $e");
+      throw Exception('Lỗi hệ thống khi tải VNPAY: $e');
     }
   }
 
   @override
-  Future<EInvoiceConfigStatus> getConfigStatus(String ownerUid) async {
-    final config = await getVnpayConfig(ownerUid);
+  Future<EInvoiceConfigStatus> getConfigStatus(String storeId) async {
+    final config = await getVnpayConfig(storeId);
     if (config == null || config.clientId.isEmpty) {
       return EInvoiceConfigStatus(isConfigured: false);
     }
@@ -144,7 +145,7 @@ class VnpayEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<String?> _getValidToken(String ownerUid, VnpayConfig config) async {
+  Future<String?> _getValidToken(String storeId, VnpayConfig config) async {
     final bool useSandbox = _shouldUseSandbox(config);
     return await loginToVnpay(config.clientId, config.clientSecret, useSandbox);
   }
@@ -186,17 +187,15 @@ class VnpayEInvoiceService implements EInvoiceProvider {
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
       CustomerModel? customer,
-      String ownerUid) async {
+      String storeId) async {
     try {
-      final config = (await getVnpayConfig(ownerUid))!;
+      final config = (await getVnpayConfig(storeId))!;
       final bool useSandbox = _shouldUseSandbox(config);
 
-      final token = await _getValidToken(ownerUid, config);
+      final token = await _getValidToken(storeId, config);
       if (token == null) {
         throw Exception('Lỗi xác thực. Kiểm tra lại Client ID/Secret.');
       }
-
-      final String storeId = billData['storeId'] ?? '';
 
       // 1. Xác định loại hóa đơn
       final String determinedType = await _determineInvoiceTypeFromSettings(storeId);
@@ -250,7 +249,7 @@ class VnpayEInvoiceService implements EInvoiceProvider {
   }
 
   @override
-  Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
+  Future<void> sendEmail(String storeId, Map<String, dynamic> rawResponse) async {
     return Future.value();
   }
 

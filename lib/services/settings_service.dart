@@ -4,39 +4,53 @@ import '../models/store_settings_model.dart';
 class SettingsService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  Stream<StoreSettings> watchStoreSettings(String userId) {
-    return _db.collection('users').doc(userId).snapshots().map((snap) {
-      return StoreSettings.fromMap(snap.data());
+  // Đối tượng mặc định để dùng khi không có dữ liệu hoặc lỗi
+  // Bạn có thể điều chỉnh true/false tùy theo logic mặc định của app
+  static const _defaultSettings = StoreSettings(
+    printBillAfterPayment: true,
+    allowProvisionalBill: true,
+    notifyKitchenAfterPayment: false,
+    showPricesOnProvisional: false,
+  );
+
+  Stream<StoreSettings> watchStoreSettings(String storeId) {
+    if (storeId.isEmpty) {
+      return Stream.value(_defaultSettings);
+    }
+
+    return _db.collection('store_settings').doc(storeId).snapshots().map((snap) {
+      if (!snap.exists || snap.data() == null) {
+        return _defaultSettings;
+      }
+      return StoreSettings.fromMap(snap.data()!);
     });
   }
 
-  Future<void> updateStoreSettings(String userId, Map<String, dynamic> partial) async {
-    if (userId.isEmpty) throw ArgumentError("userId không hợp lệ");
-    await _db.collection('users').doc(userId).set({
+  Future<void> updateStoreSettings(String storeId, Map<String, dynamic> partial) async {
+    if (storeId.isEmpty) throw ArgumentError("storeId không hợp lệ");
+    await _db.collection('store_settings').doc(storeId).set({
       ...partial,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
-
-  Future<void> ensureDefaults(String storeId) async {
-    final ref = _db.doc('stores/$storeId/settings');
-    final snap = await ref.get();
-    if (!snap.exists) {
-      await ref.set(StoreSettings(
+  Future<StoreSettings> getStoreSettings(String storeId) async {
+    if (storeId.isEmpty) {
+      return StoreSettings.fromMap(null);
+    }
+    try {
+      final doc = await _db.collection('store_settings').doc(storeId).get();
+      // Nếu doc không tồn tại hoặc data null, fromMap sẽ tự xử lý (nhờ code trong StoreSettings)
+      // Nhưng ta cần đảm bảo không crash khi đọc doc
+      return StoreSettings.fromMap(doc.data());
+    } catch (e) {
+      print("Lỗi đọc StoreSettings: $e");
+      return const StoreSettings(
         printBillAfterPayment: true,
         allowProvisionalBill: true,
         notifyKitchenAfterPayment: false,
         showPricesOnProvisional: false,
-      ).toMap());
+      );
     }
-  }
-
-  Future<StoreSettings> getStoreSettings(String userId) async {
-    if (userId.isEmpty) {
-      return StoreSettings.fromMap(null);
-    }
-    final doc = await _db.collection('users').doc(userId).get();
-    return StoreSettings.fromMap(doc.data());
   }
 }

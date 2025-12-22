@@ -198,7 +198,7 @@ class _CustomerSearchDialogState extends State<CustomerSearchDialog> {
                   children: [
                     Icon(Icons.keyboard_outlined, size: 48, color: Colors.grey),
                     SizedBox(height: 12),
-                    Text('Nhập từ khóa tên KH hoặc 3 số cuối SĐT để tìm kiếm...', style: TextStyle(color: Colors.grey)),
+                    Text('Tìm theo tên hoặc 3 số cuối SĐT của khách hàng.', style: TextStyle(color: Colors.grey)),
                   ],
                 ),
               )

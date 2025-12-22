@@ -7,6 +7,22 @@ plugins {
     id "com.google.gms.google-services"
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
+
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
+}
+
 android {
     namespace "com.aposcompany.apos"
     compileSdk 36
@@ -15,7 +31,11 @@ android {
     // Ép phiên bản activity xuống 1.9.0 để sửa lỗi conflict Gradle
     configurations.all {
         resolutionStrategy {
-            force 'androidx.activity:activity:1.9.0'
+            // Ép dùng phiên bản cũ hơn để tương thích với Gradle hiện tại
+            force 'androidx.browser:browser:1.8.0'      // Sửa lỗi browser:1.9.0
+            force 'androidx.core:core-ktx:1.13.1'       // Sửa lỗi core-ktx:1.17.0
+            force 'androidx.core:core:1.13.1'           // Sửa lỗi core:1.17.0
+            force 'androidx.activity:activity:1.9.0'    // Giữ lại cái cũ của bạn nếu cần
             force 'androidx.activity:activity-ktx:1.9.0'
         }
     }
@@ -25,8 +45,8 @@ android {
         applicationId "com.aposcompany.apos"
         minSdkVersion flutter.minSdkVersion
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
         multiDexEnabled true
     }
 

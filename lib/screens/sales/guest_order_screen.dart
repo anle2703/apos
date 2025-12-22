@@ -24,14 +24,14 @@ import '../../models/quick_note_model.dart';
 import '../../theme/string_extensions.dart';
 
 class GuestOrderScreen extends StatefulWidget {
-  final UserModel currentUser;
+  final UserModel? currentUser;
   final TableModel table;
   final OrderModel? initialOrder;
   final StoreSettings settings;
 
   const GuestOrderScreen({
     super.key,
-    required this.currentUser,
+    this.currentUser,
     required this.table,
     this.initialOrder,
     required this.settings,
@@ -97,7 +97,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         .snapshots();
 
     _productsStream =
-        _firestoreService.getAllProductsStream(widget.currentUser.storeId);
+        _firestoreService.getAllProductsStream(widget.table.storeId);
 
     _searchController.addListener(() {
       if (mounted) {
@@ -144,7 +144,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   Future<void> _listenQuickNotes() async {
     _quickNotesSub = _firestoreService
-        .getQuickNotes(widget.currentUser.storeId)
+        .getQuickNotes(widget.table.storeId)
         .listen((notes) {
       if (mounted) {
         setState(() {
@@ -428,10 +428,10 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           'startTime': Timestamp.now(),
           'items': itemsToSave,
           'totalAmount': result.total,
-          'storeId': widget.currentUser.storeId,
+          'storeId': widget.table.storeId,
           'createdAt': FieldValue.serverTimestamp(),
-          'createdByUid': widget.currentUser.uid,
-          'createdByName': widget.currentUser.name ?? 'Guest',
+          'createdByUid': 'guest_order_qr',
+          'createdByName': 'Khách Order QR',
           'numberOfCustomers': 1,
           'version': currentVersion + 1,
           'kitchenPrinted': false,
@@ -585,7 +585,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
         return FutureBuilder<List<ProductGroupModel>>(
           future:
-              _firestoreService.getProductGroups(widget.currentUser.storeId),
+              _firestoreService.getProductGroups(widget.table.storeId),
           builder: (context, groupSnapshot) {
             if (groupSnapshot.hasData) {
               _menuGroups = groupSnapshot.data!
@@ -953,7 +953,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         selectedUnit: selectedUnit,
         price: priceForUnit,
         toppings: selectedToppings,
-        addedBy: widget.currentUser.name ?? 'Guest',
+        addedBy: 'Khách hàng',
         addedAt: Timestamp.now(),
       );
     } else {
@@ -961,7 +961,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         product: product,
         price: product.sellPrice,
         selectedUnit: product.unit ?? '',
-        addedBy: widget.currentUser.name ?? 'Guest',
+        addedBy: 'Khách hàng',
         addedAt: Timestamp.now(),
       );
     }
@@ -1022,7 +1022,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           : _scheduleTimeController.text.trim(),
       'note': _noteController.text.trim(),
       'numberOfCustomers':
-          (type == 'schedule' && widget.currentUser.businessType == "fnb")
+          (type == 'schedule' && widget.settings.businessType == "fnb")
               ? numberOfCustomers
               : 1,
     };
@@ -1094,7 +1094,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
     try {
       final webOrderData = {
-        'storeId': widget.currentUser.storeId,
+        'storeId': widget.table.storeId,
         'status': 'pending',
         'type': type,
         'customerInfo': customerInfo ?? {'name': 'Khách tại bàn'},
@@ -1288,7 +1288,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                                         ? 'Vui lòng chọn thời gian'
                                         : null,
                               ),
-                              if (widget.currentUser.businessType == "fnb") ...[
+                              if (widget.settings.businessType == "fnb") ...[
                                 const SizedBox(height: 16),
                                 CustomTextFormField(
                                   controller: _numberOfCustomersController,

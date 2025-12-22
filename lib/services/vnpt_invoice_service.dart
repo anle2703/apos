@@ -35,24 +35,26 @@ class VnptEInvoiceService implements EInvoiceProvider {
 
   final _dio = Dio();
 
-  Future<void> saveVnptConfig(VnptConfig config, String ownerUid) async {
+  Future<void> saveVnptConfig(VnptConfig config, String storeId) async {
     try {
       final encodedPassword = base64Encode(utf8.encode(config.password));
-      final dataToSave = {
-        'provider': 'vnpt',
+      final encodedAppKey = base64Encode(utf8.encode(config.appKey));
+
+      await _db.collection(_configCollection).doc(storeId).set({
         'portalUrl': config.portalUrl,
         'appId': config.appId,
-        'appKey': config.appKey,
+        'appKey': encodedAppKey,
         'username': config.username,
         'password': encodedPassword,
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
-      };
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
-      await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
-      await _db.collection(_mainConfigCollection).doc(ownerUid).set({
-        'activeProvider': 'vnpt'
+      await _db.collection(_mainConfigCollection).doc(storeId).set({
+        'activeProvider': 'vnpt',
+        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
     } catch (e) {
@@ -61,40 +63,39 @@ class VnptEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<VnptConfig?> getVnptConfig(String ownerUid) async {
+  Future<VnptConfig?> getVnptConfig(String storeId) async {
     try {
-      final doc = await _db.collection(_configCollection).doc(ownerUid).get();
-      if (!doc.exists) return null;
+      final doc = await _db.collection(_configCollection).doc(storeId).get();
 
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['provider'] != 'vnpt') return null;
-
-      String decodedPassword;
-      try {
-        decodedPassword = utf8.decode(base64Decode(data['password'] ?? ''));
-      } catch (e) {
-        decodedPassword = '';
+      // 1. NẾU CHƯA CÓ DỮ LIỆU -> Trả về null để UI biết là "Chưa cấu hình"
+      // Đây không phải lỗi, đây là logic bình thường.
+      if (!doc.exists || doc.data() == null) {
+        return null;
       }
 
+      final data = doc.data()!;
+
+      // 2. NẾU CÓ DỮ LIỆU -> Parse cẩn thận, tránh null safety
       return VnptConfig(
         portalUrl: data['portalUrl'] ?? '',
         appId: data['appId'] ?? '',
-        appKey: data['appKey'] ?? '',
+        appKey: data['appKey'] != null ? utf8.decode(base64Decode(data['appKey'])) : '',
         username: data['username'] ?? '',
-        password: decodedPassword,
+        password: data['password'] != null ? utf8.decode(base64Decode(data['password'])) : '',
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
       );
     } catch (e) {
-      debugPrint ("Lỗi khi tải cấu hình VNPT: $e");
-      throw Exception('Không thể tải cấu hình VNPT.');
+      // 3. NẾU CÓ LỖI THỰC SỰ (Mạng, Parse sai base64...) -> Báo lỗi ra
+      debugPrint("Lỗi SYSTEM lấy config VNPT: $e");
+      throw Exception('Lỗi hệ thống khi tải VNPT: $e');
     }
   }
 
   @override
-  Future<EInvoiceConfigStatus> getConfigStatus(String ownerUid) async {
-    final config = await getVnptConfig(ownerUid);
+  Future<EInvoiceConfigStatus> getConfigStatus(String storeId) async {
+    final config = await getVnptConfig(storeId);
     if (config == null || config.username.isEmpty) {
       return EInvoiceConfigStatus(isConfigured: false);
     }
@@ -131,8 +132,8 @@ class VnptEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<String?> _getValidToken(String ownerUid) async {
-    final config = await getVnptConfig(ownerUid);
+  Future<String?> _getValidToken(String storeId) async {
+    final config = await getVnptConfig(storeId);
     if (config == null || config.username.isEmpty) {
       throw Exception('Chưa cấu hình VNPT HĐĐT.');
     }
@@ -140,7 +141,6 @@ class VnptEInvoiceService implements EInvoiceProvider {
         config.portalUrl, config.appId, config.appKey, config.username, config.password);
   }
 
-  // --- LOGIC XÁC ĐỊNH LOẠI HÓA ĐƠN ---
   Future<String> _determineInvoiceTypeFromSettings(String storeId) async {
     try {
       final docSnapshot = await _db.collection(_taxSettingsCollection).doc(storeId).get();
@@ -177,15 +177,14 @@ class VnptEInvoiceService implements EInvoiceProvider {
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
       CustomerModel? customer,
-      String ownerUid) async {
+      String storeId) async {
     try {
-      final token = await _getValidToken(ownerUid);
+      final token = await _getValidToken(storeId);
       if (token == null) {
         throw Exception('Không thể lấy token xác thực HĐĐT.');
       }
 
-      final config = (await getVnptConfig(ownerUid))!;
-      final String storeId = billData['storeId'] ?? '';
+      final config = (await getVnptConfig(storeId))!;
 
       // Xác định loại hóa đơn
       final String determinedType = await _determineInvoiceTypeFromSettings(storeId);
@@ -231,14 +230,14 @@ class VnptEInvoiceService implements EInvoiceProvider {
   }
 
   @override
-  Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
+  Future<void> sendEmail(String storeId, Map<String, dynamic> rawResponse) async {
     final String? fkey = rawResponse['fkey'] as String?;
     final String? email = rawResponse['email_nguoimua'] as String?;
 
     if (fkey == null || email == null || email.isEmpty) return;
 
-    final token = await _getValidToken(ownerUid);
-    final config = (await getVnptConfig(ownerUid))!;
+    final token = await _getValidToken(storeId);
+    final config = (await getVnptConfig(storeId))!;
 
     try {
       final String apiUrl = "${config.portalUrl}/business/api/invoice/send-email-invoice";
@@ -257,7 +256,6 @@ class VnptEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  // --- LOGIC PHÂN BỔ CHIẾT KHẤU & TÍNH TOÁN ---
   Map<String, dynamic> _buildPayloadWithAllocation(
       Map<String, dynamic> billData,
       CustomerModel? customer,

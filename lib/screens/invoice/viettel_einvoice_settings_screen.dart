@@ -57,10 +57,8 @@ class _ViettelEInvoiceSettingsScreenState
   Future<void> _loadSettings() async {
     setState(() => _isLoading = true);
     try {
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-
-      // Đọc cấu hình Viettel từ Service
-      final config = await _viettelService.getViettelConfig(ownerUid);
+      final storeId = widget.currentUser.storeId;
+      final config = await _viettelService.getViettelConfig(storeId);
 
       if (config != null) {
         _usernameController.text = config.username;
@@ -98,8 +96,8 @@ class _ViettelEInvoiceSettingsScreenState
         // Đã xóa dòng invoiceType gây lỗi
       );
 
-      final ownerUid = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-      await _viettelService.saveViettelConfig(config, ownerUid);
+      final storeId = widget.currentUser.storeId;
+      await _viettelService.saveViettelConfig(config, storeId);
 
       ToastService().show(message: "Đã lưu cấu hình Viettel", type: ToastType.success);
 

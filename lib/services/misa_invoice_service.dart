@@ -36,23 +36,23 @@ class MisaEInvoiceService implements EInvoiceProvider {
   static const String _misaBaseUrl = 'https://api.meinvoice.vn';
   static const String _misaAppId = '4bfc97cc-80e6-41d9-9a9b-9bbe71069a3d';
 
-  Future<void> saveMisaConfig(MisaConfig config, String ownerUid) async {
+  Future<void> saveMisaConfig(MisaConfig config, String storeId) async {
     try {
       final encodedPassword = base64Encode(utf8.encode(config.password));
-      final dataToSave = {
-        'provider': 'misa',
+
+      await _db.collection(_configCollection).doc(storeId).set({
         'taxCode': config.taxCode,
         'username': config.username,
         'password': encodedPassword,
         'templateCode': config.templateCode,
         'invoiceSeries': config.invoiceSeries,
         'autoIssueOnPayment': config.autoIssueOnPayment,
-        'appId': _misaAppId,
-      };
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
-      await _db.collection(_configCollection).doc(ownerUid).set(dataToSave);
-      await _db.collection(_mainConfigCollection).doc(ownerUid).set({
-        'activeProvider': 'misa'
+      await _db.collection(_mainConfigCollection).doc(storeId).set({
+        'activeProvider': 'misa',
+        'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
     } catch (e) {
@@ -61,38 +61,36 @@ class MisaEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<MisaConfig?> getMisaConfig(String ownerUid) async {
+  Future<MisaConfig?> getMisaConfig(String storeId) async {
     try {
-      final doc = await _db.collection(_configCollection).doc(ownerUid).get();
-      if (!doc.exists) return null;
+      final doc = await _db.collection(_configCollection).doc(storeId).get();
 
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['provider'] != 'misa') return null;
-
-      String decodedPassword;
-      try {
-        decodedPassword = utf8.decode(base64Decode(data['password'] ?? ''));
-      } catch (e) {
-        decodedPassword = '';
+      // 1. Chưa có config -> Return null (để hiện form trống)
+      if (!doc.exists || doc.data() == null) {
+        return null;
       }
 
+      final data = doc.data()!;
+
+      // 2. Có config -> Parse
       return MisaConfig(
         taxCode: data['taxCode'] ?? '',
         username: data['username'] ?? '',
-        password: decodedPassword,
+        password: data['password'] != null ? utf8.decode(base64Decode(data['password'])) : '',
         templateCode: data['templateCode'] ?? '',
         invoiceSeries: data['invoiceSeries'] ?? '',
         autoIssueOnPayment: data['autoIssueOnPayment'] ?? false,
       );
     } catch (e) {
-      debugPrint ("Lỗi khi tải cấu hình MISA: $e");
-      throw Exception('Không thể tải cấu hình MISA.');
+      // 3. Lỗi hệ thống -> Throw
+      debugPrint("Lỗi SYSTEM lấy config MISA: $e");
+      throw Exception('Lỗi hệ thống khi tải MISA: $e');
     }
   }
 
   @override
-  Future<EInvoiceConfigStatus> getConfigStatus(String ownerUid) async {
-    final config = await getMisaConfig(ownerUid);
+  Future<EInvoiceConfigStatus> getConfigStatus(String storeId) async {
+    final config = await getMisaConfig(storeId);
     if (config == null || config.username.isEmpty) {
       return EInvoiceConfigStatus(isConfigured: false);
     }
@@ -132,15 +130,14 @@ class MisaEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  Future<String?> _getValidToken(String ownerUid) async {
-    final config = await getMisaConfig(ownerUid);
+  Future<String?> _getValidToken(String storeId) async {
+    final config = await getMisaConfig(storeId);
     if (config == null || config.username.isEmpty) {
       throw Exception('Chưa cấu hình MISA HĐĐT.');
     }
     return await loginToMisa(config.taxCode, config.username, config.password);
   }
 
-  // --- LOGIC XÁC ĐỊNH LOẠI HÓA ĐƠN ---
   Future<String> _determineInvoiceTypeFromSettings(String storeId) async {
     try {
       final docSnapshot = await _db.collection(_taxSettingsCollection).doc(storeId).get();
@@ -177,17 +174,15 @@ class MisaEInvoiceService implements EInvoiceProvider {
   Future<EInvoiceResult> createInvoice(
       Map<String, dynamic> billData,
       CustomerModel? customer,
-      String ownerUid) async {
+      String storeId) async {
     try {
-      final token = await _getValidToken(ownerUid);
+      final token = await _getValidToken(storeId);
       if (token == null) {
         throw Exception('Không thể lấy token xác thực MISA.');
       }
 
-      final config = (await getMisaConfig(ownerUid))!;
+      final config = (await getMisaConfig(storeId))!;
       final transactionId = _uuid.v4();
-
-      final String storeId = billData['storeId'] ?? '';
 
       // Xác định loại hóa đơn
       final String determinedType = await _determineInvoiceTypeFromSettings(storeId);
@@ -244,12 +239,12 @@ class MisaEInvoiceService implements EInvoiceProvider {
   }
 
   @override
-  Future<void> sendEmail(String ownerUid, Map<String, dynamic> rawResponse) async {
+  Future<void> sendEmail(String storeId, Map<String, dynamic> rawResponse) async {
     final String? transactionId = rawResponse['TransactionID'] as String?;
     if (transactionId == null) return;
 
-    final token = await _getValidToken(ownerUid);
-    final config = (await getMisaConfig(ownerUid))!;
+    final token = await _getValidToken(storeId);
+    final config = (await getMisaConfig(storeId))!;
 
     try {
       final String apiUrl = "$_misaBaseUrl/api/integration/invoice/send-email";
@@ -270,7 +265,6 @@ class MisaEInvoiceService implements EInvoiceProvider {
     }
   }
 
-  // --- LOGIC PHÂN BỔ CHIẾT KHẤU ĐỂ KHỚP THUẾ ---
   Map<String, dynamic> _buildPayloadWithAllocation(
       Map<String, dynamic> billData,
       CustomerModel? customer,

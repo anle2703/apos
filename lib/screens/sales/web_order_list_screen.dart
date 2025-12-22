@@ -31,6 +31,7 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
+import '../../tables/qr_order_management_screen.dart';
 
 enum WebOrderStatusFilter { all, pending, confirmed, completed, cancelled }
 
@@ -105,7 +106,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   }
 
   void _loadQrSettings() {
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
+    final settingsId = widget.currentUser.storeId;
     SettingsService().watchStoreSettings(settingsId).listen((settings) {
       if (mounted) {
         setState(() {
@@ -241,9 +242,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                                         setStateDialog(
                                             () => isProcessing = true);
                                         try {
-                                          final settingsId =
-                                              widget.currentUser.ownerUid ??
-                                                  widget.currentUser.uid;
+                                          final settingsId = widget.currentUser.storeId;
                                           final key = isShip
                                               ? 'enableShip'
                                               : 'enableBooking';
@@ -288,7 +287,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Mã QR Online (Khách tự đặt)",
+                  const Text("Mã QR Online",
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
@@ -567,8 +566,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   Future<void> _loadSettingsAndFetchData() async {
     setState(() => _isLoadingFilter = true);
     final settingsService = SettingsService();
-    final settingsId = widget.currentUser.ownerUid ?? widget.currentUser.uid;
-
+    final settingsId = widget.currentUser.storeId;
     try {
       final settings =
           await settingsService.watchStoreSettings(settingsId).first;
@@ -1318,13 +1316,27 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   List<Widget> _buildFilterActions() {
     return [
-      if (widget.currentUser.businessType == 'retail')
-        IconButton(
-          icon: const Icon(Icons.qr_code_2,
-              color: AppTheme.primaryColor, size: 30),
-          tooltip: 'Mã QR Online',
-          onPressed: _showQrMenu,
-        ),
+      IconButton(
+        icon: const Icon(Icons.qr_code_2,
+            color: AppTheme.primaryColor, size: 30),
+        tooltip: 'Mã QR Online',
+        onPressed: () {
+          // Kiểm tra loại hình kinh doanh để xử lý
+          if (widget.currentUser.businessType == 'fnb') {
+            // Nếu là FnB -> Mở màn hình Quản lý QR Bàn
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => QrOrderManagementScreen(
+                  currentUser: widget.currentUser,
+                ),
+              ),
+            );
+          } else {
+            // Nếu là Retail (hoặc khác) -> Mở menu QR Ship/Booking như cũ
+            _showQrMenu();
+          }
+        },
+      ),
       const SizedBox(width: 8),
       IconButton(
         icon: const Icon(Icons.add_circle_outlined,

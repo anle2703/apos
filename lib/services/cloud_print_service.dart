@@ -148,23 +148,20 @@ class CloudPrintService {
               if (jobType == 'kitchen') {
                 debugPrint(">>> [DEBUG SERVER] Bắt đầu kiểm tra in tem tự động...");
 
-                final ownerQuery = await FirebaseFirestore.instance
-                    .collection('users')
-                    .where('storeId', isEqualTo: storeId)
-                    .where('role', isEqualTo: 'owner')
-                    .limit(1)
+                final settingsDoc = await FirebaseFirestore.instance
+                    .collection('store_settings')
+                    .doc(storeId)
                     .get();
 
                 bool shouldPrintLabel = false;
                 double w = 50.0;
                 double h = 30.0;
 
-                if (ownerQuery.docs.isNotEmpty) {
-                  final sData = ownerQuery.docs.first.data();
-                  // Đọc cài đặt từ user data
-                  shouldPrintLabel = sData['printLabelOnKitchen'] ?? false;
-                  w = (sData['labelWidth'] as num?)?.toDouble() ?? 50.0;
-                  h = (sData['labelHeight'] as num?)?.toDouble() ?? 30.0;
+                if (settingsDoc.exists) {
+                  final sData = settingsDoc.data();
+                  shouldPrintLabel = sData?['printLabelOnKitchen'] ?? false;
+                  w = (sData?['labelWidth'] as num?)?.toDouble() ?? 50.0;
+                  h = (sData?['labelHeight'] as num?)?.toDouble() ?? 30.0;
                 }
 
                 // Nếu bật in tem -> Thực thi

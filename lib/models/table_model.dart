@@ -30,7 +30,7 @@ class TableModel {
       id: doc.id,
       tableName: data['tableName'] ?? '',
       tableGroup: data['tableGroup'] ?? '',
-      stt: data['stt'] ?? 0,
+      stt: (data['stt'] as num?)?.toInt() ?? 0,
       serviceId: data['serviceId'] ?? '',
       storeId: data['storeId'] ?? '',
       qrToken: data['qrToken'] as String?,
