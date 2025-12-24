@@ -37,15 +37,7 @@ enum WebOrderStatusFilter { all, pending, confirmed, completed, cancelled }
 
 enum WebOrderTypeFilter { all, atTable, ship, schedule }
 
-enum TimeRange {
-  today,
-  yesterday,
-  thisWeek,
-  lastWeek,
-  thisMonth,
-  lastMonth,
-  custom
-}
+enum TimeRange { today, yesterday, thisWeek, lastWeek, thisMonth, lastMonth, custom }
 
 class WebOrderListScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -119,11 +111,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   Future<void> _saveQrToFile(GlobalKey qrKey, String fileName) async {
     try {
-      RenderRepaintBoundary boundary =
-          qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      RenderRepaintBoundary boundary = qrKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
       ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
       Uint8List pngBytes = byteData.buffer.asUint8List();
 
@@ -147,8 +137,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   Future<void> _showQrDetailDialog(String type) async {
     final bool isShip = type == 'ship';
     final String title = isShip ? "QR Đặt Giao Hàng" : "QR Đặt Lịch Hẹn";
-    final String qrUrl =
-        '$_qrOrderBaseUrl?store=${widget.currentUser.storeId}&type=$type';
+    final String qrUrl = '$_qrOrderBaseUrl?store=${widget.currentUser.storeId}&type=$type';
     final GlobalKey qrKey = GlobalKey();
 
     bool localEnabled = isShip ? _enableShipQr : _enableBookingQr;
@@ -163,9 +152,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 18)),
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 16),
                   if (localEnabled)
                     SizedBox(
@@ -192,11 +179,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.visibility_off,
-                                size: 50, color: Colors.grey),
+                            Icon(Icons.visibility_off, size: 50, color: Colors.grey),
                             SizedBox(height: 8),
-                            Text("QR đang tắt",
-                                style: TextStyle(color: Colors.grey)),
+                            Text("QR đang tắt", style: TextStyle(color: Colors.grey)),
                           ],
                         ),
                       ),
@@ -209,46 +194,32 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                         onPressed: (!localEnabled || isProcessing)
                             ? null
                             : () {
-                                _saveQrToFile(
-                                    qrKey, "QR_${isShip ? 'Ship' : 'Booking'}");
+                                _saveQrToFile(qrKey, "QR_${isShip ? 'Ship' : 'Booking'}");
                               },
                         icon: const Icon(Icons.save_alt, size: 18),
                         label: const Text("Lưu ảnh"),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryColor,
-                            foregroundColor: Colors.white),
+                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white),
                       ),
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         child: Row(
                           children: [
                             Text(localEnabled ? "Đang Bật" : "Đang Tắt",
                                 style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: localEnabled
-                                        ? Colors.green
-                                        : Colors.grey)),
+                                    fontSize: 14, fontWeight: FontWeight.bold, color: localEnabled ? Colors.green : Colors.grey)),
                             Switch(
                                 value: localEnabled,
-                                activeTrackColor:
-                                    AppTheme.primaryColor.withAlpha(125),
+                                activeTrackColor: AppTheme.primaryColor.withAlpha(125),
                                 activeThumbColor: AppTheme.primaryColor,
                                 onChanged: isProcessing
                                     ? null
                                     : (val) async {
-                                        setStateDialog(
-                                            () => isProcessing = true);
+                                        setStateDialog(() => isProcessing = true);
                                         try {
                                           final settingsId = widget.currentUser.storeId;
-                                          final key = isShip
-                                              ? 'enableShip'
-                                              : 'enableBooking';
-                                          await SettingsService()
-                                              .updateStoreSettings(
-                                                  settingsId, {key: val});
+                                          final key = isShip ? 'enableShip' : 'enableBooking';
+                                          await SettingsService().updateStoreSettings(settingsId, {key: val});
 
                                           setStateDialog(() {
                                             localEnabled = val;
@@ -262,8 +233,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                                             }
                                           });
                                         } catch (e) {
-                                          setStateDialog(
-                                              () => isProcessing = false);
+                                          setStateDialog(() => isProcessing = false);
                                         }
                                       }),
                           ],
@@ -277,25 +247,21 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           });
         });
   }
+
   void _showQrMenu() {
     showModalBottomSheet(
         context: context,
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
         builder: (ctx) => Padding(
               padding: const EdgeInsets.symmetric(vertical: 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Mã QR Online",
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text("Mã QR Online", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
                   ListTile(
-                    leading: const Icon(Icons.local_shipping,
-                        color: Colors.orange, size: 30),
-                    title: const Text("QR Đặt Giao Hàng (Ship)",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    leading: const Icon(Icons.local_shipping, color: Colors.orange, size: 30),
+                    title: const Text("QR Đặt Giao Hàng (Ship)", style: TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: Text(_enableShipQr ? "Đang bật" : "Đang tắt"),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                     onTap: () {
@@ -305,10 +271,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                   ),
                   const Divider(height: 1, thickness: 0.5, color: Colors.grey),
                   ListTile(
-                    leading: const Icon(Icons.calendar_month,
-                        color: Colors.blue, size: 30),
-                    title: const Text("QR Đặt Lịch Hẹn (Booking)",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    leading: const Icon(Icons.calendar_month, color: Colors.blue, size: 30),
+                    title: const Text("QR Đặt Lịch Hẹn (Booking)", style: TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: Text(_enableBookingQr ? "Đang bật" : "Đang tắt"),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                     onTap: () {
@@ -340,13 +304,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     return null;
   }
 
-  Future<void> _syncCustomerToWebOrder(
-      String orderId, CustomerModel customer) async {
+  Future<void> _syncCustomerToWebOrder(String orderId, CustomerModel customer) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('web_orders')
-          .doc(orderId)
-          .update({
+      await FirebaseFirestore.instance.collection('web_orders').doc(orderId).update({
         'customerName': customer.name,
         'customerId': customer.id,
         'billing.first_name': customer.name,
@@ -362,8 +322,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     try {
       if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
         // 1. Tìm hoặc Tạo khách
-        CustomerModel? customer =
-            await _findCustomerByPhone(order.customerPhone);
+        CustomerModel? customer = await _findCustomerByPhone(order.customerPhone);
         if (customer == null) {
           if (!mounted) return;
           final newCustomer = await showDialog<CustomerModel>(
@@ -380,8 +339,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           );
 
           if (newCustomer == null) {
-            ToastService().show(
-                message: "Cần thông tin khách hàng.", type: ToastType.warning);
+            ToastService().show(message: "Cần thông tin khách hàng.", type: ToastType.warning);
             return;
           }
           customer = newCustomer;
@@ -418,13 +376,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           'isWebOrder': true,
         };
 
-        await _firestoreService
-            .getOrderReference(cloudOrderId)
-            .set(savedOrderData);
+        await _firestoreService.getOrderReference(cloudOrderId).set(savedOrderData);
 
-        ToastService().show(
-            message: 'Đã xác nhận & Lưu đơn (Khách: ${customer.name})',
-            type: ToastType.success);
+        ToastService().show(message: 'Đã xác nhận & Lưu đơn (Khách: ${customer.name})', type: ToastType.success);
         return;
       }
 
@@ -446,13 +400,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         );
 
         if (newCustomer == null) {
-          ToastService()
-              .show(message: "Đã hủy thao tác.", type: ToastType.warning);
+          ToastService().show(message: "Đã hủy thao tác.", type: ToastType.warning);
           return;
         }
         customer = newCustomer;
-        ToastService()
-            .show(message: "Đã thêm khách hàng mới.", type: ToastType.success);
+        ToastService().show(message: "Đã thêm khách hàng mới.", type: ToastType.success);
       }
       // --- KẾT THÚC LOGIC MỚI ---
 
@@ -511,12 +463,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       };
       await orderRef.set(orderData, SetOptions(merge: true));
 
-      ToastService().show(
-          message: 'Đã xác nhận, in bếp và tạo bàn ảo.',
-          type: ToastType.success);
+      ToastService().show(message: 'Đã xác nhận, in bếp và tạo bàn ảo.', type: ToastType.success);
     } catch (e) {
-      ToastService()
-          .show(message: "Lỗi khi xác nhận: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi khi xác nhận: $e", type: ToastType.error);
     }
   }
 
@@ -539,9 +488,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       final orderSnap = await orderRef.get();
 
       if (!orderSnap.exists) {
-        ToastService().show(
-            message: "Lỗi: Không tìm thấy đơn hàng tương ứng.",
-            type: ToastType.error);
+        ToastService().show(message: "Lỗi: Không tìm thấy đơn hàng tương ứng.", type: ToastType.error);
         return;
       }
 
@@ -568,8 +515,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     final settingsService = SettingsService();
     final settingsId = widget.currentUser.storeId;
     try {
-      final settings =
-          await settingsService.watchStoreSettings(settingsId).first;
+      final settings = await settingsService.watchStoreSettings(settingsId).first;
       if (!mounted) return;
 
       setState(() {
@@ -584,23 +530,20 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     } catch (e) {
       debugPrint("Lỗi tải cài đặt: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Lỗi tải cài đặt: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi tải cài đặt: $e")));
       }
     } finally {
       if (mounted) setState(() => _isLoadingFilter = false);
     }
 
-    _settingsSub =
-        settingsService.watchStoreSettings(settingsId).listen((settings) {
+    _settingsSub = settingsService.watchStoreSettings(settingsId).listen((settings) {
       if (!mounted) return;
       final newCutoff = TimeOfDay(
         hour: settings.reportCutoffHour ?? 0,
         minute: settings.reportCutoffMinute ?? 0,
       );
 
-      final bool cutoffChanged = newCutoff.hour != _reportCutoffTime.hour ||
-          newCutoff.minute != _reportCutoffTime.minute;
+      final bool cutoffChanged = newCutoff.hour != _reportCutoffTime.hour || newCutoff.minute != _reportCutoffTime.minute;
 
       if (cutoffChanged) {
         setState(() {
@@ -625,14 +568,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
     DateTime startOfReportDay(DateTime date) {
       final calendarDay = DateTime(date.year, date.month, date.day);
-      return calendarDay
-          .add(Duration(hours: cutoff.hour, minutes: cutoff.minute));
+      return calendarDay.add(Duration(hours: cutoff.hour, minutes: cutoff.minute));
     }
 
     DateTime endOfReportDay(DateTime date) {
-      return startOfReportDay(date)
-          .add(const Duration(days: 1))
-          .subtract(const Duration(milliseconds: 1));
+      return startOfReportDay(date).add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
     }
 
     DateTime todayCutoffTime = startOfReportDay(now);
@@ -640,8 +580,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     if (now.isBefore(todayCutoffTime)) {
       effectiveDate = now.subtract(const Duration(days: 1));
     }
-    effectiveDate =
-        DateTime(effectiveDate.year, effectiveDate.month, effectiveDate.day);
+    effectiveDate = DateTime(effectiveDate.year, effectiveDate.month, effectiveDate.day);
 
     if (_selectedRange != TimeRange.custom) {
       switch (_selectedRange) {
@@ -661,40 +600,32 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           _calendarEndDate = yesterday;
           break;
         case TimeRange.thisWeek:
-          final startOfWeek = effectiveDate.subtract(
-              Duration(days: effectiveDate.weekday - DateTime.monday));
-          final endOfWeek = effectiveDate.add(
-              Duration(days: DateTime.daysPerWeek - effectiveDate.weekday));
+          final startOfWeek = effectiveDate.subtract(Duration(days: effectiveDate.weekday - DateTime.monday));
+          final endOfWeek = effectiveDate.add(Duration(days: DateTime.daysPerWeek - effectiveDate.weekday));
           _startDate = startOfReportDay(startOfWeek);
           _endDate = endOfReportDay(endOfWeek);
           _calendarStartDate = startOfWeek;
           _calendarEndDate = endOfWeek;
           break;
         case TimeRange.lastWeek:
-          final endOfLastWeekDay =
-              effectiveDate.subtract(Duration(days: effectiveDate.weekday));
-          final startOfLastWeekDay =
-              endOfLastWeekDay.subtract(const Duration(days: 6));
+          final endOfLastWeekDay = effectiveDate.subtract(Duration(days: effectiveDate.weekday));
+          final startOfLastWeekDay = endOfLastWeekDay.subtract(const Duration(days: 6));
           _startDate = startOfReportDay(startOfLastWeekDay);
           _endDate = endOfReportDay(endOfLastWeekDay);
           _calendarStartDate = startOfLastWeekDay;
           _calendarEndDate = endOfLastWeekDay;
           break;
         case TimeRange.thisMonth:
-          final startOfMonth =
-              DateTime(effectiveDate.year, effectiveDate.month, 1);
-          final endOfMonth =
-              DateTime(effectiveDate.year, effectiveDate.month + 1, 0);
+          final startOfMonth = DateTime(effectiveDate.year, effectiveDate.month, 1);
+          final endOfMonth = DateTime(effectiveDate.year, effectiveDate.month + 1, 0);
           _startDate = startOfReportDay(startOfMonth);
           _endDate = endOfReportDay(endOfMonth);
           _calendarStartDate = startOfMonth;
           _calendarEndDate = endOfMonth;
           break;
         case TimeRange.lastMonth:
-          final endOfLastMonth =
-              DateTime(effectiveDate.year, effectiveDate.month, 0);
-          final startOfLastMonth =
-              DateTime(endOfLastMonth.year, endOfLastMonth.month, 1);
+          final endOfLastMonth = DateTime(effectiveDate.year, effectiveDate.month, 0);
+          final startOfLastMonth = DateTime(endOfLastMonth.year, endOfLastMonth.month, 1);
           _startDate = startOfReportDay(startOfLastMonth);
           _endDate = endOfReportDay(endOfLastMonth);
           _calendarStartDate = startOfLastMonth;
@@ -730,9 +661,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
       if (!mounted) return;
 
-      Query query = FirebaseFirestore.instance
-          .collection('web_orders')
-          .where('storeId', isEqualTo: widget.currentUser.storeId);
+      Query query = FirebaseFirestore.instance.collection('web_orders').where('storeId', isEqualTo: widget.currentUser.storeId);
 
       // 1. Áp dụng bộ lọc Trạng thái (Giữ nguyên)
       if (_selectedStatus != WebOrderStatusFilter.all) {
@@ -792,8 +721,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
             'confirmedBy': data['confirmedBy'] as String?,
             'note': data['note'] as String?,
             'confirmedAt': data['confirmedAt'] as Timestamp?,
-            'numberOfCustomers':
-                data['customerInfo']?['numberOfCustomers'] as int?,
+            'numberOfCustomers': data['customerInfo']?['numberOfCustomers'] as int?,
           };
         }).toList();
 
@@ -804,8 +732,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           if (model.status == 'pending') return true;
 
           // 2. Lịch hẹn sắp tới (Schedule + Confirmed) -> Luôn hiện tất cả (không lọc ngày)
-          if (model.type == 'schedule' && model.status == 'confirmed'){
-            return true;}
+          if (model.type == 'schedule' && model.status == 'confirmed') {
+            return true;
+          }
 
           // 3. Các loại khác (Ship, Tại bàn, Lịch sử đã xong/hủy...)
           // -> Lọc theo ngày tạo (createdAt)
@@ -818,25 +747,23 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           final modelB = b['model'] as WebOrderModel;
 
           // Nhóm 1: Chờ xử lý luôn lên đầu
-          if (modelA.status == 'pending' && modelB.status != 'pending'){
-            return -1;}
-          if (modelA.status != 'pending' && modelB.status == 'pending'){
-            return 1;}
+          if (modelA.status == 'pending' && modelB.status != 'pending') {
+            return -1;
+          }
+          if (modelA.status != 'pending' && modelB.status == 'pending') {
+            return 1;
+          }
 
           // Nhóm 2: Lịch hẹn sắp tới (Schedule + Confirmed)
           // Sắp xếp ngày hẹn GẦN NHẤT lên trên (Tăng dần)
-          bool isScheduleA =
-              modelA.type == 'schedule' && modelA.status == 'confirmed';
-          bool isScheduleB =
-              modelB.type == 'schedule' && modelB.status == 'confirmed';
+          bool isScheduleA = modelA.type == 'schedule' && modelA.status == 'confirmed';
+          bool isScheduleB = modelB.type == 'schedule' && modelB.status == 'confirmed';
 
           if (isScheduleA && isScheduleB) {
             try {
               // Parse giờ hẹn từ customerAddress (Format: HH:mm dd/MM/yyyy)
-              final dateA =
-                  DateFormat('HH:mm dd/MM/yyyy').parse(modelA.customerAddress);
-              final dateB =
-                  DateFormat('HH:mm dd/MM/yyyy').parse(modelB.customerAddress);
+              final dateA = DateFormat('HH:mm dd/MM/yyyy').parse(modelA.customerAddress);
+              final dateB = DateFormat('HH:mm dd/MM/yyyy').parse(modelB.customerAddress);
               return dateA.compareTo(dateB); // Tăng dần (Gần nhất lên đầu)
             } catch (_) {
               // Nếu lỗi format thì dùng ngày tạo (Mới nhất lên đầu)
@@ -879,26 +806,21 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   Future<bool> _updateOrderStatus(String orderId, String newStatus) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('web_orders')
-          .doc(orderId)
-          .update({
+      await FirebaseFirestore.instance.collection('web_orders').doc(orderId).update({
         'status': newStatus,
         'confirmedBy': widget.currentUser.name,
         'confirmedAt': FieldValue.serverTimestamp(),
       });
       return true;
     } catch (e) {
-      ToastService()
-          .show(message: 'Lỗi (cập nhật web_order): $e', type: ToastType.error);
+      ToastService().show(message: 'Lỗi (cập nhật web_order): $e', type: ToastType.error);
       return false;
     }
   }
 
   Future<void> _confirmAtTableOrder(WebOrderModel order) async {
     if (order.tableId == null || order.tableId!.isEmpty) {
-      ToastService().show(
-          message: "Lỗi: Đơn hàng này thiếu ID Bàn.", type: ToastType.error);
+      ToastService().show(message: "Lỗi: Đơn hàng này thiếu ID Bàn.", type: ToastType.error);
       return;
     }
 
@@ -906,9 +828,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     try {
       allProducts = await _productsFuture;
     } catch (e) {
-      ToastService().show(
-          message: "Lỗi: Không thể tải danh sách sản phẩm.",
-          type: ToastType.error);
+      ToastService().show(message: "Lỗi: Không thể tải danh sách sản phẩm.", type: ToastType.error);
       return;
     }
 
@@ -918,21 +838,16 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       final serverData = serverSnapshot.data() as Map<String, dynamic>?;
 
       final Map<String, OrderItem> oldServerItemsMap = {};
-      if (serverSnapshot.exists &&
-          serverData != null &&
-          serverData['status'] == 'active') {
+      if (serverSnapshot.exists && serverData != null && serverData['status'] == 'active') {
         final serverItemsList = (serverData['items'] as List<dynamic>? ?? []);
         for (var itemData in serverItemsList) {
           try {
-            final item = OrderItem.fromMap(
-                (itemData as Map).cast<String, dynamic>(),
-                allProducts: allProducts);
+            final item = OrderItem.fromMap((itemData as Map).cast<String, dynamic>(), allProducts: allProducts);
             final key = item.groupKey;
             if (oldServerItemsMap.containsKey(key)) {
               oldServerItemsMap[key] = oldServerItemsMap[key]!.copyWith(
                 quantity: oldServerItemsMap[key]!.quantity + item.quantity,
-                sentQuantity:
-                    oldServerItemsMap[key]!.sentQuantity + item.sentQuantity,
+                sentQuantity: oldServerItemsMap[key]!.sentQuantity + item.sentQuantity,
               );
             } else {
               oldServerItemsMap[key] = item;
@@ -953,10 +868,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           final key = deltaItem.groupKey;
           if (deltaItemsMap.containsKey(key)) {
             final existingItem = deltaItemsMap[key]!;
-            final String? mergedNote = [existingItem.note, deltaItem.note]
-                .where((n) => n != null && n.isNotEmpty)
-                .join(', ')
-                .nullIfEmpty;
+            final String? mergedNote =
+                [existingItem.note, deltaItem.note].where((n) => n != null && n.isNotEmpty).join(', ').nullIfEmpty;
 
             deltaItemsMap[key] = existingItem.copyWith(
               quantity: existingItem.quantity + deltaItem.quantity,
@@ -966,15 +879,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
             deltaItemsMap[key] = deltaItem;
           }
         } catch (e) {
-          debugPrint(
-              "Lỗi parse món ăn từ web_order: $e. Món: ${webItem.product.productName}");
+          debugPrint("Lỗi parse món ăn từ web_order: $e. Món: ${webItem.product.productName}");
         }
       }
 
       final List<Map<String, dynamic>> itemsToPrintAdd = [];
       final List<Map<String, dynamic>> itemsToPrintCancel = [];
-      final Map<String, OrderItem> finalItemsToSaveMap =
-          Map.from(oldServerItemsMap);
+      final Map<String, OrderItem> finalItemsToSaveMap = Map.from(oldServerItemsMap);
 
       for (final deltaEntry in deltaItemsMap.entries) {
         final key = deltaEntry.key;
@@ -985,10 +896,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         if (currentItem != null) {
           final newQty = currentItem.quantity + deltaQty;
           if (newQty > 0) {
-            final String? mergedNote = [currentItem.note, deltaItem.note]
-                .where((n) => n != null && n.isNotEmpty)
-                .join(', ')
-                .nullIfEmpty;
+            final String? mergedNote =
+                [currentItem.note, deltaItem.note].where((n) => n != null && n.isNotEmpty).join(', ').nullIfEmpty;
             finalItemsToSaveMap[key] = currentItem.copyWith(
               quantity: newQty,
               sentQuantity: currentItem.sentQuantity + deltaQty,
@@ -1004,18 +913,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         if (deltaQty > 0) {
           itemsToPrintAdd.add({'isCancel': false, ...deltaItem.toMap()});
         } else if (deltaQty < 0) {
-          itemsToPrintCancel.add({
-            'isCancel': true,
-            ...deltaItem.copyWith(quantity: -deltaQty).toMap()
-          });
+          itemsToPrintCancel.add({'isCancel': true, ...deltaItem.copyWith(quantity: -deltaQty).toMap()});
         }
       }
 
-      final itemsToSave =
-          finalItemsToSaveMap.values.map((e) => e.toMap()).toList();
+      final itemsToSave = finalItemsToSaveMap.values.map((e) => e.toMap()).toList();
 
-      final newTotalAmount = finalItemsToSaveMap.values
-          .fold(0.0, (tong, item) => tong + item.subtotal);
+      final newTotalAmount = finalItemsToSaveMap.values.fold(0.0, (tong, item) => tong + item.subtotal);
       final currentVersion = (serverData?['version'] as num?)?.toInt() ?? 0;
       final bool kitchenPrinted = true;
 
@@ -1028,8 +932,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           'version': currentVersion + 1,
         });
       } else if (itemsToSave.isNotEmpty) {
-        if (!serverSnapshot.exists ||
-            ['paid', 'cancelled'].contains(serverData?['status'])) {
+        if (!serverSnapshot.exists || ['paid', 'cancelled'].contains(serverData?['status'])) {
           final newOrderData = {
             'id': orderRef.id,
             'tableId': order.tableId!,
@@ -1079,13 +982,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
       await _updateOrderStatus(order.id, 'confirmed');
 
-      ToastService().show(
-          message: "Đã xác nhận và gửi báo bếp!", type: ToastType.success);
+      ToastService().show(message: "Đã xác nhận và gửi báo bếp!", type: ToastType.success);
     } catch (e, st) {
       debugPrint("Lỗi khi xác nhận đơn 'at_table': $e");
       debugPrint(st.toString());
-      ToastService().show(
-          message: "Lỗi khi xác nhận: ${e.toString()}", type: ToastType.error);
+      ToastService().show(message: "Lỗi khi xác nhận: ${e.toString()}", type: ToastType.error);
     }
   }
 
@@ -1147,19 +1048,16 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: AppTheme.scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
             return Padding(
-              padding: EdgeInsets.fromLTRB(
-                  20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
               child: Wrap(
                 runSpacing: 16,
                 children: [
-                  Text('Lọc Đơn Hàng',
-                      style: Theme.of(context).textTheme.headlineMedium),
+                  Text('Lọc Đơn Hàng', style: Theme.of(context).textTheme.headlineMedium),
 
                   // Lọc Thời Gian
                   AppDropdown<TimeRange>(
@@ -1179,11 +1077,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                           startInitialDate: tempStartDate ?? DateTime.now(),
                           endInitialDate: tempEndDate,
                           startFirstDate: DateTime(2020),
-                          startLastDate:
-                              DateTime.now().add(const Duration(days: 365)),
+                          startLastDate: DateTime.now().add(const Duration(days: 365)),
                           endFirstDate: tempStartDate ?? DateTime(2020),
-                          endLastDate:
-                              DateTime.now().add(const Duration(days: 365)),
+                          endLastDate: DateTime.now().add(const Duration(days: 365)),
                           is24HourMode: true,
                           isShowSeconds: false,
                           type: OmniDateTimePickerType.date,
@@ -1208,12 +1104,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                             tempSelectedRange == TimeRange.custom &&
                             tempStartDate != null &&
                             tempEndDate != null) {
-                          final start =
-                              DateFormat('dd/MM/yy').format(tempStartDate!);
-                          final end =
-                              DateFormat('dd/MM/yyyy').format(tempEndDate!);
-                          return Text('$start - $end',
-                              overflow: TextOverflow.ellipsis);
+                          final start = DateFormat('dd/MM/yy').format(tempStartDate!);
+                          final end = DateFormat('dd/MM/yyyy').format(tempEndDate!);
+                          return Text('$start - $end', overflow: TextOverflow.ellipsis);
                         }
                         return Text(_getItemText(range));
                       }).toList();
@@ -1279,13 +1172,10 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: () {
-                          bool dateChanged =
-                              (_selectedRange != tempSelectedRange) ||
-                                  (_selectedRange == TimeRange.custom &&
-                                      (_calendarStartDate != tempStartDate ||
-                                          _calendarEndDate != tempEndDate));
-                          bool statusChanged =
-                              _selectedStatus != tempSelectedStatus;
+                          bool dateChanged = (_selectedRange != tempSelectedRange) ||
+                              (_selectedRange == TimeRange.custom &&
+                                  (_calendarStartDate != tempStartDate || _calendarEndDate != tempEndDate));
+                          bool statusChanged = _selectedStatus != tempSelectedStatus;
                           bool typeChanged = _selectedType != tempSelectedType;
 
                           setState(() {
@@ -1317,8 +1207,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   List<Widget> _buildFilterActions() {
     return [
       IconButton(
-        icon: const Icon(Icons.qr_code_2,
-            color: AppTheme.primaryColor, size: 30),
+        icon: const Icon(Icons.qr_code_2, color: AppTheme.primaryColor, size: 30),
         tooltip: 'Mã QR Online',
         onPressed: () {
           // Kiểm tra loại hình kinh doanh để xử lý
@@ -1339,8 +1228,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       ),
       const SizedBox(width: 8),
       IconButton(
-        icon: const Icon(Icons.add_circle_outlined,
-            color: AppTheme.primaryColor, size: 30),
+        icon: const Icon(Icons.add_circle_outlined, color: AppTheme.primaryColor, size: 30),
         tooltip: 'Tạo đơn mới',
         onPressed: _openCreateManualOrder,
       ),
@@ -1348,12 +1236,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       IconButton(
         icon: _isLoadingFilter
             ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppTheme.primaryColor))
-            : const Icon(Icons.filter_list,
-                color: AppTheme.primaryColor, size: 30),
+                width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryColor))
+            : const Icon(Icons.filter_list, color: AppTheme.primaryColor, size: 30),
         tooltip: 'Lọc đơn hàng',
         onPressed: _isLoadingFilter ? null : showFilterModal,
       ),
@@ -1386,9 +1270,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (productSnapshot.hasError || !productSnapshot.hasData) {
-            return Center(
-                child: Text(
-                    'Lỗi nghiêm trọng: Không thể tải sản phẩm. ${productSnapshot.error}'));
+            return Center(child: Text('Lỗi nghiêm trọng: Không thể tải sản phẩm. ${productSnapshot.error}'));
           }
 
           return StreamBuilder<List<Map<String, dynamic>>>(
@@ -1416,8 +1298,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                 );
               }
               if (!orderSnapshot.hasData || orderSnapshot.data!.isEmpty) {
-                return const Center(
-                    child: Text('Không tìm thấy đơn hàng nào.'));
+                return const Center(child: Text('Không tìm thấy đơn hàng nào.'));
               }
 
               final allOrdersData = orderSnapshot.data!;
@@ -1425,10 +1306,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
               // --- PHÂN LOẠI 3 NHÓM ---
 
               // Nhóm 1: Chờ xử lý (Pending)
-              final pendingOrders = allOrdersData
-                  .where((data) =>
-                      (data['model'] as WebOrderModel).status == 'pending')
-                  .toList();
+              final pendingOrders = allOrdersData.where((data) => (data['model'] as WebOrderModel).status == 'pending').toList();
 
               // Nhóm 2: Lịch hẹn sắp tới (Schedule + Confirmed)
               final scheduledOrders = allOrdersData.where((data) {
@@ -1441,8 +1319,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                 final m = data['model'] as WebOrderModel;
                 // Loại bỏ những đơn đã thuộc 2 nhóm trên
                 bool isPending = m.status == 'pending';
-                bool isScheduled =
-                    m.type == 'schedule' && m.status == 'confirmed';
+                bool isScheduled = m.type == 'schedule' && m.status == 'confirmed';
                 return !isPending && !isScheduled;
               }).toList();
 
@@ -1471,8 +1348,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                 children: [
                   // SECTION 1: CHỜ XỬ LÝ
                   if (pendingOrders.isNotEmpty) ...[
-                    _buildSectionHeader('Chờ xử lý (${pendingOrders.length})',
-                        Colors.red), // Màu đỏ cho nổi bật
+                    _buildSectionHeader('Chờ xử lý (${pendingOrders.length})', Colors.red), // Màu đỏ cho nổi bật
                     ...pendingOrders.map((data) => _buildOrderCard(
                           data['model'] as WebOrderModel,
                           data['rawData'] as Map<String, dynamic>,
@@ -1490,15 +1366,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                       // Padding rộng hơn chút để tách nhóm
                       child: Row(
                         children: [
-                          Icon(Icons.calendar_month,
-                              color: Colors.blue, size: 20),
+                          Icon(Icons.calendar_month, color: Colors.blue, size: 20),
                           SizedBox(width: 8),
                           Text(
                             "Lịch hẹn sắp tới",
-                            style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue),
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
                           ),
                         ],
                       ),
@@ -1515,9 +1387,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
                   // SECTION 3: LỊCH SỬ / ĐÃ XỬ LÝ
                   if (historyOrders.isNotEmpty) ...[
-                    _buildSectionHeader(
-                        'Lịch sử đơn hàng (${historyOrders.length})',
-                        Colors.grey.shade700),
+                    _buildSectionHeader('Lịch sử đơn hàng (${historyOrders.length})', Colors.grey.shade700),
                     ...historyOrders.map((data) => _buildOrderCard(
                           data['model'] as WebOrderModel,
                           data['rawData'] as Map<String, dynamic>,
@@ -1529,15 +1399,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                   ],
 
                   // Nếu tất cả đều trống
-                  if (pendingOrders.isEmpty &&
-                      scheduledOrders.isEmpty &&
-                      historyOrders.isEmpty)
+                  if (pendingOrders.isEmpty && scheduledOrders.isEmpty && historyOrders.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 50),
                       child: Center(
-                          child: Text(
-                              "Không có đơn hàng nào trong khoảng thời gian này.",
-                              style: TextStyle(color: Colors.grey))),
+                          child: Text("Không có đơn hàng nào trong khoảng thời gian này.", style: TextStyle(color: Colors.grey))),
                     )
                 ],
               );
@@ -1553,8 +1419,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Text(
         title,
-        style:
-            TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color),
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color),
       ),
     );
   }
@@ -1595,13 +1460,8 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     );
   }
 
-  Widget _buildOrderCard(
-      WebOrderModel order,
-      Map<String, dynamic> rawData,
-      String? confirmedBy,
-      String? note,
-      Timestamp? confirmedAt,
-      int? numberOfCustomers) {
+  Widget _buildOrderCard(WebOrderModel order, Map<String, dynamic> rawData, String? confirmedBy, String? note,
+      Timestamp? confirmedAt, int? numberOfCustomers) {
     final currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
     final timeFormat = DateFormat('HH:mm dd/MM/yyyy');
     final isPending = order.status == 'pending';
@@ -1609,8 +1469,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     final bool isFnb = (widget.currentUser.businessType ?? '').contains("fnb");
 
     // --- LOGIC XỬ LÝ DỮ LIỆU HIỂN THỊ (FIX LỖI NA) ---
-    String getDisplayData(String rootKey, String? modelValue,
-        {String? nestedKey}) {
+    String getDisplayData(String rootKey, String? modelValue, {String? nestedKey}) {
       if (rawData[rootKey] != null && rawData[rootKey].toString().isNotEmpty) {
         return rawData[rootKey].toString();
       }
@@ -1631,15 +1490,9 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       return '';
     }
 
-    final String displayPhone = getDisplayData(
-        'customerPhone', order.customerPhone,
-        nestedKey: 'phone');
-    final String displayName = getDisplayData(
-        'customerName', order.customerName,
-        nestedKey: 'first_name');
-    final String displayAddressOrTime = getDisplayData(
-        'customerAddress', order.customerAddress,
-        nestedKey: 'address_1');
+    final String displayPhone = getDisplayData('customerPhone', order.customerPhone, nestedKey: 'phone');
+    final String displayName = getDisplayData('customerName', order.customerName, nestedKey: 'first_name');
+    final String displayAddressOrTime = getDisplayData('customerAddress', order.customerAddress, nestedKey: 'address_1');
 
     // ----------------------------------------------------
 
@@ -1706,8 +1559,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     if (isPending) {
       line3Widget = const SizedBox.shrink();
     } else {
-      final String confirmedAtString =
-          confirmedAt != null ? timeFormat.format(confirmedAt.toDate()) : '';
+      final String confirmedAtString = confirmedAt != null ? timeFormat.format(confirmedAt.toDate()) : '';
       line3Widget = Wrap(
         spacing: 8.0,
         runSpacing: 4.0,
@@ -1716,16 +1568,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.person_outline, size: 16, color: Colors.grey.shade700),
             const SizedBox(width: 4),
-            Text(confirmedBy ?? 'N/A',
-                style: const TextStyle(fontSize: 15, color: Colors.black87)),
+            Text(confirmedBy ?? 'N/A', style: const TextStyle(fontSize: 15, color: Colors.black87)),
           ]),
           if (confirmedAtString.isNotEmpty)
             Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.access_time_outlined,
-                  size: 16, color: Colors.grey.shade700),
+              Icon(Icons.access_time_outlined, size: 16, color: Colors.grey.shade700),
               const SizedBox(width: 4),
-              Text(confirmedAtString,
-                  style: const TextStyle(fontSize: 15, color: Colors.black87)),
+              Text(confirmedAtString, style: const TextStyle(fontSize: 15, color: Colors.black87)),
             ]),
           _buildStatusChip(statusText, statusColor),
         ],
@@ -1742,33 +1591,20 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           contentPadding: EdgeInsets.zero,
           visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
           minVerticalPadding: 0,
-          title: Text('$quantityString x ${item.product.productName}',
-              style: const TextStyle(color: Colors.black, fontSize: 15)),
+          title: Text('$quantityString x ${item.product.productName}', style: const TextStyle(color: Colors.black, fontSize: 15)),
           subtitle: hasNote
-              ? Text(item.note!,
-                  style: const TextStyle(
-                      color: Colors.red,
-                      fontStyle: FontStyle.italic,
-                      fontSize: 14))
+              ? Text(item.note!, style: const TextStyle(color: Colors.red, fontStyle: FontStyle.italic, fontSize: 14))
               : null,
-          trailing: Text(currencyFormat.format(item.subtotal),
-              style: const TextStyle(color: Colors.black, fontSize: 15)),
+          trailing: Text(currencyFormat.format(item.subtotal), style: const TextStyle(color: Colors.black, fontSize: 15)),
         );
       }),
       const Divider(height: 8, thickness: 0.5, color: Colors.grey),
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text('Tổng cộng',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: Colors.black)),
+          const Text('Tổng cộng', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
           Text(currencyFormat.format(totalToShow),
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: Colors.black)),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
         ],
       ),
     ];
@@ -1783,26 +1619,19 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           spacing: 12.0,
           runSpacing: 4.0,
           children: [
-            _buildInfoRow(Icons.person,
-                displayName.isNotEmpty ? displayName : 'Khách lẻ'),
-            _buildInfoRow(
-                Icons.payments_outlined, currencyFormat.format(totalToShow)),
+            _buildInfoRow(Icons.person, displayName.isNotEmpty ? displayName : 'Khách lẻ'),
+            _buildInfoRow(Icons.payments_outlined, currencyFormat.format(totalToShow)),
           ],
         );
 
         detailsWidgets = [
-          _buildInfoRow(
-              Icons.location_on_outlined,
-              displayAddressOrTime.isNotEmpty
-                  ? displayAddressOrTime
-                  : 'Chưa có địa chỉ'),
+          _buildInfoRow(Icons.location_on_outlined, displayAddressOrTime.isNotEmpty ? displayAddressOrTime : 'Chưa có địa chỉ'),
           const SizedBox(height: 4),
           _buildInfoRow(Icons.access_time, 'Đặt lúc: $timeString'),
           if (note != null && note.isNotEmpty) ...[
             const SizedBox(height: 8),
             InkWell(
-              onTap:
-                  isPending ? () => _showEditNoteDialog(order.id, note) : null,
+              onTap: isPending ? () => _showEditNoteDialog(order.id, note) : null,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
                 child: _buildInfoRow(Icons.edit, note, color: Colors.red),
@@ -1811,9 +1640,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           ],
           if ((note == null || note.isEmpty) && isPending)
             TextButton.icon(
-              style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  foregroundColor: AppTheme.primaryColor),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: AppTheme.primaryColor),
               icon: const Icon(Icons.add_comment_outlined, size: 16),
               label: const Text('Thêm ghi chú'),
               onPressed: () => _showEditNoteDialog(order.id, note),
@@ -1825,8 +1652,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       case 'schedule':
         typeIcon = Icons.calendar_month_outlined;
 
-        String finalName =
-            displayName.isNotEmpty ? displayName : 'Khách đặt lịch';
+        String finalName = displayName.isNotEmpty ? displayName : 'Khách đặt lịch';
         if (isFnb && numberOfCustomers != null && numberOfCustomers > 0) {
           finalName = '($numberOfCustomers) $finalName';
         }
@@ -1847,8 +1673,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           if (note != null && note.isNotEmpty) ...[
             const SizedBox(height: 8),
             InkWell(
-              onTap:
-                  isPending ? () => _showEditNoteDialog(order.id, note) : null,
+              onTap: isPending ? () => _showEditNoteDialog(order.id, note) : null,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
                 child: _buildInfoRow(Icons.edit, note, color: Colors.red),
@@ -1857,9 +1682,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           ],
           if ((note == null || note.isEmpty) && isPending)
             TextButton.icon(
-              style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  foregroundColor: AppTheme.primaryColor),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, foregroundColor: AppTheme.primaryColor),
               icon: const Icon(Icons.add_comment_outlined, size: 16),
               label: const Text('Thêm ghi chú'),
               onPressed: () => _showEditNoteDialog(order.id, note),
@@ -1876,14 +1699,12 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           spacing: 12.0,
           runSpacing: 4.0,
           children: [
-            _buildInfoRow(
-                Icons.payments_outlined, currencyFormat.format(totalToShow)),
+            _buildInfoRow(Icons.payments_outlined, currencyFormat.format(totalToShow)),
             _buildInfoRow(Icons.access_time, timeString),
           ],
         );
         detailsWidgets = [
-          if (note != null && note.isNotEmpty)
-            _buildInfoRow(Icons.edit, note, color: Colors.red),
+          if (note != null && note.isNotEmpty) _buildInfoRow(Icons.edit, note, color: Colors.red),
           ...itemsListWidgets,
         ];
         break;
@@ -1907,8 +1728,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         backgroundColor: statusColor,
         child: Icon(typeIcon, color: Colors.white),
       ),
-      title:
-          Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold)),
+      title: Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold)),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1917,9 +1737,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
           if (!isPending) ...[const SizedBox(height: 6), line3Widget],
         ],
       ),
-      trailing: isMobile
-          ? const SizedBox.shrink()
-          : Icon(statusIcon, color: statusColor, size: 20),
+      trailing: isMobile ? const SizedBox.shrink() : Icon(statusIcon, color: statusColor, size: 20),
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16.0, 0, 16.0, 16.0),
@@ -1937,19 +1755,14 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.cancel_outlined),
                         label: const Text('Từ chối'),
-                        style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red)),
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
                         onPressed: () => _showConfirmationDialog(
                           title: 'Từ chối',
                           content: 'Bạn có chắc muốn từ chối yêu cầu này?',
                           onConfirm: () async {
-                            final bool success =
-                                await _updateOrderStatus(order.id, 'cancelled');
+                            final bool success = await _updateOrderStatus(order.id, 'cancelled');
                             if (success) {
-                              ToastService().show(
-                                  message: 'Đã từ chối yêu cầu.',
-                                  type: ToastType.success);
+                              ToastService().show(message: 'Đã từ chối yêu cầu.', type: ToastType.success);
                             }
                           },
                         ),
@@ -1959,15 +1772,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                     Expanded(
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.check_circle_outline),
-                        label: Text(
-                            (order.type == 'at_table' || order.type == 'ship')
-                                ? (isRetail ? 'Xác nhận' : 'Báo bếp')
-                                : 'Xác nhận'),
+                        label: Text((order.type == 'at_table' || order.type == 'ship')
+                            ? (isRetail ? 'Xác nhận' : 'Báo bếp')
+                            : 'Xác nhận'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isRetail
                               ? Colors.blue
-                              : (!(widget.currentUser.businessType ?? '')
-                                      .contains("fnb")
+                              : (!(widget.currentUser.businessType ?? '').contains("fnb")
                                   ? Colors.blue.shade700
                                   : AppTheme.primaryColor),
                           foregroundColor: Colors.white,
@@ -1975,23 +1786,17 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                         onPressed: () {
                           if (order.type == 'at_table') {
                             _showConfirmationDialog(
-                                title: 'Xác nhận',
-                                content: 'Gửi báo chế biến?',
-                                onConfirm: () => _confirmAtTableOrder(order));
+                                title: 'Xác nhận', content: 'Gửi báo chế biến?', onConfirm: () => _confirmAtTableOrder(order));
                           } else if (order.type == 'ship') {
                             _showConfirmationDialog(
                                 title: 'Xác nhận',
-                                content: isRetail
-                                    ? 'Xác nhận đơn giao hàng?'
-                                    : 'Gửi báo chế biến?',
-                                onConfirm: () =>
-                                    _confirmShipOrder(order, note));
+                                content: isRetail ? 'Xác nhận đơn giao hàng?' : 'Gửi báo chế biến?',
+                                onConfirm: () => _confirmShipOrder(order, note));
                           } else {
                             _showConfirmationDialog(
                                 title: 'Xác nhận',
                                 content: 'Xác nhận thông tin Đặt lịch hẹn?',
-                                onConfirm: () => _confirmScheduleOrder(
-                                    order, numberOfCustomers, note));
+                                onConfirm: () => _confirmScheduleOrder(order, numberOfCustomers, note));
                           }
                         },
                       ),
@@ -2008,19 +1813,14 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                         child: OutlinedButton.icon(
                       icon: const Icon(Icons.cancel),
                       label: const Text("Hủy đơn"),
-                      style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red)),
+                      style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
                       onPressed: () => _showConfirmationDialog(
                           title: "Hủy đơn",
                           content: "Bạn có chắc muốn hủy đơn này không?",
                           onConfirm: () async {
                             await _updateOrderStatus(order.id, 'cancelled');
                             if (order.type == 'ship') {
-                              await FirebaseFirestore.instance
-                                  .collection('orders')
-                                  .doc(order.id)
-                                  .delete();
+                              await FirebaseFirestore.instance.collection('orders').doc(order.id).delete();
                             }
                           }),
                     )),
@@ -2033,17 +1833,13 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
                           child: ElevatedButton.icon(
                         icon: const Icon(Icons.check),
                         label: const Text("Hoàn tất"),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            foregroundColor: Colors.white),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
                         onPressed: () {
                           _showConfirmationDialog(
                             title: "Hoàn tất",
-                            content:
-                                "Xác nhận khách đã đến và tạo đơn bán hàng?",
+                            content: "Xác nhận khách đã đến và tạo đơn bán hàng?",
                             // Truyền thêm rawData['customerId'] vào tham số thứ 2
-                            onConfirm: () =>
-                                _completeScheduleOrderRetail(order, rawData),
+                            onConfirm: () => _completeScheduleOrderRetail(order, rawData),
                           );
                         },
                       ))
@@ -2094,25 +1890,14 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
     // [WRAPPER CHO RETAIL SHIP STATUS]
     if (isRetail && order.type == 'ship' && order.status == 'confirmed') {
       return StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('orders')
-              .doc(order.id)
-              .snapshots(),
+          stream: FirebaseFirestore.instance.collection('orders').doc(order.id).snapshots(),
           builder: (context, snapshot) {
             // Nếu không tìm thấy document trong 'orders' (đã bị xóa do thanh toán hoặc xóa tay)
             // Hoặc document có status != saved
             if (snapshot.hasData && (!snapshot.data!.exists)) {
               // Tự động hiển thị style màu Xám (Đã hoàn tất)
               return _buildCompletedCardVisual(
-                  order,
-                  rawData,
-                  confirmedBy,
-                  note,
-                  confirmedAt,
-                  typeIcon,
-                  titleText,
-                  line2Widget,
-                  detailsWidgets);
+                  order, rawData, confirmedBy, note, confirmedAt, typeIcon, titleText, line2Widget, detailsWidgets);
             }
 
             // Nếu vẫn còn đơn saved -> Hiển thị Card Cam bình thường
@@ -2120,10 +1905,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               elevation: 2,
               clipBehavior: Clip.antiAlias,
-              child: Theme(
-                  data: Theme.of(context)
-                      .copyWith(dividerColor: Colors.transparent),
-                  child: cardContent),
+              child: Theme(data: Theme.of(context).copyWith(dividerColor: Colors.transparent), child: cardContent),
             );
           });
     }
@@ -2132,25 +1914,14 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       elevation: 2,
       clipBehavior: Clip.antiAlias,
-      child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: cardContent),
+      child: Theme(data: Theme.of(context).copyWith(dividerColor: Colors.transparent), child: cardContent),
     );
   }
 
-  Widget _buildCompletedCardVisual(
-      WebOrderModel order,
-      Map<String, dynamic> rawData,
-      String? confirmedBy,
-      String? note,
-      Timestamp? confirmedAt,
-      IconData typeIcon,
-      String titleText,
-      Widget line2Widget,
-      List<Widget> detailsWidgets) {
+  Widget _buildCompletedCardVisual(WebOrderModel order, Map<String, dynamic> rawData, String? confirmedBy, String? note,
+      Timestamp? confirmedAt, IconData typeIcon, String titleText, Widget line2Widget, List<Widget> detailsWidgets) {
     final timeFormat = DateFormat('HH:mm dd/MM/yyyy');
-    final confirmedAtString =
-        confirmedAt != null ? timeFormat.format(confirmedAt.toDate()) : '';
+    final confirmedAtString = confirmedAt != null ? timeFormat.format(confirmedAt.toDate()) : '';
 
     String statusLabel = 'Đã hoàn tất';
     if (order.type == 'schedule') {
@@ -2164,47 +1935,33 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
               key: ValueKey('${order.id}_completed'),
-              title: Text(titleText,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              leading: const CircleAvatar(
-                  backgroundColor: Colors.grey,
-                  child: Icon(Icons.check, color: Colors.white)),
-              subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 4),
-                    line2Widget,
-                    const SizedBox(height: 6),
-                    Wrap(spacing: 8, children: [
-                      Text(confirmedBy ?? 'N/A'),
-                      if (confirmedAtString.isNotEmpty) Text(confirmedAtString),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                            color: Colors.grey.withAlpha(25),
-                            borderRadius: BorderRadius.circular(12)),
-                        child: Text(statusLabel,
-                            style: const TextStyle(
-                                color: Colors.grey,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13)),
-                      )
-                    ])
-                  ]),
+              title: Text(titleText, style: const TextStyle(fontWeight: FontWeight.bold)),
+              leading: const CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.check, color: Colors.white)),
+              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const SizedBox(height: 4),
+                line2Widget,
+                const SizedBox(height: 6),
+                Wrap(spacing: 8, children: [
+                  Text(confirmedBy ?? 'N/A'),
+                  if (confirmedAtString.isNotEmpty) Text(confirmedAtString),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.grey.withAlpha(25), borderRadius: BorderRadius.circular(12)),
+                    child:
+                        Text(statusLabel, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 13)),
+                  )
+                ])
+              ]),
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: detailsWidgets),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: detailsWidgets),
                 )
               ],
             )));
   }
 
-  Future<void> _confirmScheduleOrder(
-      WebOrderModel order, int? numberOfCustomers, String? note) async {
+  Future<void> _confirmScheduleOrder(WebOrderModel order, int? numberOfCustomers, String? note) async {
     if ((widget.currentUser.businessType ?? '').toLowerCase() == 'retail') {
       // 1. Tìm hoặc Tạo khách hàng
       CustomerModel? customer = await _findCustomerByPhone(order.customerPhone);
@@ -2225,9 +1982,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         );
 
         if (newCustomer == null) {
-          ToastService().show(
-              message: "Cần thông tin khách hàng để xác nhận.",
-              type: ToastType.warning);
+          ToastService().show(message: "Cần thông tin khách hàng để xác nhận.", type: ToastType.warning);
           return;
         }
         customer = newCustomer;
@@ -2242,8 +1997,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         if (note != null && note != order.note) {
           await _updateOrderNote(order.id, note);
         }
-        ToastService()
-            .show(message: 'Đã xác nhận lịch hẹn.', type: ToastType.success);
+        ToastService().show(message: 'Đã xác nhận lịch hẹn.', type: ToastType.success);
       }
       return;
     }
@@ -2267,13 +2021,11 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
         );
 
         if (newCustomer == null) {
-          ToastService()
-              .show(message: "Đã hủy thao tác.", type: ToastType.warning);
+          ToastService().show(message: "Đã hủy thao tác.", type: ToastType.warning);
           return;
         }
         customer = newCustomer;
-        ToastService()
-            .show(message: "Đã thêm khách hàng mới.", type: ToastType.success);
+        ToastService().show(message: "Đã thêm khách hàng mới.", type: ToastType.success);
       }
 
       final bool success = await _updateOrderStatus(order.id, 'confirmed');
@@ -2319,29 +2071,22 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
       };
       await orderRef.set(orderData, SetOptions(merge: true));
 
-      ToastService().show(
-          message: 'Đã xác nhận và tạo bàn ảo (Booking).',
-          type: ToastType.success);
+      ToastService().show(message: 'Đã xác nhận và tạo bàn ảo (Booking).', type: ToastType.success);
     } catch (e) {
-      ToastService()
-          .show(message: "Lỗi khi xác nhận: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi khi xác nhận: $e", type: ToastType.error);
     }
   }
 
-  Future<void> _completeScheduleOrderRetail(
-      WebOrderModel order, Map<String, dynamic> rawData) async {
+  Future<void> _completeScheduleOrderRetail(WebOrderModel order, Map<String, dynamic> rawData) async {
     try {
       // 1. LẤY DỮ LIỆU TRỰC TIẾP TỪ RAW DATA (Để tránh lỗi Model mapping ra 'N/A')
       String? finalCustomerId = rawData['customerId'] as String?;
-      String finalName =
-          rawData['customerName']?.toString() ?? order.customerName;
-      String finalPhone =
-          rawData['customerPhone']?.toString() ?? order.customerPhone;
+      String finalName = rawData['customerName']?.toString() ?? order.customerName;
+      String finalPhone = rawData['customerPhone']?.toString() ?? order.customerPhone;
 
       // [FIX] Lấy địa chỉ/giờ hẹn trực tiếp từ rawData
       // Web Order manual lưu giờ hẹn vào 'customerAddress' và 'billing.address_1'
-      String finalAddress =
-          rawData['customerAddress']?.toString() ?? order.customerAddress;
+      String finalAddress = rawData['customerAddress']?.toString() ?? order.customerAddress;
 
       // Fallback: Nếu vẫn rỗng hoặc 'N/A', thử lấy trong billing
       if (finalAddress.isEmpty || finalAddress == 'N/A') {
@@ -2404,9 +2149,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
       await _firestoreService.getOrderReference(newOrderId).set(savedOrderData);
 
-      ToastService().show(
-          message: 'Đã hoàn tất & Lưu đơn ra màn hình chính.',
-          type: ToastType.success);
+      ToastService().show(message: 'Đã hoàn tất & Lưu đơn ra màn hình chính.', type: ToastType.success);
     } catch (e) {
       debugPrint("Lỗi hoàn tất: $e");
       ToastService().show(message: "Lỗi: $e", type: ToastType.error);
@@ -2415,19 +2158,14 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
 
   Future<void> _updateOrderNote(String orderId, String newNote) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('web_orders')
-          .doc(orderId)
-          .update({
+      await FirebaseFirestore.instance.collection('web_orders').doc(orderId).update({
         'note': newNote,
         'confirmedBy': widget.currentUser.name, // Cập nhật người sửa cuối
         'confirmedAt': FieldValue.serverTimestamp(), // Cập nhật thời gian
       });
-      ToastService().show(
-          message: 'Cập nhật ghi chú thành công.', type: ToastType.success);
+      ToastService().show(message: 'Cập nhật ghi chú thành công.', type: ToastType.success);
     } catch (e) {
-      ToastService()
-          .show(message: 'Lỗi cập nhật ghi chú: $e', type: ToastType.error);
+      ToastService().show(message: 'Lỗi cập nhật ghi chú: $e', type: ToastType.error);
     }
   }
 
@@ -2563,8 +2301,7 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
   void initState() {
     super.initState();
     _noteController = TextEditingController(text: widget.item.note);
-    _qtyController =
-        TextEditingController(text: formatNumber(widget.item.quantity));
+    _qtyController = TextEditingController(text: formatNumber(widget.item.quantity));
   }
 
   @override
@@ -2615,27 +2352,20 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
         height: 40,
         child: AppDropdown<String>(
           labelText: 'Đơn vị',
-          value: uniqueUnits.contains(item.selectedUnit)
-              ? item.selectedUnit
-              : uniqueUnits.first,
+          value: uniqueUnits.contains(item.selectedUnit) ? item.selectedUnit : uniqueUnits.first,
           isDense: true,
-          items: uniqueUnits
-              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-              .toList(),
+          items: uniqueUnits.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
           onChanged: (val) {
             if (val != null) {
               double newPrice = item.product.sellPrice;
               if (val == item.product.unit) {
                 newPrice = item.product.sellPrice;
               } else {
-                final u = item.product.additionalUnits.firstWhere(
-                    (element) => element['unitName'] == val,
-                    orElse: () => {});
+                final u = item.product.additionalUnits.firstWhere((element) => element['unitName'] == val, orElse: () => {});
                 if (u.isNotEmpty) newPrice = (u['sellPrice'] as num).toDouble();
               }
               // Khi đổi ĐVT, reset topping về rỗng và giá về giá gốc
-              widget.onUpdate(item
-                  .copyWith(selectedUnit: val, price: newPrice, toppings: {}));
+              widget.onUpdate(item.copyWith(selectedUnit: val, price: newPrice, toppings: {}));
             }
           },
         ),
@@ -2663,8 +2393,7 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
                 padding: EdgeInsets.zero,
                 // Bỏ padding mặc định để icon căn giữa chuẩn
                 style: IconButton.styleFrom(
-                  shape:
-                      const CircleBorder(), // [QUAN TRỌNG] Ép hiệu ứng thành hình tròn
+                  shape: const CircleBorder(), // [QUAN TRỌNG] Ép hiệu ứng thành hình tròn
                 ),
                 onPressed: () {
                   if (item.quantity > 1) {
@@ -2679,18 +2408,15 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
               child: TextFormField(
                 controller: _qtyController,
                 textAlign: TextAlign.center,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                 decoration: const InputDecoration(
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.only(bottom: 12),
                   isDense: true,
                 ),
                 onChanged: (val) {
-                  final double? newQty =
-                      double.tryParse(val.replaceAll(',', ''));
+                  final double? newQty = double.tryParse(val.replaceAll(',', ''));
                   if (newQty != null && newQty > 0) {
                     widget.onUpdate(item.copyWith(quantity: newQty));
                   }
@@ -2703,12 +2429,10 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
               width: btnWidth,
               height: 40,
               child: IconButton(
-                icon: const Icon(Icons.add,
-                    color: AppTheme.primaryColor, size: 18),
+                icon: const Icon(Icons.add, color: AppTheme.primaryColor, size: 18),
                 padding: EdgeInsets.zero,
                 style: IconButton.styleFrom(
-                  shape:
-                      const CircleBorder(), // [QUAN TRỌNG] Ép hiệu ứng thành hình tròn
+                  shape: const CircleBorder(), // [QUAN TRỌNG] Ép hiệu ứng thành hình tròn
                 ),
                 onPressed: () {
                   widget.onUpdate(item.copyWith(quantity: item.quantity + 1));
@@ -2726,17 +2450,14 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
         decoration: InputDecoration(
           hintText: 'Ghi chú...',
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey.shade300)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          border:
+              OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
           prefixIcon: const Icon(Icons.edit_note, size: 18, color: Colors.grey),
         ),
         style: const TextStyle(fontSize: 13),
         onChanged: (val) {
-          widget.onUpdate(item.copyWith(
-              note: () => val.trim().isEmpty ? null : val.trim()));
+          widget.onUpdate(item.copyWith(note: () => val.trim().isEmpty ? null : val.trim()));
         },
       );
     }
@@ -2783,16 +2504,12 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(
-                          child: Text(item.product.productName,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16)),
+                          child:
+                              Text(item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         ),
                         const SizedBox(width: 16),
                         Text("${formatNumber(lineTotal)} đ",
-                            style: const TextStyle(
-                                color: AppTheme.primaryColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16)),
+                            style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
                         const SizedBox(width: 8),
                         IconButton(
                           onPressed: widget.onRemove,
@@ -2805,9 +2522,7 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
                     ),
                     if (item.toppings.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Align(
-                          alignment: Alignment.centerLeft,
-                          child: buildSelectedToppings()),
+                      Align(alignment: Alignment.centerLeft, child: buildSelectedToppings()),
                     ],
                     const SizedBox(height: 12),
                     Row(
@@ -2829,9 +2544,8 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: Text(item.product.productName,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16)),
+                          child:
+                              Text(item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         ),
                         IconButton(
                           onPressed: widget.onRemove,
@@ -2848,10 +2562,7 @@ class _ManualOrderItemCardState extends State<ManualOrderItemCard> {
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Text("${formatNumber(lineTotal)} đ",
-                            style: const TextStyle(
-                                color: AppTheme.primaryColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15)),
+                            style: const TextStyle(color: AppTheme.primaryColor, fontWeight: FontWeight.bold, fontSize: 15)),
                         const SizedBox(width: 12),
                         Expanded(
                           child: buildNoteInput(),
@@ -2880,12 +2591,10 @@ class CreateManualWebOrderScreen extends StatefulWidget {
   const CreateManualWebOrderScreen({super.key, required this.currentUser});
 
   @override
-  State<CreateManualWebOrderScreen> createState() =>
-      _CreateManualWebOrderScreenState();
+  State<CreateManualWebOrderScreen> createState() => _CreateManualWebOrderScreenState();
 }
 
-class _CreateManualWebOrderScreenState
-    extends State<CreateManualWebOrderScreen> {
+class _CreateManualWebOrderScreenState extends State<CreateManualWebOrderScreen> {
   final _formKey = GlobalKey<FormState>();
   final FirestoreService _firestoreService = FirestoreService();
   bool _isSubmitting = false;
@@ -2907,8 +2616,7 @@ class _CreateManualWebOrderScreenState
   Timer? _debounceTimer;
   CustomerModel? _foundCustomer;
 
-  double get _totalAmount => _selectedItems.fold(
-      0, (tong, item) => tong + (item.price * item.quantity));
+  double get _totalAmount => _selectedItems.fold(0, (tong, item) => tong + (item.price * item.quantity));
 
   @override
   void initState() {
@@ -2949,14 +2657,11 @@ class _CreateManualWebOrderScreenState
               _nameController.text = customer.name;
             }
             // Nếu là Ship và chưa nhập địa chỉ -> Điền địa chỉ cũ
-            if (_orderType == WebOrderTypeFilter.ship &&
-                customer.address != null &&
-                _addressController.text.isEmpty) {
+            if (_orderType == WebOrderTypeFilter.ship && customer.address != null && _addressController.text.isEmpty) {
               _addressController.text = customer.address!;
             }
           });
-          ToastService().show(
-              message: "Đã tìm thấy khách hàng cũ.", type: ToastType.success);
+          ToastService().show(message: "Đã tìm thấy khách hàng cũ.", type: ToastType.success);
         } else {
           setState(() {
             _foundCustomer = null;
@@ -2974,12 +2679,7 @@ class _CreateManualWebOrderScreenState
       previouslySelected: previouslySelected,
       groupByCategory: true,
       // [SỬA] Chỉ cho phép chọn các loại này, loại trừ 'Nguyên liệu', 'Vật liệu'
-      allowedProductTypes: [
-        'Hàng hóa',
-        'Dịch vụ/Tính giờ',
-        'Thành phẩm/Combo',
-        'Topping/Bán kèm'
-      ],
+      allowedProductTypes: ['Hàng hóa', 'Dịch vụ/Tính giờ', 'Thành phẩm/Combo', 'Topping/Bán kèm'],
     );
 
     if (results != null) {
@@ -3026,8 +2726,7 @@ class _CreateManualWebOrderScreenState
     }
 
     final String prefix = isShip ? 'ship_' : 'schedule_';
-    final String tableName =
-        isShip ? 'Giao hàng' : (isRetail ? 'Đặt lịch' : 'Booking');
+    final String tableName = isShip ? 'Giao hàng' : (isRetail ? 'Đặt lịch' : 'Booking');
 
     final String virtualTableId = isRetail ? orderId : '$prefix$orderId';
     final int stt = isShip ? -999 : -998;
@@ -3084,10 +2783,8 @@ class _CreateManualWebOrderScreenState
       'storeId': widget.currentUser.storeId,
       'createdAt': webOrderData['createdAt'],
       'createdByUid': widget.currentUser.uid,
-      'createdByName':
-          widget.currentUser.name ?? widget.currentUser.phoneNumber,
-      'numberOfCustomers':
-          webOrderData['customerInfo']['numberOfCustomers'] ?? 1,
+      'createdByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
+      'numberOfCustomers': webOrderData['customerInfo']['numberOfCustomers'] ?? 1,
       'version': 1,
       'customerId': customer.id,
       'customerName': customer.name,
@@ -3097,9 +2794,7 @@ class _CreateManualWebOrderScreenState
       'isWebOrder': true,
     };
 
-    await _firestoreService
-        .getOrderReference(orderId)
-        .set(orderData, SetOptions(merge: true));
+    await _firestoreService.getOrderReference(orderId).set(orderData, SetOptions(merge: true));
   }
 
   Future<void> _submitOrder() async {
@@ -3111,22 +2806,19 @@ class _CreateManualWebOrderScreenState
     });
 
     if (!_formKey.currentState!.validate()) {
-      ToastService().show(
-          message: "Vui lòng kiểm tra lại thông tin.", type: ToastType.warning);
+      ToastService().show(message: "Vui lòng kiểm tra lại thông tin.", type: ToastType.warning);
       return;
     }
 
     final bool isShip = _orderType == WebOrderTypeFilter.ship;
 
     if (!isShip && _bookingTime == null) {
-      ToastService()
-          .show(message: "Vui lòng chọn giờ hẹn", type: ToastType.warning);
+      ToastService().show(message: "Vui lòng chọn giờ hẹn", type: ToastType.warning);
       return;
     }
 
     if (_selectedItems.isEmpty) {
-      ToastService().show(
-          message: "Vui lòng chọn ít nhất 1 sản phẩm", type: ToastType.warning);
+      ToastService().show(message: "Vui lòng chọn ít nhất 1 sản phẩm", type: ToastType.warning);
       return;
     }
 
@@ -3152,9 +2844,7 @@ class _CreateManualWebOrderScreenState
         );
 
         if (newCustomer == null) {
-          ToastService().show(
-              message: "Vui lòng tạo khách hàng để tiếp tục.",
-              type: ToastType.warning);
+          ToastService().show(message: "Vui lòng tạo khách hàng để tiếp tục.", type: ToastType.warning);
           if (mounted) setState(() => _isSubmitting = false);
           return;
         }
@@ -3167,10 +2857,8 @@ class _CreateManualWebOrderScreenState
 
       if (!isShip) {
         // Booking: Tạo 2 định dạng khác nhau
-        webOrderAddress = DateFormat('HH:mm dd/MM/yyyy')
-            .format(_bookingTime!); // Card hiện yyyy
-        virtualTableAddress = DateFormat('HH:mm dd/MM/yy')
-            .format(_bookingTime!); // Bàn ảo hiện yy
+        webOrderAddress = DateFormat('HH:mm dd/MM/yyyy').format(_bookingTime!); // Card hiện yyyy
+        virtualTableAddress = DateFormat('HH:mm dd/MM/yy').format(_bookingTime!); // Bàn ảo hiện yy
       } else {
         // Ship: Dùng chung địa chỉ
         webOrderAddress = _addressController.text.trim();
@@ -3182,10 +2870,8 @@ class _CreateManualWebOrderScreenState
         customerCount = int.tryParse(_customerCountController.text) ?? 1;
       }
 
-      final String staffName =
-          widget.currentUser.name ?? widget.currentUser.phoneNumber;
-      final newDocRef =
-          FirebaseFirestore.instance.collection('web_orders').doc();
+      final String staffName = widget.currentUser.name ?? widget.currentUser.phoneNumber;
+      final newDocRef = FirebaseFirestore.instance.collection('web_orders').doc();
       final String orderId = newDocRef.id;
 
       // [SỬA LẠI ĐOẠN NÀY] Khai báo trực tiếp map contactInfo để dùng
@@ -3236,11 +2922,9 @@ class _CreateManualWebOrderScreenState
       );
 
       if (isShip) {
-        ToastService()
-            .show(message: "Đã tạo đơn giao hàng.", type: ToastType.success);
+        ToastService().show(message: "Đã tạo đơn giao hàng.", type: ToastType.success);
       } else {
-        ToastService()
-            .show(message: "Đã tạo lịch hẹn.", type: ToastType.success);
+        ToastService().show(message: "Đã tạo lịch hẹn.", type: ToastType.success);
       }
 
       if (mounted) {
@@ -3300,8 +2984,7 @@ class _CreateManualWebOrderScreenState
         isDense: true,
       ),
       maxLines: 1,
-      validator: (val) =>
-          (val == null || val.trim().isEmpty) ? 'Nhập địa chỉ' : null,
+      validator: (val) => (val == null || val.trim().isEmpty) ? 'Nhập địa chỉ' : null,
     );
   }
 
@@ -3363,21 +3046,16 @@ class _CreateManualWebOrderScreenState
               child: InputDecorator(
                 decoration: InputDecoration(
                   labelText: "Giờ hẹn *",
-                  prefixIcon: const Icon(Icons.access_time_filled,
-                      color: AppTheme.primaryColor),
+                  prefixIcon: const Icon(Icons.access_time_filled, color: AppTheme.primaryColor),
                   border: const OutlineInputBorder(),
                   isDense: true,
                   errorText: state.errorText, // Hiển thị lỗi từ validator
                 ),
                 child: Text(
-                  _bookingTime != null
-                      ? DateFormat('HH:mm dd/MM/yyyy').format(_bookingTime!)
-                      : "Chọn giờ...",
+                  _bookingTime != null ? DateFormat('HH:mm dd/MM/yyyy').format(_bookingTime!) : "Chọn giờ...",
                   style: TextStyle(
                     fontSize: 15,
-                    fontWeight: _bookingTime != null
-                        ? FontWeight.bold
-                        : FontWeight.normal,
+                    fontWeight: _bookingTime != null ? FontWeight.bold : FontWeight.normal,
                     color: _bookingTime != null ? Colors.black : Colors.grey,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -3405,15 +3083,11 @@ class _CreateManualWebOrderScreenState
   Future<void> _showEditItemDialog(int index, OrderItem item) async {
     // Nếu sản phẩm không có topping thì báo luôn
     if (item.product.accompanyingItems.isEmpty) {
-      ToastService().show(
-          message: "Sản phẩm này không có topping/bán kèm.",
-          type: ToastType.warning);
+      ToastService().show(message: "Sản phẩm này không có topping/bán kèm.", type: ToastType.warning);
       return;
     }
 
-    final allProducts = await _firestoreService
-        .getAllProductsStream(widget.currentUser.storeId)
-        .first;
+    final allProducts = await _firestoreService.getAllProductsStream(widget.currentUser.storeId).first;
 
     if (!mounted) return;
 
@@ -3427,12 +3101,10 @@ class _CreateManualWebOrderScreenState
     );
 
     if (result != null) {
-      final newToppings =
-          result['selectedToppings'] as Map<ProductModel, double>;
+      final newToppings = result['selectedToppings'] as Map<ProductModel, double>;
 
       // 1. Lấy giá gốc theo ĐVT (VD: 35k)
-      final double basePrice =
-          _getBasePriceForUnit(item.product, item.selectedUnit);
+      final double basePrice = _getBasePriceForUnit(item.product, item.selectedUnit);
 
       // 2. Tính tổng tiền Topping (VD: 20k)
       double toppingsTotal = 0;
@@ -3456,11 +3128,10 @@ class _CreateManualWebOrderScreenState
     if ((product.unit ?? '') == selectedUnit) {
       return product.sellPrice;
     }
-    final additionalUnitData = product.additionalUnits.firstWhereOrNull(
-        (unitData) => (unitData['unitName'] as String?) == selectedUnit);
+    final additionalUnitData =
+        product.additionalUnits.firstWhereOrNull((unitData) => (unitData['unitName'] as String?) == selectedUnit);
     if (additionalUnitData != null) {
-      return (additionalUnitData['sellPrice'] as num?)?.toDouble() ??
-          product.sellPrice;
+      return (additionalUnitData['sellPrice'] as num?)?.toDouble() ?? product.sellPrice;
     }
     return product.sellPrice;
   }
@@ -3492,8 +3163,7 @@ class _CreateManualWebOrderScreenState
               : TextButton(
                   // Nếu đang xử lý thì disable nút (null)
                   onPressed: _isSubmitting ? null : _submitOrder,
-                  child: const Text("XÁC NHẬN",
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text("XÁC NHẬN", style: TextStyle(fontWeight: FontWeight.bold)),
                 )
         ],
       ),
@@ -3523,12 +3193,10 @@ class _CreateManualWebOrderScreenState
                         ),
                       ],
                       selected: {_orderType},
-                      onSelectionChanged:
-                          (Set<WebOrderTypeFilter> newSelection) {
+                      onSelectionChanged: (Set<WebOrderTypeFilter> newSelection) {
                         setState(() {
                           _orderType = newSelection.first;
-                          _autovalidateMode = AutovalidateMode
-                              .disabled; // Reset validate khi chuyển tab
+                          _autovalidateMode = AutovalidateMode.disabled; // Reset validate khi chuyển tab
                         });
                       },
                       showSelectedIcon: false,
@@ -3612,10 +3280,7 @@ class _CreateManualWebOrderScreenState
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text("Sản phẩm (${_selectedItems.length})",
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(fontWeight: FontWeight.bold)),
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                         TextButton.icon(
                           onPressed: _pickProducts,
                           icon: const Icon(Icons.add),
@@ -3628,11 +3293,8 @@ class _CreateManualWebOrderScreenState
                       Container(
                         padding: const EdgeInsets.all(20),
                         alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(12)),
-                        child: const Text("Chưa có sản phẩm nào",
-                            style: TextStyle(color: Colors.grey)),
+                        decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
+                        child: const Text("Chưa có sản phẩm nào", style: TextStyle(color: Colors.grey)),
                       )
                     else
                       ListView.builder(
@@ -3653,8 +3315,7 @@ class _CreateManualWebOrderScreenState
                                 _selectedItems[index] = updatedItem;
                               });
                             },
-                            onTap: () => _showEditItemDialog(
-                                index, _selectedItems[index]),
+                            onTap: () => _showEditItemDialog(index, _selectedItems[index]),
                           );
                         },
                       ),
@@ -3667,25 +3328,15 @@ class _CreateManualWebOrderScreenState
           // BOTTOM BAR
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white, boxShadow: [
-              BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 4,
-                  offset: const Offset(0, -2))
-            ]),
+            decoration: BoxDecoration(
+                color: Colors.white, boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: const Offset(0, -2))]),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text("Tổng tiền:",
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text("Tổng tiền:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 Text(
-                  NumberFormat.currency(locale: 'vi_VN', symbol: 'đ')
-                      .format(_totalAmount),
-                  style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryColor),
+                  NumberFormat.currency(locale: 'vi_VN', symbol: 'đ').format(_totalAmount),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
                 ),
               ],
             ),
@@ -3730,8 +3381,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
     // 2. Fill lại số lượng Topping cũ (nếu có)
     if (widget.initialToppings != null) {
       widget.initialToppings!.forEach((p, qty) {
-        final matchingProduct =
-            _accompanyingProducts.firstWhereOrNull((ap) => ap.id == p.id);
+        final matchingProduct = _accompanyingProducts.firstWhereOrNull((ap) => ap.id == p.id);
         if (matchingProduct != null) {
           _selectedToppings[matchingProduct.id] = qty;
         }
@@ -3745,8 +3395,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
 
     _selectedToppings.forEach((productId, quantity) {
       if (quantity > 0) {
-        final product =
-            _accompanyingProducts.firstWhereOrNull((p) => p.id == productId);
+        final product = _accompanyingProducts.firstWhereOrNull((p) => p.id == productId);
         if (product != null) {
           toppingsMap[product] = quantity;
         }
@@ -3781,8 +3430,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (hasToppings) ...[
-                const Text('Chọn Topping / Bán kèm:',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Chọn Topping / Bán kèm:', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Column(
                   children: _accompanyingProducts.map((topping) {
@@ -3806,26 +3454,19 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                             child: Row(
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.remove,
-                                      color: Colors.red, size: 18),
-                                  onPressed: () =>
-                                      _updateToppingQuantity(topping.id, -1),
-                                  constraints: const BoxConstraints(
-                                      minWidth: 32, minHeight: 32),
+                                  icon: const Icon(Icons.remove, color: Colors.red, size: 18),
+                                  onPressed: () => _updateToppingQuantity(topping.id, -1),
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                   padding: EdgeInsets.zero,
                                 ),
                                 Text(
                                   formatNumber(quantity),
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.add,
-                                      color: AppTheme.primaryColor, size: 18),
-                                  onPressed: () =>
-                                      _updateToppingQuantity(topping.id, 1),
-                                  constraints: const BoxConstraints(
-                                      minWidth: 32, minHeight: 32),
+                                  icon: const Icon(Icons.add, color: AppTheme.primaryColor, size: 18),
+                                  onPressed: () => _updateToppingQuantity(topping.id, 1),
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                   padding: EdgeInsets.zero,
                                 ),
                               ],
@@ -3840,16 +3481,14 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                 const Center(
                     child: Padding(
                   padding: EdgeInsets.all(16.0),
-                  child: Text("Sản phẩm này không có Topping.",
-                      style: TextStyle(color: Colors.grey)),
+                  child: Text("Sản phẩm này không có Topping.", style: TextStyle(color: Colors.grey)),
                 )),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
         ElevatedButton(onPressed: _onConfirm, child: const Text('Xác nhận')),
       ],
     );

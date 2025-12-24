@@ -20,8 +20,7 @@ import 'vietqr_popup.dart';
 import '../../services/settings_service.dart';
 import '../../services/e_invoice_service.dart';
 import '../invoice/e_invoice_provider.dart';
-import '../../screens/tax_management_screen.dart'
-    show kDirectRates, kDeductionRates;
+import '../../screens/tax_management_screen.dart' show kDirectRates, kDeductionRates;
 import 'package:intl/intl.dart';
 import 'dart:math';
 import '../../models/surcharge_model.dart';
@@ -78,8 +77,7 @@ class SurchargeItem {
   double amount;
   bool isPercent;
 
-  SurchargeItem(
-      {required this.name, required this.amount, this.isPercent = false});
+  SurchargeItem({required this.name, required this.amount, this.isPercent = false});
 }
 
 class PaymentScreen extends StatelessWidget {
@@ -158,9 +156,7 @@ class PaymentScreen extends StatelessWidget {
       // 1. Tải PTTT
       if (_PaymentPanelState._cachedPaymentMethods == null) {
         final snapshot = await firestore.getPaymentMethods(storeId).first;
-        final methods = snapshot.docs
-            .map((doc) => PaymentMethodModel.fromFirestore(doc))
-            .toList();
+        final methods = snapshot.docs.map((doc) => PaymentMethodModel.fromFirestore(doc)).toList();
 
         final cashMethod = PaymentMethodModel(
           id: 'cash_default',
@@ -177,14 +173,14 @@ class PaymentScreen extends StatelessWidget {
           _PaymentPanelState._cachedDefaultMethodId == null ||
           _PaymentPanelState._cachedStoreDetails == null) {
         final results = await Future.wait([
-          firestore.getStoreTaxSettings(storeId),                               // 0: Thuế
+          firestore.getStoreTaxSettings(storeId), // 0: Thuế
           FirebaseFirestore.instance.collection('promotions').doc('${storeId}_PromoSettings').get(), // 1: Voucher
-          firestore.loadPointsSettings(storeId),                                // 2: Điểm
+          firestore.loadPointsSettings(storeId), // 2: Điểm
           // --- [SỬA] Bỏ qua việc đọc từ Users, vì defaultPaymentMethodId đã chuyển sang StoreSettings
           // FirebaseFirestore.instance.collection('users').doc(ownerUid).get(),
-          firestore.getStoreDetails(storeId),                                   // 3: Store Details
-          SettingsService().getStoreSettings(storeId),                          // 4: [SỬA] Dùng storeId
-          firestore.getActiveSurcharges(storeId),                               // 5: Phụ thu
+          firestore.getStoreDetails(storeId), // 3: Store Details
+          SettingsService().getStoreSettings(storeId), // 4: [SỬA] Dùng storeId
+          firestore.getActiveSurcharges(storeId), // 5: Phụ thu
         ]);
 
         _PaymentPanelState._cachedStoreTaxSettings = results[0] as Map<String, dynamic>?;
@@ -316,6 +312,7 @@ class _PaymentPanel extends StatefulWidget {
   final bool isRetailMode;
   final String? initialPaymentMethodId;
   final String? currentShiftId;
+
   const _PaymentPanel({
     required this.order,
     required this.currentUser,
@@ -356,6 +353,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   static Map<String, String>? _cachedStoreDetails;
   static dynamic _cachedStoreSettingsObj;
   static List<SurchargeModel>? _cachedSurcharges;
+
   static void resetCache() {
     _cachedStoreTaxSettings = null;
     _cachedPaymentMethods = null;
@@ -410,16 +408,12 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     // 1. Khởi tạo Controllers từ initialState (nếu có)
     final initialState = widget.initialState;
     if (initialState != null) {
-      _discountController = TextEditingController(
-          text: formatNumber(initialState.discountAmount));
-      _voucherController =
-          TextEditingController(text: initialState.voucherCode);
+      _discountController = TextEditingController(text: formatNumber(initialState.discountAmount));
+      _voucherController = TextEditingController(text: initialState.voucherCode);
       _pointsController = TextEditingController(); // Points thường load lại sau
       _isDiscountPercent = initialState.isDiscountPercent;
-      _surcharges = initialState.surcharges
-          .map((s) => SurchargeItem(
-          name: s.name, amount: s.amount, isPercent: s.isPercent))
-          .toList();
+      _surcharges =
+          initialState.surcharges.map((s) => SurchargeItem(name: s.name, amount: s.amount, isPercent: s.isPercent)).toList();
     } else {
       _discountController = TextEditingController();
       _voucherController = TextEditingController();
@@ -468,9 +462,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       futures.add(_loadPaymentMethods(forceRefresh: true));
     }
 
-    if (_cachedStoreTaxSettings == null ||
-        _cachedEarnRate == null ||
-        _cachedStoreDetails == null) {
+    if (_cachedStoreTaxSettings == null || _cachedEarnRate == null || _cachedStoreDetails == null) {
       futures.add(_loadSettings(forceRefresh: true));
     }
 
@@ -485,9 +477,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     setState(() {
       // --- Xử lý Thuế (Logic cũ của _loadStoreTaxSettings nằm ở đây) ---
       if (_cachedStoreTaxSettings != null) {
-        final rawMap = _cachedStoreTaxSettings!['taxAssignmentMap']
-        as Map<String, dynamic>? ??
-            {};
+        final rawMap = _cachedStoreTaxSettings!['taxAssignmentMap'] as Map<String, dynamic>? ?? {};
         _productTaxRateMap.clear();
         rawMap.forEach((taxKey, productIds) {
           if (productIds is List) {
@@ -512,9 +502,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       // --- Xử lý PTTT ---
       if (_cachedPaymentMethods != null) {
-        _cashMethod = _cachedPaymentMethods!.firstWhere(
-                (m) => m.type == PaymentMethodType.cash,
-            orElse: () => _createDefaultCashMethod());
+        _cashMethod =
+            _cachedPaymentMethods!.firstWhere((m) => m.type == PaymentMethodType.cash, orElse: () => _createDefaultCashMethod());
         _availableMethods = _cachedPaymentMethods!;
         _methodsLoaded = true;
         _setupDefaultSelection();
@@ -529,19 +518,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
         // 3. Tính ngay giá trị giảm (quan trọng nhất)
         if (_appliedVoucher!.isPercent) {
-          _voucherDiscountValue =
-              widget.subtotal * (_appliedVoucher!.value / 100);
+          _voucherDiscountValue = widget.subtotal * (_appliedVoucher!.value / 100);
         } else {
           _voucherDiscountValue = _appliedVoucher!.value;
         }
 
-        debugPrint(
-            ">>> [Instant Apply] Đã áp dụng Voucher từ Cache: $_voucherDiscountValue");
+        debugPrint(">>> [Instant Apply] Đã áp dụng Voucher từ Cache: $_voucherDiscountValue");
       }
       // Fallback: Trường hợp hiếm hoi có mã nhưng chưa có Model thì mới dùng cách cũ
-      else if (_voucherController.text.isEmpty &&
-          _cachedDefaultVoucherCode != null &&
-          _cachedDefaultVoucherCode!.isNotEmpty) {
+      else if (_voucherController.text.isEmpty && _cachedDefaultVoucherCode != null && _cachedDefaultVoucherCode!.isNotEmpty) {
         _voucherController.text = _cachedDefaultVoucherCode!;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _applyVoucher(silent: true);
@@ -550,11 +535,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       if (_cachedSurcharges != null && _surcharges.isEmpty) {
         // Chỉ thêm nếu danh sách hiện tại đang trống (tránh duplicate khi hot reload)
-        _surcharges = _cachedSurcharges!.map((s) => SurchargeItem(
-          name: s.name,
-          amount: s.value,
-          isPercent: s.isPercent,
-        )).toList();
+        _surcharges = _cachedSurcharges!
+            .map((s) => SurchargeItem(
+                  name: s.name,
+                  amount: s.value,
+                  isPercent: s.isPercent,
+                ))
+            .toList();
       }
 
       // Tính lại tổng tiền ngay lập tức
@@ -564,7 +551,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   Future<void> _loadSettings({bool forceRefresh = false}) async {
     try {
-
       final results = await Future.wait([
         SettingsService().getStoreSettings(widget.currentUser.storeId),
         FirestoreService().loadPointsSettings(widget.currentUser.storeId),
@@ -573,10 +559,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       ]);
 
       // [SỬA ĐỔI] Đọc cài đặt voucher từ collection 'promotions' thay vì 'stores'
-      final promoSettingsSnapshot = await FirebaseFirestore.instance
-          .collection('promotions')
-          .doc('${widget.currentUser.storeId}_PromoSettings')
-          .get();
+      final promoSettingsSnapshot =
+          await FirebaseFirestore.instance.collection('promotions').doc('${widget.currentUser.storeId}_PromoSettings').get();
 
       _cachedStoreSettingsObj = results[0]; // [MỚI]
       final pointsSettings = results[1] as Map<String, dynamic>;
@@ -594,10 +578,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         final String? freshCode = data?['defaultVoucherCode'];
 
         // TRƯỜNG HỢP 1: Database đã xóa voucher mặc định, nhưng Cache vẫn còn
-        if ((freshCode == null || freshCode.isEmpty) &&
-            _cachedDefaultVoucher != null) {
-          debugPrint(
-              ">>> [Sync] Voucher mặc định đã bị xóa trên server. Đang gỡ bỏ...");
+        if ((freshCode == null || freshCode.isEmpty) && _cachedDefaultVoucher != null) {
+          debugPrint(">>> [Sync] Voucher mặc định đã bị xóa trên server. Đang gỡ bỏ...");
 
           _cachedDefaultVoucherCode = null;
           _cachedDefaultVoucher = null;
@@ -609,9 +591,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
               _voucherDiscountValue = 0;
               _calculateTotal();
             });
-            ToastService().show(
-                message: "Voucher mặc định đã bị hủy.",
-                type: ToastType.warning);
+            ToastService().show(message: "Voucher mặc định đã bị hủy.", type: ToastType.warning);
           }
         }
 
@@ -620,10 +600,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _cachedDefaultVoucherCode = freshCode;
 
           // Nếu Cache đang null HOẶC Cache đang giữ mã cũ -> Tải cái mới để lưu vào RAM
-          if (_cachedDefaultVoucher == null ||
-              _cachedDefaultVoucher!.code != freshCode) {
-            final voucherResult = await FirestoreService()
-                .validateVoucher(freshCode, widget.currentUser.storeId);
+          if (_cachedDefaultVoucher == null || _cachedDefaultVoucher!.code != freshCode) {
+            final voucherResult = await FirestoreService().validateVoucher(freshCode, widget.currentUser.storeId);
             _cachedDefaultVoucher = voucherResult;
 
             // Nếu đang mở màn hình thì cập nhật UI luôn
@@ -654,13 +632,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   Future<void> _loadPaymentMethods({bool forceRefresh = false}) async {
     try {
       // SỬA LỖI Ở ĐÂY: Thay .get() bằng .first
-      final snapshot = await _firestoreService
-          .getPaymentMethods(widget.currentUser.storeId)
-          .first;
+      final snapshot = await _firestoreService.getPaymentMethods(widget.currentUser.storeId).first;
 
-      final firestoreMethods = snapshot.docs
-          .map((doc) => PaymentMethodModel.fromFirestore(doc))
-          .toList();
+      final firestoreMethods = snapshot.docs.map((doc) => PaymentMethodModel.fromFirestore(doc)).toList();
       final cashMethod = _createDefaultCashMethod();
 
       // Cập nhật Cache Static
@@ -676,9 +650,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     if (_cashMethod == null || _availableMethods.isEmpty) return;
 
     // 1. Xác định PTTT MỤC TIÊU (Cái mà mình muốn chọn)
-    String targetId = widget.initialPaymentMethodId ??
-        _cachedDefaultMethodId ??
-        _cashMethod!.id;
+    String targetId = widget.initialPaymentMethodId ?? _cachedDefaultMethodId ?? _cashMethod!.id;
 
     // Kiểm tra xem Mục tiêu có tồn tại trong danh sách đã tải chưa?
     final bool targetExists = _availableMethods.any((m) => m.id == targetId);
@@ -699,9 +671,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       // Lấy thông tin phương thức đang được chọn
       // (Tìm trong list, nếu không thấy thì nó chính là cái Fake Cash)
-      final currentMethod = _availableMethods.firstWhere(
-              (m) => m.id == currentSelectedId,
-          orElse: () => _createDefaultCashMethod());
+      final currentMethod =
+          _availableMethods.firstWhere((m) => m.id == currentSelectedId, orElse: () => _createDefaultCashMethod());
 
       // Trường hợp B:
       // - Đang chọn loại là TIỀN MẶT (Bất kể ID giả hay thật)
@@ -748,8 +719,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   void didUpdateWidget(covariant _PaymentPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (widget.subtotal != oldWidget.subtotal ||
-        widget.customer?.id != oldWidget.customer?.id) {
+    if (widget.subtotal != oldWidget.subtotal || widget.customer?.id != oldWidget.customer?.id) {
       _calculateTotal(syncPayment: true);
     }
   }
@@ -811,8 +781,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       return;
     }
 
-    final voucher = await FirestoreService()
-        .validateVoucher(code, widget.currentUser.storeId);
+    final voucher = await FirestoreService().validateVoucher(code, widget.currentUser.storeId);
 
     if (!mounted) return;
 
@@ -850,9 +819,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           _cachedDefaultVoucherCode = null;
         }
       } else {
-        ToastService().show(
-            message: "Voucher không hợp lệ hoặc đã hết hạn.",
-            type: ToastType.error);
+        ToastService().show(message: "Voucher không hợp lệ hoặc đã hết hạn.", type: ToastType.error);
       }
     }
     _calculateTotal(syncPayment: true);
@@ -861,9 +828,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   double _calculateDiscount() {
     final discountInput = parseVN(_discountController.text);
     if (_isDiscountPercent && discountInput > 100) return widget.subtotal;
-    return _isDiscountPercent
-        ? (widget.subtotal * discountInput / 100)
-        : discountInput;
+    return _isDiscountPercent ? (widget.subtotal * discountInput / 100) : discountInput;
   }
 
   (double, double) _getCalculatedTaxes(double totalDistributableDiscount) {
@@ -947,8 +912,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     // [QUAN TRỌNG] Chỉ tự động gán tiền nếu có lệnh syncPayment
     if (syncPayment && !initialLoad && _selectedMethodIds.length == 1) {
       final methodId = _selectedMethodIds.first;
-      final method = _availableMethods.firstWhere((m) => m.id == methodId,
-          orElse: () => _cashMethod!);
+      final method = _availableMethods.firstWhere((m) => m.id == methodId, orElse: () => _cashMethod!);
 
       bool shouldAutoSync = method.type != PaymentMethodType.cash || !widget.promptForCash;
 
@@ -1014,8 +978,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   double _calculateTotalSurcharge() {
     return _surcharges.fold<double>(0.0, (acc, item) {
       if (item.isPercent && item.amount > 100) return acc;
-      final surcharge =
-      item.isPercent ? widget.subtotal * (item.amount / 100) : item.amount;
+      final surcharge = item.isPercent ? widget.subtotal * (item.amount / 100) : item.amount;
       return acc + surcharge.toDouble();
     });
   }
@@ -1027,19 +990,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     _calculateTotal();
 
     // 2. Kiểm tra logic tiền mặt
-    if (widget.promptForCash &&
-        _selectedMethodIds.contains(_cashMethod!.id) &&
-        _debtAmount > 0) {
-      final double otherPayments = _paymentAmounts.entries
-          .where((e) => e.key != _cashMethod!.id)
-          .fold(0.0, (a, b) => a + b.value);
+    if (widget.promptForCash && _selectedMethodIds.contains(_cashMethod!.id) && _debtAmount > 0) {
+      final double otherPayments =
+          _paymentAmounts.entries.where((e) => e.key != _cashMethod!.id).fold(0.0, (a, b) => a + b.value);
       final double cashNeeded = _totalPayable - otherPayments;
       final double cashPaid = _paymentAmounts[_cashMethod!.id] ?? 0.0;
 
       if (cashNeeded > 0 && cashPaid < cashNeeded) {
-        ToastService().show(
-            message: 'Vui lòng xác nhận tiền mặt',
-            type: ToastType.warning);
+        ToastService().show(message: 'Vui lòng xác nhận tiền mặt', type: ToastType.warning);
 
         final bool isDebtConfirmed = await _showCashDialog();
 
@@ -1066,11 +1024,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       }
       if (firstUnconfirmedBankMethod != null) {
         ToastService().show(
-            message:
-            'Vui lòng xác nhận đã nhận thanh toán qua ${firstUnconfirmedBankMethod.name}',
-            type: ToastType.warning);
-        final bool wasConfirmed =
-        await _showQrPopup(firstUnconfirmedBankMethod);
+            message: 'Vui lòng xác nhận đã nhận thanh toán qua ${firstUnconfirmedBankMethod.name}', type: ToastType.warning);
+        final bool wasConfirmed = await _showQrPopup(firstUnconfirmedBankMethod);
         if (!wasConfirmed) return;
       } else {
         break;
@@ -1078,14 +1033,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     }
 
     if (_totalPayable > 0 && _paymentAmounts.isEmpty) {
-      ToastService().show(
-          message: 'Vui lòng chọn ít nhất 1 PTTT', type: ToastType.warning);
+      ToastService().show(message: 'Vui lòng chọn ít nhất 1 PTTT', type: ToastType.warning);
       return;
     }
     if (_debtAmount > 0 && widget.customer == null) {
-      ToastService().show(
-          message: 'Không đủ tiền và không có khách hàng để ghi nợ.',
-          type: ToastType.error);
+      ToastService().show(message: 'Không đủ tiền và không có khách hàng để ghi nợ.', type: ToastType.error);
       return;
     }
 
@@ -1136,14 +1088,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       String? firstBankMethodId;
       try {
-        firstBankMethodId =
-            validPayments.keys.firstWhere((id) => id != _cashMethod!.id);
+        firstBankMethodId = validPayments.keys.firstWhere((id) => id != _cashMethod!.id);
       } catch (e) {
         firstBankMethodId = null;
       }
-      final firstBankMethod = firstBankMethodId != null
-          ? _availableMethods.firstWhere((m) => m.id == firstBankMethodId)
-          : null;
+      final firstBankMethod = firstBankMethodId != null ? _availableMethods.firstWhere((m) => m.id == firstBankMethodId) : null;
 
       Map<String, dynamic>? bankDetails;
       if (firstBankMethod != null && firstBankMethod.qrDisplayOnBill) {
@@ -1179,16 +1128,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final rateMap = isDeduction ? kDeductionRates : kDirectRates;
       final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
 
-      final List<Map<String, dynamic>> billItems =
-      widget.order.items.map((item) {
+      final List<Map<String, dynamic>> billItems = widget.order.items.map((item) {
         final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
         final productData = item['product'] as Map<String, dynamic>? ?? {};
 
         final serviceSetup = productData['serviceSetup'] as Map<String, dynamic>?;
         final isTimeBased = serviceSetup?['isTimeBased'] == true;
         if (isTimeBased) {
-          final priceBreakdown =
-          List<Map<String, dynamic>>.from(item['priceBreakdown'] ?? []);
+          final priceBreakdown = List<Map<String, dynamic>>.from(item['priceBreakdown'] ?? []);
           int totalMinutes = 0;
           for (var block in priceBreakdown) {
             totalMinutes += (block['minutes'] as num?)?.toInt() ?? 0;
@@ -1203,8 +1150,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         if (!rateMap.containsKey(taxKey)) taxKey = defaultTaxKey;
         final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
 
-        newItem['taxAmount'] =
-            ((item['subtotal'] as num?)?.toDouble() ?? 0.0) * rate;
+        newItem['taxAmount'] = ((item['subtotal'] as num?)?.toDouble() ?? 0.0) * rate;
         newItem['taxRate'] = rate;
         newItem['taxKey'] = taxKey;
 
@@ -1229,8 +1175,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         final productData = (item['product'] as Map<String, dynamic>?) ?? {};
         final productType = productData['productType'] as String?;
         final isTimeBased = productData['serviceSetup']?['isTimeBased'] == true;
-        final commissionStaff =
-            (item['commissionStaff'] as Map<String, dynamic>?) ?? {};
+        final commissionStaff = (item['commissionStaff'] as Map<String, dynamic>?) ?? {};
 
         if (productType == "Dịch vụ/Tính giờ" &&
             !isTimeBased &&
@@ -1275,10 +1220,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'discount': result.discountAmount,
         'discountType': result.discountType,
         'discountInput': parseVN(_discountController.text),
-        'surcharges': result.surcharges
-            .map((s) =>
-        {'name': s.name, 'amount': s.amount, 'isPercent': s.isPercent})
-            .toList(),
+        'surcharges': result.surcharges.map((s) => {'name': s.name, 'amount': s.amount, 'isPercent': s.isPercent}).toList(),
         'taxPercent': 0.0,
         'taxAmount': _calculatedVatAmount,
         'tncnAmount': _calculatedTncnAmount,
@@ -1289,8 +1231,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'createdAt': FieldValue.serverTimestamp(),
         'clientCreatedAt': now,
         'createdByUid': widget.currentUser.uid,
-        'createdByName':
-        widget.currentUser.name ?? widget.currentUser.phoneNumber,
+        'createdByName': widget.currentUser.name ?? widget.currentUser.phoneNumber,
         'voucherCode': _appliedVoucher?.code,
         'voucherDiscount': _voucherDiscountValue,
         'customerPointsUsed': result.customerPointsUsed,
@@ -1320,7 +1261,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             widget.currentUser.storeId,
           );
           billData['eInvoiceInfo'] = eInvoiceResult.toJson();
-
         } catch (e) {
           debugPrint("Lỗi HĐĐT (Vẫn cho phép thanh toán): $e");
           ToastService().show(message: "Không thể xuất HĐĐT: ${e.toString()}", type: ToastType.warning);
@@ -1336,10 +1276,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           billItems: billItems,
           result: result,
           billData: billData,
-          eInvoiceResult: eInvoiceResult, // <--- QUAN TRỌNG: Truyền kết quả vào đây
+          eInvoiceResult: eInvoiceResult,
+          // <--- QUAN TRỌNG: Truyền kết quả vào đây
           newBillId: newBillId,
-        ).catchError(
-                (e) => debugPrint("Lỗi in ngầm: $e"));
+        ).catchError((e) => debugPrint("Lỗi in ngầm: $e"));
       }
 
       // 2. Callback xác nhận
@@ -1387,19 +1327,15 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final String newBillId = '${widget.currentUser.storeId}_$shortBillCode';
 
       // 3. Chuẩn bị dữ liệu in
-      final validPayments =
-      Map.fromEntries(_paymentAmounts.entries.where((e) => e.value > 0));
+      final validPayments = Map.fromEntries(_paymentAmounts.entries.where((e) => e.value > 0));
 
       String? firstBankMethodId;
       try {
-        firstBankMethodId =
-            validPayments.keys.firstWhere((id) => id != _cashMethod!.id);
+        firstBankMethodId = validPayments.keys.firstWhere((id) => id != _cashMethod!.id);
       } catch (e) {
         firstBankMethodId = null;
       }
-      final firstBankMethod = firstBankMethodId != null
-          ? _availableMethods.firstWhere((m) => m.id == firstBankMethodId)
-          : null;
+      final firstBankMethod = firstBankMethodId != null ? _availableMethods.firstWhere((m) => m.id == firstBankMethodId) : null;
 
       Map<String, dynamic>? bankDetails;
       if (firstBankMethod != null && firstBankMethod.qrDisplayOnBill) {
@@ -1436,8 +1372,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final rateMap = isDeduction ? kDeductionRates : kDirectRates;
       final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
 
-      final List<Map<String, dynamic>> billItems =
-      widget.order.items.map((item) {
+      final List<Map<String, dynamic>> billItems = widget.order.items.map((item) {
         final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
         final productData = item['product'] as Map<String, dynamic>? ?? {};
 
@@ -1446,8 +1381,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         if (!rateMap.containsKey(taxKey)) taxKey = defaultTaxKey;
         final double rate = rateMap[taxKey]?['rate'] ?? 0.0;
 
-        newItem['taxAmount'] =
-            ((item['subtotal'] as num?)?.toDouble() ?? 0.0) * rate;
+        newItem['taxAmount'] = ((item['subtotal'] as num?)?.toDouble() ?? 0.0) * rate;
         newItem['taxRate'] = rate;
         newItem['taxKey'] = taxKey;
 
@@ -1474,7 +1408,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final billData = {
         'customerName': widget.customer?.name ?? widget.order.customerName,
         'customerPhone': widget.customer?.phone ?? widget.order.customerPhone, // Thêm SĐT
-        'guestAddress': widget.customerAddress ?? widget.order.guestAddress,   // Thêm Địa chỉ
+        'guestAddress': widget.customerAddress ?? widget.order.guestAddress, // Thêm Địa chỉ
         'hideDebt': isCashPayment, // Cờ để ẩn dư nợ
       };
 
@@ -1489,7 +1423,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       );
 
       ToastService().show(message: "Đã gửi lệnh in Bill Giao hàng.", type: ToastType.success);
-
     } catch (e) {
       ToastService().show(message: 'Lỗi in: $e', type: ToastType.error);
     } finally {
@@ -1552,14 +1485,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         final String expectedTableId = 'ship_$webOrderId';
         if (widget.order.tableId == expectedTableId) {
           try {
-            await FirebaseFirestore.instance
-                .collection('web_orders')
-                .doc(webOrderId)
-                .update({
+            await FirebaseFirestore.instance.collection('web_orders').doc(webOrderId).update({
               'status': 'Đã hoàn tất',
               'completedAt': FieldValue.serverTimestamp(),
-              'completedBy':
-              widget.currentUser.name ?? widget.currentUser.phoneNumber,
+              'completedBy': widget.currentUser.name ?? widget.currentUser.phoneNumber,
             });
             await firestore.deleteTable(widget.order.tableId);
           } catch (_) {}
@@ -1568,8 +1497,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       // 4. Trừ kho (Inventory) - VẪN GIỮ NGUYÊN để trừ tồn kho
       try {
-        await InventoryService()
-            .processStockDeductionForOrder(billItems, widget.order.storeId);
+        await InventoryService().processStockDeductionForOrder(billItems, widget.order.storeId);
       } catch (e) {
         debugPrint("Background Inventory Error: $e");
       }
@@ -1592,10 +1520,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           firestore.updateCustomerDebt(widget.customer!.id, _debtAmount);
         }
         try {
-          await FirebaseFirestore.instance
-              .collection('customers')
-              .doc(widget.customer!.id)
-              .update({
+          await FirebaseFirestore.instance.collection('customers').doc(widget.customer!.id).update({
             'totalSpent': FieldValue.increment(result.totalPayable), // Cộng dồn tiền
             'lastVisit': FieldValue.serverTimestamp(), // Cập nhật ngày ghé thăm
           });
@@ -1612,8 +1537,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             widget.customer,
             ownerUid,
           );
-          await firestore
-              .updateBill(newBillId, {'eInvoiceInfo': eResult.toJson()});
+          await firestore.updateBill(newBillId, {'eInvoiceInfo': eResult.toJson()});
         } catch (e) {
           debugPrint("Background E-Invoice Error: $e");
         }
@@ -1682,7 +1606,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           billItems: billItems,
           result: result,
           billData: billData,
-          eInvoiceResult: eInvoiceResult, // <--- Truyền xuống đây
+          eInvoiceResult: eInvoiceResult,
+          // <--- Truyền xuống đây
           newBillId: newBillId,
         );
         PrintQueueService().addJob(PrintJobType.receipt, receiptPayload);
@@ -1702,8 +1627,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     required EInvoiceResult? eInvoiceResult, // <--- Đảm bảo có tham số này
     required String newBillId,
   }) {
-    final List<Map<String, dynamic>> formattedSurcharges =
-    result.surcharges.map((s) {
+    final List<Map<String, dynamic>> formattedSurcharges = result.surcharges.map((s) {
       if (s.isPercent) {
         final double calculatedAmount = widget.subtotal * (s.amount / 100);
         return {
@@ -1783,7 +1707,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   // Tìm hàm _showCashDialog và thay thế bằng nội dung này
   Future<bool> _showCashDialog() async {
-    final result = await showDialog<Map<String, dynamic>>( // [SỬA] Kiểu trả về là Map
+    final result = await showDialog<Map<String, dynamic>>(
+      // [SỬA] Kiểu trả về là Map
       context: context,
       builder: (_) => CashDenominationDialog(
         totalPayable: _debtAmount > 0 ? _debtAmount : _totalPayable,
@@ -1808,8 +1733,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     final firestore = FirestoreService();
 
     // 1. Tìm các món chưa được gửi đi (logic này đã đúng)
-    final allItems =
-    widget.order.items.map((e) => Map<String, dynamic>.from(e)).toList();
+    final allItems = widget.order.items.map((e) => Map<String, dynamic>.from(e)).toList();
     final unsentItemsMaps = allItems.where((itemMap) {
       final double q = ((itemMap['quantity'] ?? 0) as num).toDouble();
       final double sent = ((itemMap['sentQuantity'] ?? 0) as num).toDouble();
@@ -1835,11 +1759,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
     // 3. CẬP NHẬT FIRESTORE VỚI VERSIONING (ĐÃ SỬA LỖI)
     final updatedItems = allItems.map((itemMap) {
-      final wasUnsent = unsentItemsMaps
-          .any((unsent) => unsent['lineId'] == itemMap['lineId']);
-      return wasUnsent
-          ? {...itemMap, 'sentQuantity': itemMap['quantity']}
-          : itemMap;
+      final wasUnsent = unsentItemsMaps.any((unsent) => unsent['lineId'] == itemMap['lineId']);
+      return wasUnsent ? {...itemMap, 'sentQuantity': itemMap['quantity']} : itemMap;
     }).toList();
 
     // Đọc lại đơn hàng để lấy version mới nhất, tránh xung đột
@@ -1847,8 +1768,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     if (!orderDoc.exists) {
       throw Exception("Đơn hàng không còn tồn tại để báo bếp.");
     }
-    final currentVersion =
-        (orderDoc.data() as Map<String, dynamic>)['version'] as int? ?? 1;
+    final currentVersion = (orderDoc.data() as Map<String, dynamic>)['version'] as int? ?? 1;
 
     await firestore.updateOrder(widget.order.id, {
       'items': updatedItems,
@@ -1856,8 +1776,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       'version': currentVersion + 1,
     });
 
-    ToastService()
-        .show(message: "Báo bếp thành công.", type: ToastType.success);
+    ToastService().show(message: "Báo bếp thành công.", type: ToastType.success);
   }
 
   Future<void> _printAndExit() async {
@@ -1900,8 +1819,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       }
     } catch (e) {
       debugPrint("Lỗi trong quá trình in tạm tính: $e");
-      ToastService()
-          .show(message: "Đã xảy ra lỗi, không thể in.", type: ToastType.error);
+      ToastService().show(message: "Đã xảy ra lỗi, không thể in.", type: ToastType.error);
     }
   }
 
@@ -1922,9 +1840,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(title,
-                    style: theme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold, color: Colors.black)),
+                Text(title, style: theme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.black)),
                 if (trailing != null) trailing,
               ],
             ),
@@ -1939,8 +1855,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
   Future<void> _printDetailedProvisionalBill() async {
     try {
       final firestore = FirestoreService();
-      final storeInfo =
-      await firestore.getStoreDetails(widget.currentUser.storeId);
+      final storeInfo = await firestore.getStoreDetails(widget.currentUser.storeId);
       if (storeInfo == null) {
         throw Exception("Không tìm thấy thông tin cửa hàng.");
       }
@@ -1948,8 +1863,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final orderRef = firestore.getOrderReference(widget.order.id);
       final orderDoc = await orderRef.get();
       if (orderDoc.exists) {
-        final currentVersion =
-            (orderDoc.data() as Map<String, dynamic>)['version'] as int? ?? 1;
+        final currentVersion = (orderDoc.data() as Map<String, dynamic>)['version'] as int? ?? 1;
         await orderRef.update({
           'provisionalBillPrintedAt': FieldValue.serverTimestamp(),
           'provisionalBillSource': 'payment_screen',
@@ -1959,11 +1873,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
       Map<String, dynamic>? bankDetailsForProvisional;
 
-      if (_defaultPaymentMethodId != null &&
-          _defaultPaymentMethodId != _cashMethod?.id) {
+      if (_defaultPaymentMethodId != null && _defaultPaymentMethodId != _cashMethod?.id) {
         try {
           final defaultMethod = _availableMethods.firstWhere(
-                (m) => m.id == _defaultPaymentMethodId,
+            (m) => m.id == _defaultPaymentMethodId,
           );
 
           if (defaultMethod.qrDisplayOnProvisionalBill) {
@@ -1984,8 +1897,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final String defaultTaxKey = isDeduction ? 'VAT_0' : 'HKD_0';
 
       // Map lại items để thêm taxRate và taxKey
-      final List<Map<String, dynamic>> detailedItems =
-      widget.order.items.map((item) {
+      final List<Map<String, dynamic>> detailedItems = widget.order.items.map((item) {
         final Map<String, dynamic> newItem = Map<String, dynamic>.from(item);
 
         final productData = item['product'] as Map<String, dynamic>? ?? {};
@@ -2026,14 +1938,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         'taxPercent': 0.0,
         'surcharges': _surcharges
             .map((s) => {
-          'name': s.isPercent
-              ? '${s.name} (${formatNumber(s.amount)}%)'
-              : s.name,
-          'amount': s.isPercent
-              ? widget.subtotal * (s.amount / 100)
-              : s.amount,
-          'isPercent': s.isPercent
-        })
+                  'name': s.isPercent ? '${s.name} (${formatNumber(s.amount)}%)' : s.name,
+                  'amount': s.isPercent ? widget.subtotal * (s.amount / 100) : s.amount,
+                  'isPercent': s.isPercent
+                })
             .toList(),
         'totalPayable': _totalPayable,
         'startTime': widget.order.startTime,
@@ -2075,9 +1983,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     final double amountToPay = amountInInput > 0 ? amountInInput : _debtAmount;
 
     if (amountToPay <= 0) {
-      ToastService().show(
-          message: 'Vui lòng nhập số tiền cho PTTT này trước khi tạo mã QR.',
-          type: ToastType.warning);
+      ToastService().show(message: 'Vui lòng nhập số tiền cho PTTT này trước khi tạo mã QR.', type: ToastType.warning);
       return false; // Trả về false vì không thể mở popup
     }
 
@@ -2108,33 +2014,25 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final totalDiscount =
-        _calculateDiscount() + _pointsMonetaryValue + _voucherDiscountValue;
-    final totalTaxAndSurcharges = _calculatedVatAmount +
-        _calculatedTncnAmount +
-        _calculateTotalSurcharge();
+    final totalDiscount = _calculateDiscount() + _pointsMonetaryValue + _voucherDiscountValue;
+    final totalTaxAndSurcharges = _calculatedVatAmount + _calculatedTncnAmount + _calculateTotalSurcharge();
 
     return Column(children: [
       Expanded(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (widget.customer != null)
-              _buildCard(
-                  title: "Khách hàng",
-                  child: _CustomerInfoPanel(customer: widget.customer!)),
+            if (widget.customer != null) _buildCard(title: "Khách hàng", child: _CustomerInfoPanel(customer: widget.customer!)),
             _buildCard(
               title: "Tổng thành tiền",
               trailing: Text('${formatNumber(widget.subtotal)} đ',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold, color: Colors.black)),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.black)),
               child: const SizedBox.shrink(),
             ),
             _buildCard(
               title: "Chiết khấu & Giảm giá",
               trailing: Text('- ${formatNumber(totalDiscount)} đ',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.black, fontWeight: FontWeight.bold)),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black, fontWeight: FontWeight.bold)),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final isWide = constraints.maxWidth > 600;
@@ -2149,8 +2047,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             isDense: true,
                             value: _isDiscountPercent,
                             items: const [
-                              DropdownMenuItem(
-                                  value: false, child: Text('VND')),
+                              DropdownMenuItem(value: false, child: Text('VND')),
                               DropdownMenuItem(value: true, child: Text('%')),
                             ],
                             onChanged: (val) {
@@ -2165,18 +2062,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                         Expanded(
                           child: CustomTextFormField(
                             controller: _discountController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             inputFormatters: [
                               ThousandDecimalInputFormatter(),
-                              if (_isDiscountPercent)
-                                CenteredRangeTextInputFormatter(
-                                    min: 0, max: 100),
+                              if (_isDiscountPercent) CenteredRangeTextInputFormatter(min: 0, max: 100),
                             ],
                             decoration: const InputDecoration(
-                                labelText: 'Chiết khấu',
-                                prefixIcon: Icon(Icons.discount_outlined),
-                                isDense: true),
+                                labelText: 'Chiết khấu', prefixIcon: Icon(Icons.discount_outlined), isDense: true),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -2185,9 +2077,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             controller: _voucherController,
                             keyboardType: TextInputType.text,
                             textCapitalization: TextCapitalization.characters,
-                            decoration: const InputDecoration(
-                                labelText: 'Voucher',
-                                prefixIcon: Icon(Icons.card_giftcard_outlined)),
+                            decoration:
+                                const InputDecoration(labelText: 'Voucher', prefixIcon: Icon(Icons.card_giftcard_outlined)),
                             onChanged: (_) => _calculateTotal(),
                           ),
                         ),
@@ -2198,9 +2089,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             keyboardType: TextInputType.number,
                             inputFormatters: [ThousandDecimalInputFormatter()],
                             decoration: InputDecoration(
-                                hintText: _redeemRate > 0
-                                    ? '-${formatNumber(_redeemRate)}đ/Điểm'
-                                    : 'Chưa thiết lập',
+                                hintText: _redeemRate > 0 ? '-${formatNumber(_redeemRate)}đ/Điểm' : 'Chưa thiết lập',
                                 labelText: 'Điểm thưởng',
                                 prefixIcon: const Icon(Icons.star)),
                             onChanged: (_) => _calculateTotal(),
@@ -2219,8 +2108,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                               labelText: "Loại",
                               value: _isDiscountPercent,
                               items: const [
-                                DropdownMenuItem(
-                                    value: false, child: Text('VND')),
+                                DropdownMenuItem(value: false, child: Text('VND')),
                                 DropdownMenuItem(value: true, child: Text('%')),
                               ],
                               onChanged: (val) {
@@ -2235,18 +2123,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                           Expanded(
                             child: CustomTextFormField(
                               controller: _discountController,
-                              keyboardType:
-                              const TextInputType.numberWithOptions(
-                                  decimal: true),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
                               inputFormatters: [
                                 ThousandDecimalInputFormatter(),
-                                if (_isDiscountPercent)
-                                  CenteredRangeTextInputFormatter(
-                                      min: 0, max: 100),
+                                if (_isDiscountPercent) CenteredRangeTextInputFormatter(min: 0, max: 100),
                               ],
-                              decoration: const InputDecoration(
-                                  labelText: 'Chiết khấu',
-                                  prefixIcon: Icon(Icons.discount_outlined)),
+                              decoration:
+                                  const InputDecoration(labelText: 'Chiết khấu', prefixIcon: Icon(Icons.discount_outlined)),
                             ),
                           ),
                         ],
@@ -2260,10 +2143,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                               controller: _voucherController,
                               keyboardType: TextInputType.text,
                               textCapitalization: TextCapitalization.characters,
-                              decoration: const InputDecoration(
-                                  labelText: 'Voucher',
-                                  prefixIcon:
-                                  Icon(Icons.card_giftcard_outlined)),
+                              decoration:
+                                  const InputDecoration(labelText: 'Voucher', prefixIcon: Icon(Icons.card_giftcard_outlined)),
                               onChanged: (_) => _calculateTotal(),
                             ),
                           ),
@@ -2272,13 +2153,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                             child: CustomTextFormField(
                               controller: _pointsController,
                               keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                ThousandDecimalInputFormatter()
-                              ],
+                              inputFormatters: [ThousandDecimalInputFormatter()],
                               decoration: InputDecoration(
-                                  hintText: _redeemRate > 0
-                                      ? '-${formatNumber(_redeemRate)}đ/Điểm'
-                                      : 'Chưa thiết lập',
+                                  hintText: _redeemRate > 0 ? '-${formatNumber(_redeemRate)}đ/Điểm' : 'Chưa thiết lập',
                                   labelText: 'Điểm thưởng',
                                   prefixIcon: const Icon(Icons.star)),
                               onChanged: (_) => _calculateTotal(),
@@ -2294,8 +2171,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             _buildCard(
               title: "Thuế & Phụ thu",
               trailing: Text('+ ${formatNumber(totalTaxAndSurcharges)} đ',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold, color: Colors.black)),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.black)),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2303,14 +2179,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
-                      leading: Icon(Icons.request_quote_outlined,
-                          color: Colors.grey.shade600),
-                      title: Text(
-                          _calcMethod == 'deduction' ? 'Thuế VAT' : 'Thuế Gộp'),
+                      leading: Icon(Icons.request_quote_outlined, color: Colors.grey.shade600),
+                      title: Text(_calcMethod == 'deduction' ? 'Thuế VAT' : 'Thuế Gộp'),
                       trailing: Text(
                         '${formatNumber(_calculatedVatAmount)} đ',
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                     ),
                   const SizedBox(height: 12),
@@ -2321,8 +2194,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             _buildCard(
               title: "Số tiền khách phải trả",
               trailing: Text('${formatNumber(_totalPayable)} đ',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold, color: Colors.red)),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: Colors.red)),
               child: const SizedBox.shrink(),
             ),
             _buildCard(
@@ -2337,11 +2209,11 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             ),
             _buildCard(
               title: _debtAmount > 0 ? "Dư nợ" : "Tiền thừa",
-              trailing: Text(
-                  '${formatNumber(_debtAmount > 0 ? _debtAmount : _changeAmount)} đ',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: _debtAmount > 0 ? Colors.red : Colors.green)),
+              trailing: Text('${formatNumber(_debtAmount > 0 ? _debtAmount : _changeAmount)} đ',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold, color: _debtAmount > 0 ? Colors.red : Colors.green)),
               child: const SizedBox.shrink(),
             ),
           ],
@@ -2370,9 +2242,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           return CustomTextFormField(
             controller: _cashInputController,
             readOnly: widget.promptForCash,
-            onTap: (widget.promptForCash && _totalPayable > 0)
-                ? _showCashDialog
-                : null,
+            onTap: (widget.promptForCash && _totalPayable > 0) ? _showCashDialog : null,
             decoration: InputDecoration(
               labelText: 'Tiền mặt',
               prefixIcon: Icon(_getIconForMethodType(method.type)),
@@ -2394,9 +2264,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
         // 1. Khởi tạo Controller nếu chưa có
         if (!_paymentControllers.containsKey(method.id)) {
-          _paymentControllers[method.id] = TextEditingController(
-              text: formatNumber(_paymentAmounts[method.id] ?? 0)
-          );
+          _paymentControllers[method.id] = TextEditingController(text: formatNumber(_paymentAmounts[method.id] ?? 0));
         }
 
         // [QUAN TRỌNG] Dòng này để sửa lỗi "Undefined name 'controller'"
@@ -2414,16 +2282,14 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             decoration: InputDecoration(
               labelText: method.name,
               prefixIcon: Icon(_getIconForMethodType(method.type)),
-              suffixIcon: (method.type == PaymentMethodType.bank &&
-                  method.qrDisplayOnScreen)
+              suffixIcon: (method.type == PaymentMethodType.bank && method.qrDisplayOnScreen)
                   ? _confirmedBankMethods.contains(method.id)
-                  ? const Icon(Icons.check_circle, color: Colors.green)
-                  : IconButton(
-                icon: const Icon(Icons.qr_code_scanner_outlined,
-                    color: AppTheme.primaryColor),
-                onPressed: () => _showQrPopup(method),
-                tooltip: 'Quét QR',
-              )
+                      ? const Icon(Icons.check_circle, color: Colors.green)
+                      : IconButton(
+                          icon: const Icon(Icons.qr_code_scanner_outlined, color: AppTheme.primaryColor),
+                          onPressed: () => _showQrPopup(method),
+                          tooltip: 'Quét QR',
+                        )
                   : null,
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -2458,8 +2324,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         label: const Text('Thêm phụ thu'),
         onPressed: () {
           setState(() {
-            _surcharges
-                .add(SurchargeItem(name: '', amount: 0, isPercent: false));
+            _surcharges.add(SurchargeItem(name: '', amount: 0, isPercent: false));
             _calculateTotal(syncPayment: true);
           });
         },
@@ -2476,8 +2341,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             padding: const EdgeInsets.only(bottom: 12.0),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final isWide =
-                    constraints.maxWidth > 600;
+                final isWide = constraints.maxWidth > 600;
                 if (isWide) {
                   return Row(
                     children: [
@@ -2514,16 +2378,13 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                       Expanded(
                         flex: 2,
                         child: CustomTextFormField(
-                          initialValue:
-                          item.amount == 0 ? '' : formatNumber(item.amount),
+                          initialValue: item.amount == 0 ? '' : formatNumber(item.amount),
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             ThousandDecimalInputFormatter(),
-                            if (item.isPercent)
-                              CenteredRangeTextInputFormatter(min: 0, max: 100),
+                            if (item.isPercent) CenteredRangeTextInputFormatter(min: 0, max: 100),
                           ],
-                          decoration:
-                          const InputDecoration(labelText: 'Giá trị'),
+                          decoration: const InputDecoration(labelText: 'Giá trị'),
                           onChanged: (val) {
                             final parsed = parseVN(val).toDouble();
                             setState(() {
@@ -2584,8 +2445,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                               labelText: "Loại",
                               value: item.isPercent,
                               items: const [
-                                DropdownMenuItem(
-                                    value: false, child: Text('VND')),
+                                DropdownMenuItem(value: false, child: Text('VND')),
                                 DropdownMenuItem(value: true, child: Text('%')),
                               ],
                               onChanged: (val) {
@@ -2599,15 +2459,10 @@ class _PaymentPanelState extends State<_PaymentPanel> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: CustomTextFormField(
-                              initialValue: item.amount == 0
-                                  ? ''
-                                  : formatNumber(item.amount),
+                              initialValue: item.amount == 0 ? '' : formatNumber(item.amount),
                               keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                ThousandDecimalInputFormatter()
-                              ],
-                              decoration:
-                              const InputDecoration(labelText: 'Giá trị'),
+                              inputFormatters: [ThousandDecimalInputFormatter()],
+                              decoration: const InputDecoration(labelText: 'Giá trị'),
                               onChanged: (val) {
                                 final parsed = parseVN(val).toDouble();
                                 setState(() {
@@ -2631,8 +2486,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           label: const Text('Thêm phụ thu khác'),
           onPressed: () {
             setState(() {
-              _surcharges
-                  .add(SurchargeItem(name: '', amount: 0, isPercent: false));
+              _surcharges.add(SurchargeItem(name: '', amount: 0, isPercent: false));
               _calculateTotal(syncPayment: true);
             });
           },
@@ -2677,9 +2531,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
               borderRadius: BorderRadius.circular(12.0),
             ),
             side: BorderSide(
-              color: isSelected
-                  ? AppTheme.primaryColor.withAlpha(8)
-                  : Colors.grey.shade300,
+              color: isSelected ? AppTheme.primaryColor.withAlpha(8) : Colors.grey.shade300,
             ),
             onSelected: (selected) {
               _calculateTotal();
@@ -2687,24 +2539,18 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
               setState(() {
                 if (selected) {
-                  final otherPayments = Map.from(_paymentAmounts)
-                    ..remove(method.id);
-                  final bool alreadyPaidFull = (currentDebt <= 0) &&
-                      otherPayments.values.any((v) => (v as double) > 0);
+                  final otherPayments = Map.from(_paymentAmounts)..remove(method.id);
+                  final bool alreadyPaidFull = (currentDebt <= 0) && otherPayments.values.any((v) => (v as double) > 0);
 
                   if (alreadyPaidFull) {
-                    ToastService().show(
-                        message: 'Đã đủ tiền, không cần thêm PTTT.',
-                        type: ToastType.warning);
+                    ToastService().show(message: 'Đã đủ tiền, không cần thêm PTTT.', type: ToastType.warning);
                     return;
                   }
 
                   _selectedMethodIds.add(method.id);
 
                   double amountToSet;
-                  final double remainingAmount = (currentDebt > 0)
-                      ? currentDebt
-                      : (_totalPayable > 0 ? _totalPayable : 0);
+                  final double remainingAmount = (currentDebt > 0) ? currentDebt : (_totalPayable > 0 ? _totalPayable : 0);
 
                   if (method.type == PaymentMethodType.cash) {
                     if (widget.promptForCash) {
@@ -2771,14 +2617,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withAlpha(12),
-                blurRadius: 10,
-                offset: const Offset(0, -5))
-          ],
-          border:
-          Border(top: BorderSide(color: Colors.grey.shade200, width: 1.0))),
+          boxShadow: [BoxShadow(color: Colors.black.withAlpha(12), blurRadius: 10, offset: const Offset(0, -5))],
+          border: Border(top: BorderSide(color: Colors.grey.shade200, width: 1.0))),
 
       // KIỂM TRA CHẾ ĐỘ ĐỂ HIỆN NÚT TƯƠNG ỨNG
       child: widget.isRetailMode
@@ -2794,8 +2634,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           Expanded(
             child: OutlinedButton(
               onPressed: _isProcessingPayment ? null : widget.onCancel,
-              style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16)),
+              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
               child: const Text('Hủy'),
             ),
           ),
@@ -2806,8 +2645,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             onPressed: _isProcessingPayment ? null : _printAndExit,
             icon: const Icon(Icons.print_outlined, size: 20),
             label: const Text('TẠM TÍNH'),
-            style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 8)),
+            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
           ),
         ),
         const SizedBox(width: 8),
@@ -2816,14 +2654,9 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           child: ElevatedButton(
             // F&B gọi không tham số -> in theo cấu hình
             onPressed: _isProcessingPayment ? null : () => _confirmPayment(),
-            style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 8)),
+            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8)),
             child: _isProcessingPayment
-                ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 3))
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                 : const Text('XÁC NHẬN THANH TOÁN'),
           ),
         ),
@@ -2841,8 +2674,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
           Expanded(
             child: OutlinedButton(
               onPressed: _isProcessingPayment ? null : widget.onCancel,
-              style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16)),
+              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
               child: const Text('Hủy'),
             ),
           ),
@@ -2852,11 +2684,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         // Nút Thanh toán (Giữ nguyên: Luôn thanh toán nhưng KHÔNG in)
         Expanded(
           child: ElevatedButton(
-            onPressed: _isProcessingPayment
-                ? null
-                : () => _confirmPayment(forcePrint: false),
-            style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16)),
+            onPressed: _isProcessingPayment ? null : () => _confirmPayment(forcePrint: false),
+            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
             child: const Text('Thanh toán'),
           ),
         ),
@@ -2869,21 +2698,17 @@ class _PaymentPanelState extends State<_PaymentPanel> {
             onPressed: _isProcessingPayment
                 ? null
                 : () {
-              if (isShipOrder) {
-                // Nếu là Ship -> Chỉ In Bill (Gọi hàm mới)
-                _printShipBillOnly();
-              } else {
-                // Nếu là Tại quầy -> Thanh toán & In (Logic cũ)
-                _confirmPayment(forcePrint: true);
-              }
-            },
+                    if (isShipOrder) {
+                      // Nếu là Ship -> Chỉ In Bill (Gọi hàm mới)
+                      _printShipBillOnly();
+                    } else {
+                      // Nếu là Tại quầy -> Thanh toán & In (Logic cũ)
+                      _confirmPayment(forcePrint: true);
+                    }
+                  },
             icon: const Icon(Icons.print),
             label: _isProcessingPayment
-                ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 3))
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                 : Text(isShipOrder ? 'In Bill (Ship)' : 'Thanh toán & In'), // Đổi tên nút
             style: ElevatedButton.styleFrom(
                 backgroundColor: isShipOrder ? Colors.orange : AppTheme.primaryColor, // Đổi màu cam cho dễ phân biệt nếu muốn
@@ -2899,9 +2724,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
 
     for (final itemMap in widget.order.items) {
       // 1. Ép kiểu Product an toàn
-      final product = itemMap['product'] is Map
-          ? Map<String, dynamic>.from(itemMap['product'])
-          : <String, dynamic>{};
+      final product = itemMap['product'] is Map ? Map<String, dynamic>.from(itemMap['product']) : <String, dynamic>{};
 
       // Giá vốn mặc định (Cơ bản)
       double itemCostPrice = (product['costPrice'] as num?)?.toDouble() ?? 0.0;
@@ -2986,9 +2809,7 @@ class _PaymentPanelState extends State<_PaymentPanel> {
     }
 
     // 2. Tính TỔNG GIẢM GIÁ CẤP HÓA ĐƠN
-    final double totalBillDiscount = _calculateDiscount() +
-        _voucherDiscountValue +
-        _pointsMonetaryValue;
+    final double totalBillDiscount = _calculateDiscount() + _voucherDiscountValue + _pointsMonetaryValue;
 
     // 3. Tính DOANH THU THUẦN (Net Revenue) từ hàng hóa
     // widget.subtotal: Là tổng tiền hàng (đã trừ giảm giá từng món, chưa gồm thuế/phụ thu)
@@ -3009,11 +2830,7 @@ class _CustomerInfoPanel extends StatelessWidget {
     if (customer == null) {
       return ListTile(
         leading: const Icon(Icons.person, color: Colors.grey),
-        title: Text('Khách lẻ',
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.bold)),
+        title: Text('Khách lẻ', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
         contentPadding: EdgeInsets.zero,
       );
     }
@@ -3030,20 +2847,13 @@ class _CustomerInfoPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(customer!.name,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _InfoTile(
-                  icon: Icons.receipt_long,
-                  label: 'Dư nợ:',
-                  value: '${formatNumber(debt)} đ'),
-              _InfoTile(
-                  icon: Icons.star,
-                  label: 'Điểm thưởng:',
-                  value: formatNumber(points.toDouble())),
+              _InfoTile(icon: Icons.receipt_long, label: 'Dư nợ:', value: '${formatNumber(debt)} đ'),
+              _InfoTile(icon: Icons.star, label: 'Điểm thưởng:', value: formatNumber(points.toDouble())),
             ],
           )
         ],
@@ -3057,8 +2867,7 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoTile(
-      {required this.icon, required this.label, required this.value});
+  const _InfoTile({required this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -3066,15 +2875,10 @@ class _InfoTile extends StatelessWidget {
       children: [
         Icon(icon, color: Colors.grey.shade600, size: 20),
         const SizedBox(width: 4),
-        Text(label,
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(color: Colors.grey.shade600)),
+        Text(label, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey.shade600)),
         const SizedBox(width: 4),
         Text(value,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -3084,25 +2888,20 @@ class CashDenominationDialog extends StatefulWidget {
   final double totalPayable;
   final double initialCash;
   final bool hasCustomer;
-  const CashDenominationDialog(
-      {super.key, required this.totalPayable, required this.initialCash, required this.hasCustomer,});
+
+  const CashDenominationDialog({
+    super.key,
+    required this.totalPayable,
+    required this.initialCash,
+    required this.hasCustomer,
+  });
 
   @override
   State<CashDenominationDialog> createState() => _CashDenominationDialogState();
 }
 
 class _CashDenominationDialogState extends State<CashDenominationDialog> {
-  final List<int> denominations = [
-    500000,
-    200000,
-    100000,
-    50000,
-    20000,
-    10000,
-    5000,
-    2000,
-    1000
-  ];
+  final List<int> denominations = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000];
   final Map<int, int> _quantities = {};
   double _totalCash = 0;
   bool _isPopping = false;
@@ -3170,10 +2969,7 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
           children: [
             Text(
               'Phải trả: ${formatNumber(widget.totalPayable)} đ',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(color: Colors.red, fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.red, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
@@ -3186,10 +2982,10 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
             const SizedBox(height: 8),
             Text(
               'Tiền thừa: ${formatNumber(changeToDisplay)} đ',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.green,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 18),
             ),
             const SizedBox(height: 16),
 
@@ -3222,23 +3018,15 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
       actions: [
         if (widget.hasCustomer)
           TextButton(
-            onPressed: () =>
-                _safePop({'value': _totalCash, 'isDebtConfirmed': true}),
-            child: const Text('Ghi nợ',
-                style:
-                TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            onPressed: () => _safePop({'value': _totalCash, 'isDebtConfirmed': true}),
+            child: const Text('Ghi nợ', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         TextButton(
           onPressed: _reset,
           child: const Text('Reset'),
         ),
-        TextButton(
-            onPressed: () => _safePop(null),
-            child: const Text('Hủy')),
-        ElevatedButton(
-            onPressed: () =>
-                _safePop({'value': _totalCash, 'isDebtConfirmed': false}),
-            child: const Text('Xong')),
+        TextButton(onPressed: () => _safePop(null), child: const Text('Hủy')),
+        ElevatedButton(onPressed: () => _safePop({'value': _totalCash, 'isDebtConfirmed': false}), child: const Text('Xong')),
       ],
     );
   }
@@ -3260,10 +3048,10 @@ class _CashDenominationDialogState extends State<CashDenominationDialog> {
               child: Text(
                 formatNumber(den.toDouble()),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textColor,
-                  fontSize: 18,
-                ),
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textColor,
+                      fontSize: 18,
+                    ),
               ),
             ),
           ),
@@ -3302,9 +3090,9 @@ class CenteredRangeTextInputFormatter extends TextInputFormatter {
 
   @override
   TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue,
-      TextEditingValue newValue,
-      ) {
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
     if (newValue.text.isEmpty) {
       return newValue;
     }

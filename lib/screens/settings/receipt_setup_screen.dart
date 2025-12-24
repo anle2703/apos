@@ -17,6 +17,7 @@ import '../../widgets/table_notification_widget.dart';
 
 class ReceiptSetupScreen extends StatefulWidget {
   final UserModel currentUser;
+
   const ReceiptSetupScreen({super.key, required this.currentUser});
 
   @override
@@ -84,8 +85,7 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
             itemsToPrint: dummyItems,
             targetPrinterRole: 'kitchen_printer_a',
             configuredPrinters: configuredPrinters,
-            customerName: "Anh Nam"
-        );
+            customerName: "Anh Nam");
       } else {
         final bool showPrices = _previewMode != 'check_dish';
         final bool isSimple = _previewMode == 'provisional_simple';
@@ -96,7 +96,9 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
           'subtotal': 155000.0,
           'discount': 15500.0,
           'taxAmount': 0.0,
-          'surcharges': [{'name': 'Phụ thu Tết', 'amount': 10000.0}],
+          'surcharges': [
+            {'name': 'Phụ thu Tết', 'amount': 10000.0}
+          ],
           'totalPayable': 149500.0,
           'changeAmount': 50500.0,
           'customer': {'name': 'Lê Thành An', 'phone': '0935417776'},
@@ -123,7 +125,6 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
       }
 
       ToastService().show(message: "Đã gửi lệnh in thử", type: ToastType.success);
-
     } catch (e) {
       ToastService().show(message: "Lỗi in thử: $e", type: ToastType.error);
     } finally {
@@ -139,9 +140,14 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
       appBar: AppBar(
         title: const Text('Cấu hình Mẫu in'),
         actions: [
-          IconButton(icon: const Icon(Icons.restore, color: AppTheme.primaryColor, size: 30), onPressed: _resetToDefaults, tooltip: 'Mặc định'),
-          IconButton(icon: const Icon(Icons.print, color: AppTheme.primaryColor, size: 30), onPressed: _testPrint, tooltip: 'In thử'),
-          IconButton(icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 30), onPressed: _saveSettings, tooltip: 'Lưu'),
+          IconButton(
+              icon: const Icon(Icons.restore, color: AppTheme.primaryColor, size: 30),
+              onPressed: _resetToDefaults,
+              tooltip: 'Mặc định'),
+          IconButton(
+              icon: const Icon(Icons.print, color: AppTheme.primaryColor, size: 30), onPressed: _testPrint, tooltip: 'In thử'),
+          IconButton(
+              icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 30), onPressed: _saveSettings, tooltip: 'Lưu'),
         ],
       ),
       body: LayoutBuilder(
@@ -149,17 +155,17 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
           bool isWide = constraints.maxWidth > 800;
           return isWide
               ? Row(
-            children: [
-              Expanded(flex: 5, child: _buildPreviewPanel()),
-              Expanded(flex: 5, child: _buildSettingsPanel()),
-            ],
-          )
+                  children: [
+                    Expanded(flex: 5, child: _buildPreviewPanel()),
+                    Expanded(flex: 5, child: _buildSettingsPanel()),
+                  ],
+                )
               : Column(
-            children: [
-              Expanded(flex: 4, child: _buildPreviewPanel()),
-              Expanded(flex: 6, child: _buildSettingsPanel()),
-            ],
-          );
+                  children: [
+                    Expanded(flex: 4, child: _buildPreviewPanel()),
+                    Expanded(flex: 6, child: _buildSettingsPanel()),
+                  ],
+                );
         },
       ),
     );
@@ -175,7 +181,6 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
           children: [
             Text("Xem trước mẫu in", style: TextStyle(color: Colors.grey[700], fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
-
             Container(
               constraints: const BoxConstraints(maxWidth: 380),
               decoration: BoxDecoration(
@@ -197,7 +202,8 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
     if (_previewMode == 'kitchen') {
       return _buildKitchenPreview();
     }
-    if (_previewMode == 'table_event') { // <--- THÊM LOGIC NÀY
+    if (_previewMode == 'table_event') {
+      // <--- THÊM LOGIC NÀY
       return TableNotificationWidget(
         storeInfo: {'name': 'CÀ PHÊ GÓC PHỐ'},
         actionTitle: 'CHUYỂN BÀN',
@@ -212,7 +218,9 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
       'subtotal': 155000.0,
       'discount': 15500.0,
       'taxAmount': 0.0,
-      'surcharges': [{'name': 'Phụ thu Tết', 'amount': 10000.0}],
+      'surcharges': [
+        {'name': 'Phụ thu Tết', 'amount': 10000.0}
+      ],
       'totalPayable': 149500.0,
       'changeAmount': 50500.0,
       'customer': {'name': 'Lê Thành An', 'phone': '0935417776'},
@@ -225,11 +233,7 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
 
     return ReceiptWidget(
       title: title,
-      storeInfo: const {
-        'name': 'Phần mềm APOS',
-        'address': '999 Quang Trung - Tp Quảng Ngãi',
-        'phone': '0935417776'
-      },
+      storeInfo: const {'name': 'Phần mềm APOS', 'address': '999 Quang Trung - Tp Quảng Ngãi', 'phone': '0935417776'},
       items: dummyItems,
       summary: dummySummary,
       userName: 'Thu ngân 01',
@@ -283,9 +287,7 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               // Nếu là Retail, luôn hiển thị settings cho Bill
-              children: (isRetail || _previewMode != 'kitchen')
-                  ? _buildBillSettings()
-                  : _buildKitchenSettings(),
+              children: (isRetail || _previewMode != 'kitchen') ? _buildBillSettings() : _buildKitchenSettings(),
             ),
           ),
         ],
@@ -296,34 +298,46 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
   List<Widget> _buildBillSettings() {
     return [
       _buildSectionTitle("Thông tin chung & Header"),
-      _buildSwitchTile("Hiển thị Tên cửa hàng", _settings.billShowStoreName, (v) => setState(() => _settings.billShowStoreName = v)),
+      _buildSwitchTile(
+          "Hiển thị Tên cửa hàng", _settings.billShowStoreName, (v) => setState(() => _settings.billShowStoreName = v)),
       _buildSliderTile("Cỡ chữ Tên quán", _settings.billHeaderSize, 10, 30, (v) => setState(() => _settings.billHeaderSize = v)),
 
-      _buildSwitchTile("Hiển thị Địa chỉ", _settings.billShowStoreAddress, (v) => setState(() => _settings.billShowStoreAddress = v)),
-      _buildSliderTile("Cỡ chữ Địa chỉ", _settings.billAddressSize, 8, 30, (v) => setState(() => _settings.billAddressSize = v)), // Mới
+      _buildSwitchTile(
+          "Hiển thị Địa chỉ", _settings.billShowStoreAddress, (v) => setState(() => _settings.billShowStoreAddress = v)),
+      _buildSliderTile("Cỡ chữ Địa chỉ", _settings.billAddressSize, 8, 30, (v) => setState(() => _settings.billAddressSize = v)),
+      // Mới
 
-      _buildSwitchTile("Hiển thị SĐT/Hotline", _settings.billShowStorePhone, (v) => setState(() => _settings.billShowStorePhone = v)),
-      _buildSliderTile("Cỡ chữ SĐT", _settings.billPhoneSize, 8, 30, (v) => setState(() => _settings.billPhoneSize = v)), // Mới
+      _buildSwitchTile(
+          "Hiển thị SĐT/Hotline", _settings.billShowStorePhone, (v) => setState(() => _settings.billShowStorePhone = v)),
+      _buildSliderTile("Cỡ chữ SĐT", _settings.billPhoneSize, 8, 30, (v) => setState(() => _settings.billPhoneSize = v)),
+      // Mới
       const SizedBox(height: 8),
 
       _buildSectionTitle("Thông tin đơn hàng"),
       _buildSliderTile("Cỡ chữ Tiêu đề", _settings.billTitleSize, 10, 30, (v) => setState(() => _settings.billTitleSize = v)),
-      _buildSwitchTile("Hiển thị tên Thu ngân", _settings.billShowCashierName, (v) => setState(() => _settings.billShowCashierName = v)),
-      _buildSwitchTile("Hiển thị tên Khách hàng", _settings.billShowCustomerName, (v) => setState(() => _settings.billShowCustomerName = v)),
-      _buildSliderTile("Cỡ chữ TT (Khách/NV/Giờ)", _settings.billTextSize, 10, 30, (v) => setState(() => _settings.billTextSize = v)),
+      _buildSwitchTile(
+          "Hiển thị tên Thu ngân", _settings.billShowCashierName, (v) => setState(() => _settings.billShowCashierName = v)),
+      _buildSwitchTile(
+          "Hiển thị tên Khách hàng", _settings.billShowCustomerName, (v) => setState(() => _settings.billShowCustomerName = v)),
+      _buildSliderTile(
+          "Cỡ chữ TT (Khách/NV/Giờ)", _settings.billTextSize, 10, 30, (v) => setState(() => _settings.billTextSize = v)),
       const SizedBox(height: 8),
       _buildSectionTitle("Danh sách món"),
-      _buildSliderTile("Cỡ chữ Tên món", _settings.billItemNameSize, 10, 30, (v) => setState(() => _settings.billItemNameSize = v)),
-      _buildSliderTile("Cỡ chữ Chi tiết (Giá/SL)", _settings.billItemDetailSize, 10, 30, (v) => setState(() => _settings.billItemDetailSize = v)),
+      _buildSliderTile(
+          "Cỡ chữ Tên món", _settings.billItemNameSize, 10, 30, (v) => setState(() => _settings.billItemNameSize = v)),
+      _buildSliderTile("Cỡ chữ Chi tiết (Giá/SL)", _settings.billItemDetailSize, 10, 30,
+          (v) => setState(() => _settings.billItemDetailSize = v)),
       const SizedBox(height: 8),
       _buildSectionTitle("Tổng kết & Footer"),
       _buildSwitchTile("Hiển thị dòng Thuế", _settings.billShowTax, (v) => setState(() => _settings.billShowTax = v)),
       _buildSwitchTile("Hiển thị Phụ thu", _settings.billShowSurcharge, (v) => setState(() => _settings.billShowSurcharge = v)),
       _buildSwitchTile("Hiển thị Chiết khấu", _settings.billShowDiscount, (v) => setState(() => _settings.billShowDiscount = v)),
       _buildSliderTile("Cỡ chữ Tổng tiền", _settings.billTotalSize, 10, 30, (v) => setState(() => _settings.billTotalSize = v)),
-      _buildSwitchTile("Hiển thị Phương thức TT", _settings.billShowPaymentMethod, (v) => setState(() => _settings.billShowPaymentMethod = v)),
+      _buildSwitchTile(
+          "Hiển thị Phương thức TT", _settings.billShowPaymentMethod, (v) => setState(() => _settings.billShowPaymentMethod = v)),
 
-      _buildSwitchTile("Hiển thị Footer (Lời cảm ơn)", _settings.billShowFooter, (v) => setState(() => _settings.billShowFooter = v)),
+      _buildSwitchTile(
+          "Hiển thị Footer (Lời cảm ơn)", _settings.billShowFooter, (v) => setState(() => _settings.billShowFooter = v)),
       const SizedBox(height: 8),
       if (_settings.billShowFooter) ...[
         Padding(
@@ -350,24 +364,32 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
   List<Widget> _buildKitchenSettings() {
     return [
       _buildSectionTitle("Thông tin phiếu"),
-      _buildSliderTile("Cỡ chữ Tiêu đề", _settings.kitchenTitleSize, 10, 30, (v) => setState(() => _settings.kitchenTitleSize = v)),
+      _buildSliderTile(
+          "Cỡ chữ Tiêu đề", _settings.kitchenTitleSize, 10, 30, (v) => setState(() => _settings.kitchenTitleSize = v)),
       _buildSwitchTile("Hiển thị Giờ in", _settings.kitchenShowTime, (v) => setState(() => _settings.kitchenShowTime = v)),
-      _buildSwitchTile("Hiển thị tên Nhân viên", _settings.kitchenShowStaff, (v) => setState(() => _settings.kitchenShowStaff = v)),
-      _buildSwitchTile("Hiển thị tên Khách", _settings.kitchenShowCustomer, (v) => setState(() => _settings.kitchenShowCustomer = v)),
-      _buildSliderTile("Cỡ chữ TT (Khách/NV/Giờ)", _settings.kitchenInfoSize, 10, 30, (v) => setState(() => _settings.kitchenInfoSize = v)),
-
+      _buildSwitchTile(
+          "Hiển thị tên Nhân viên", _settings.kitchenShowStaff, (v) => setState(() => _settings.kitchenShowStaff = v)),
+      _buildSwitchTile(
+          "Hiển thị tên Khách", _settings.kitchenShowCustomer, (v) => setState(() => _settings.kitchenShowCustomer = v)),
+      _buildSliderTile(
+          "Cỡ chữ TT (Khách/NV/Giờ)", _settings.kitchenInfoSize, 10, 30, (v) => setState(() => _settings.kitchenInfoSize = v)),
       _buildSectionTitle("Nội dung món"),
-      _buildSliderTile("Cỡ chữ Header (STT/Món/SL)", _settings.kitchenTableHeaderSize, 10, 30, (v) => setState(() => _settings.kitchenTableHeaderSize = v)),
-      _buildSliderTile("Cỡ chữ Số lượng (SL)", _settings.kitchenQtySize, 10, 30, (v) => setState(() => _settings.kitchenQtySize = v)),
-      _buildSliderTile("Cỡ chữ Tên món", _settings.kitchenItemNameSize, 10, 30, (v) => setState(() => _settings.kitchenItemNameSize = v)),
-      _buildSliderTile("Cỡ chữ Ghi chú/Topping", _settings.kitchenNoteSize, 10, 30, (v) => setState(() => _settings.kitchenNoteSize = v)),
+      _buildSliderTile("Cỡ chữ Header (STT/Món/SL)", _settings.kitchenTableHeaderSize, 10, 30,
+          (v) => setState(() => _settings.kitchenTableHeaderSize = v)),
+      _buildSliderTile(
+          "Cỡ chữ Số lượng (SL)", _settings.kitchenQtySize, 10, 30, (v) => setState(() => _settings.kitchenQtySize = v)),
+      _buildSliderTile(
+          "Cỡ chữ Tên món", _settings.kitchenItemNameSize, 10, 30, (v) => setState(() => _settings.kitchenItemNameSize = v)),
+      _buildSliderTile(
+          "Cỡ chữ Ghi chú/Topping", _settings.kitchenNoteSize, 10, 30, (v) => setState(() => _settings.kitchenNoteSize = v)),
     ];
   }
 
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Text(title.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 13)),
+      child: Text(title.toUpperCase(),
+          style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 13)),
     );
   }
 
@@ -411,7 +433,22 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
     // SỬA: Xóa tham số subtotal, để OrderItem tự tính
     return [
       OrderItem(
-        product: ProductModel(id: '1', productName: 'Cà phê sữa đá', sellPrice: 25000, productCode: 'CF01', additionalBarcodes: [], additionalUnits: [], costPrice: 0, stock: 0, minStock: 0, storeId: '', ownerUid: '', accompanyingItems: [], recipeItems: [], compiledMaterials: [], kitchenPrinters: []),
+        product: ProductModel(
+            id: '1',
+            productName: 'Cà phê sữa đá',
+            sellPrice: 25000,
+            productCode: 'CF01',
+            additionalBarcodes: [],
+            additionalUnits: [],
+            costPrice: 0,
+            stock: 0,
+            minStock: 0,
+            storeId: '',
+            ownerUid: '',
+            accompanyingItems: [],
+            recipeItems: [],
+            compiledMaterials: [],
+            kitchenPrinters: []),
         quantity: 2,
         price: 25000,
         selectedUnit: 'Ly',
@@ -423,7 +460,22 @@ class _ReceiptSetupScreenState extends State<ReceiptSetupScreen> {
         commissionStaff: {},
       ),
       OrderItem(
-        product: ProductModel(id: '2', productName: 'Trà đào cam sả', sellPrice: 35000, productCode: 'TD01', additionalBarcodes: [], additionalUnits: [], costPrice: 0, stock: 0, minStock: 0, storeId: '', ownerUid: '', accompanyingItems: [], recipeItems: [], compiledMaterials: [], kitchenPrinters: []),
+        product: ProductModel(
+            id: '2',
+            productName: 'Trà đào cam sả',
+            sellPrice: 35000,
+            productCode: 'TD01',
+            additionalBarcodes: [],
+            additionalUnits: [],
+            costPrice: 0,
+            stock: 0,
+            minStock: 0,
+            storeId: '',
+            ownerUid: '',
+            accompanyingItems: [],
+            recipeItems: [],
+            compiledMaterials: [],
+            kitchenPrinters: []),
         quantity: 1,
         price: 35000,
         selectedUnit: 'Ly',

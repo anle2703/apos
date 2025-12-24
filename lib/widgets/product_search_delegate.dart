@@ -17,19 +17,17 @@ class ProductSearchScreen {
   }) async {
     return await Navigator.of(context).push<ProductModel>(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            _ProductSearchContent(
-              currentUser: currentUser,
-              allowedProductTypes: allowedProductTypes,
-              isMultiSelect: false,
-              groupByCategory: false,
-            ),
+        pageBuilder: (context, animation, secondaryAnimation) => _ProductSearchContent(
+          currentUser: currentUser,
+          allowedProductTypes: allowedProductTypes,
+          isMultiSelect: false,
+          groupByCategory: false,
+        ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(0.0, 1.0);
           const end = Offset.zero;
           const curve = Curves.ease;
-          var tween =
-          Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+          var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
           return SlideTransition(
             position: animation.drive(tween),
             child: child,
@@ -48,20 +46,18 @@ class ProductSearchScreen {
   }) async {
     return await Navigator.of(context).push<List<ProductModel>>(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            _ProductSearchContent(
-              currentUser: currentUser,
-              allowedProductTypes: allowedProductTypes,
-              isMultiSelect: true,
-              previouslySelected: previouslySelected,
-              groupByCategory: groupByCategory,
-            ),
+        pageBuilder: (context, animation, secondaryAnimation) => _ProductSearchContent(
+          currentUser: currentUser,
+          allowedProductTypes: allowedProductTypes,
+          isMultiSelect: true,
+          previouslySelected: previouslySelected,
+          groupByCategory: groupByCategory,
+        ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(0.0, 1.0);
           const end = Offset.zero;
           const curve = Curves.ease;
-          var tween =
-          Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+          var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
           return SlideTransition(
             position: animation.drive(tween),
             child: child,
@@ -111,9 +107,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
   Future<void> _loadAllData() async {
     try {
       final results = await Future.wait([
-        _firestoreService
-            .getAllProductsStream(widget.currentUser.storeId)
-            .first,
+        _firestoreService.getAllProductsStream(widget.currentUser.storeId).first,
         if (widget.groupByCategory)
           _firestoreService.getProductGroups(widget.currentUser.storeId)
         else
@@ -196,17 +190,15 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                     contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     suffixIcon: value.text.isNotEmpty
                         ? IconButton(
-                      icon: const Icon(Icons.clear, size: 20, color: AppTheme.primaryColor),
-                      onPressed: () => _searchController.clear(),
-                    )
-                        : ((defaultTargetPlatform == TargetPlatform.android ||
-                        defaultTargetPlatform == TargetPlatform.iOS)
-                        ? IconButton(
-                      icon: const Icon(Icons.qr_code_scanner,
-                          color: AppTheme.primaryColor),
-                      onPressed: _scanBarcode,
-                    )
-                        : null),
+                            icon: const Icon(Icons.clear, size: 20, color: AppTheme.primaryColor),
+                            onPressed: () => _searchController.clear(),
+                          )
+                        : ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS)
+                            ? IconButton(
+                                icon: const Icon(Icons.qr_code_scanner, color: AppTheme.primaryColor),
+                                onPressed: _scanBarcode,
+                              )
+                            : null),
                   ),
                 );
               },
@@ -216,18 +208,17 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : (_allProducts.isEmpty
-                ? const Center(child: Text('Không có sản phẩm nào.'))
-                : ValueListenableBuilder<TextEditingValue>(
-              valueListenable: _searchController,
-              builder: (context, value, child) {
-                final filteredProducts = _getFilteredProducts();
+                    ? const Center(child: Text('Không có sản phẩm nào.'))
+                    : ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _searchController,
+                        builder: (context, value, child) {
+                          final filteredProducts = _getFilteredProducts();
 
-                return widget.groupByCategory
-                    ? _buildTabbedProductList(filteredProducts)
-                    : _buildFlatProductList(filteredProducts);
-              },
-            )
-            ),
+                          return widget.groupByCategory
+                              ? _buildTabbedProductList(filteredProducts)
+                              : _buildFlatProductList(filteredProducts);
+                        },
+                      )),
           ),
         ],
       ),
@@ -240,20 +231,17 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
     return _allProducts.where((product) {
       final typeFilterPassed = widget.allowedProductTypes == null ||
           widget.allowedProductTypes!.isEmpty ||
-          (product.productType != null &&
-              widget.allowedProductTypes!.contains(product.productType));
+          (product.productType != null && widget.allowedProductTypes!.contains(product.productType));
       if (!typeFilterPassed) return false;
 
       if (searchQuery.isEmpty) return true;
 
-      final nameMatches =
-      product.productName.toLowerCase().contains(searchQuery);
+      final nameMatches = product.productName.toLowerCase().contains(searchQuery);
 
-      final codeMatches =
-          product.productCode?.toLowerCase().contains(searchQuery) ?? false;
+      final codeMatches = product.productCode?.toLowerCase().contains(searchQuery) ?? false;
 
       final barcodeMatches = product.additionalBarcodes.any(
-            (barcode) => barcode.toLowerCase().contains(searchQuery),
+        (barcode) => barcode.toLowerCase().contains(searchQuery),
       );
 
       return nameMatches || codeMatches || barcodeMatches;
@@ -265,16 +253,12 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
     if (!widget.isMultiSelect) return;
 
     final filteredProducts = _getFilteredProducts();
-    final productsForTab = (tabName == 'Tất cả')
-        ? filteredProducts
-        : filteredProducts
-        .where((p) => p.productGroup == tabName)
-        .toList();
+    final productsForTab =
+        (tabName == 'Tất cả') ? filteredProducts : filteredProducts.where((p) => p.productGroup == tabName).toList();
 
     if (productsForTab.isEmpty) return;
 
-    final bool allSelected = productsForTab.every((product) =>
-        _tempSelectedItems.any((selected) => selected.id == product.id));
+    final bool allSelected = productsForTab.every((product) => _tempSelectedItems.any((selected) => selected.id == product.id));
 
     setState(() {
       if (allSelected) {
@@ -312,9 +296,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
   Widget _buildTabbedProductList(List<ProductModel> filteredProducts) {
     final Map<String, List<ProductModel>> groupedProducts = {};
     for (final product in filteredProducts) {
-      final groupName = product.productGroup != null && product.productGroup!.isNotEmpty
-          ? product.productGroup!
-          : 'Khác';
+      final groupName = product.productGroup != null && product.productGroup!.isNotEmpty ? product.productGroup! : 'Khác';
       (groupedProducts[groupName] ??= []).add(product);
     }
     final List<ProductGroupModel> nonEmptyGroups = [];
@@ -338,9 +320,8 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
             onTap: (index) {
               final now = DateTime.now();
               final sameTab = (_lastTabIndex == index);
-              final isDouble = sameTab &&
-                  _lastTabTapAt != null &&
-                  now.difference(_lastTabTapAt!) < const Duration(milliseconds: 300);
+              final isDouble =
+                  sameTab && _lastTabTapAt != null && now.difference(_lastTabTapAt!) < const Duration(milliseconds: 300);
 
               if (isDouble) {
                 _handleTabDoubleTap(tabNames[index]);
@@ -354,14 +335,10 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
           Expanded(
             child: TabBarView(
               children: tabNames.map((tabName) {
-                final productsForTab = (tabName == 'Tất cả')
-                    ? filteredProducts
-                    : groupedProducts[tabName] ?? [];
+                final productsForTab = (tabName == 'Tất cả') ? filteredProducts : groupedProducts[tabName] ?? [];
                 if (productsForTab.isEmpty) {
                   return Center(
-                    child: Text(tabName == 'Tất cả'
-                        ? 'Không tìm thấy kết quả phù hợp.'
-                        : 'Không có sản phẩm trong nhóm này.'),
+                    child: Text(tabName == 'Tất cả' ? 'Không tìm thấy kết quả phù hợp.' : 'Không có sản phẩm trong nhóm này.'),
                   );
                 }
                 return ListView.builder(
@@ -379,7 +356,6 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
         ],
       ),
     );
-
   }
 
   Widget _buildUnifiedListItem({
@@ -393,14 +369,11 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
         borderRadius: BorderRadius.circular(12),
         child: product.imageUrl != null && product.imageUrl!.isNotEmpty
             ? CachedNetworkImage(
-          imageUrl: product.imageUrl!,
-          fit: BoxFit.cover,
-          placeholder: (context, url) =>
-              Container(color: Colors.grey.shade200),
-          errorWidget: (context, url, error) => const Icon(
-              Icons.image_not_supported_outlined,
-              color: Colors.grey),
-        )
+                imageUrl: product.imageUrl!,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(color: Colors.grey.shade200),
+                errorWidget: (context, url, error) => const Icon(Icons.image_not_supported_outlined, color: Colors.grey),
+              )
             : const Icon(Icons.inventory_2_outlined, color: Colors.grey),
       ),
     );
@@ -415,9 +388,9 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
           Text(
             product.productName,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Colors.grey.shade700,
-              fontWeight: FontWeight.bold,
-            ),
+                  color: Colors.grey.shade700,
+                  fontWeight: FontWeight.bold,
+                ),
             maxLines: 2, // Giới hạn 2 dòng cho tên dài
             overflow: TextOverflow.ellipsis,
           ),
@@ -429,7 +402,8 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
               // Mã sản phẩm
               const Icon(Icons.qr_code_scanner, size: 14, color: Colors.grey),
               const SizedBox(width: 4),
-              Flexible( // Dùng Flexible để mã dài không bị lỗi
+              Flexible(
+                // Dùng Flexible để mã dài không bị lỗi
                 child: Text(
                   product.productCode ?? '---',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
@@ -446,8 +420,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                 'Tồn: ${formatNumber(product.stock)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: product.stock <= 0 ? Colors.red : Colors.grey.shade700,
-                    fontWeight: product.stock <= 0 ? FontWeight.bold : FontWeight.normal
-                ),
+                    fontWeight: product.stock <= 0 ? FontWeight.bold : FontWeight.normal),
               ),
             ],
           ),
@@ -460,10 +433,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
               // Giá bán
               Text(
                 formatNumber(product.sellPrice),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade700,
-                    fontSize: 14
-                ),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade700, fontSize: 14),
               ),
 
               if (hasUnit) ...[
@@ -473,13 +443,10 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                   decoration: BoxDecoration(
                       color: Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.grey.shade300)
-                  ),
+                      border: Border.all(color: Colors.grey.shade300)),
                   child: Text(
                     product.unit!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey.shade800
-                    ),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade800),
                   ),
                 )
               ]
@@ -488,6 +455,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
         ],
       );
     }
+
     return InkWell(
       onTap: () {
         if (widget.isMultiSelect) {
@@ -526,8 +494,7 @@ class _ProductSearchContentState extends State<_ProductSearchContent> {
                             _tempSelectedItems.add(product);
                           }
                         } else {
-                          _tempSelectedItems
-                              .removeWhere((item) => item.id == product.id);
+                          _tempSelectedItems.removeWhere((item) => item.id == product.id);
                         }
                       });
                     },

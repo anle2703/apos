@@ -79,8 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
     'facebook': 'https://www.facebook.com/anlee2502',
     'zalo': '0935417776',
   };
-  final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
@@ -119,10 +118,9 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         String? token = await FirebaseMessaging.instance.getToken();
         if (token != null) {
-          await _settingsService.updateStoreSettings(
-              _currentUser!.storeId,
-              {'fcmTokens': FieldValue.arrayRemove([token])}
-          );
+          await _settingsService.updateStoreSettings(_currentUser!.storeId, {
+            'fcmTokens': FieldValue.arrayRemove([token])
+          });
         }
       } catch (e) {
         debugPrint("Lỗi xóa token cache: $e");
@@ -149,25 +147,21 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    final DarwinInitializationSettings initializationSettingsDarwin =
-        DarwinInitializationSettings(
+    final DarwinInitializationSettings initializationSettingsDarwin = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
 
-    final InitializationSettings initializationSettings =
-        InitializationSettings(
+    final InitializationSettings initializationSettings = InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsDarwin,
     );
 
     await _localNotificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
 
     await _localNotificationsPlugin.initialize(
@@ -182,17 +176,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       String? token = await FirebaseMessaging.instance.getToken();
-      await _settingsService.updateStoreSettings(
-          _currentUser!.storeId,
-          {'fcmTokens': FieldValue.arrayUnion([token])}
-      );
+      await _settingsService.updateStoreSettings(_currentUser!.storeId, {
+        'fcmTokens': FieldValue.arrayUnion([token])
+      });
     } catch (e) {
       debugPrint(">>> [DEBUG] Lỗi đồng bộ Token: $e");
     }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      debugPrint(
-          ">>> [DEBUG] TIN NHẮN ĐẾN KHI APP MỞ: ${message.notification?.title}");
+      debugPrint(">>> [DEBUG] TIN NHẮN ĐẾN KHI APP MỞ: ${message.notification?.title}");
 
       RemoteNotification? notification = message.notification;
       AndroidNotification? android = message.notification?.android;
@@ -212,8 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
               importance: Importance.max,
               priority: Priority.high,
               icon: '@mipmap/ic_launcher',
-              largeIcon:
-                  const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+              largeIcon: const DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
             ),
           ),
         );
@@ -300,9 +291,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (_currentUser!.role != 'guest') {
-      final String realOwnerUid = _currentUser!.role == 'owner'
-          ? _currentUser!.uid
-          : (_currentUser!.ownerUid ?? _currentUser!.uid);
+      final String realOwnerUid =
+          _currentUser!.role == 'owner' ? _currentUser!.uid : (_currentUser!.ownerUid ?? _currentUser!.uid);
 
       ShiftService().ensureShiftOpen(
         _currentUser!.storeId,
@@ -315,8 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _handleContactAction(String type, String value) async {
     if (value.isEmpty) {
-      ToastService().show(
-          message: 'Chưa cập nhật thông tin này.', type: ToastType.warning);
+      ToastService().show(message: 'Chưa cập nhật thông tin này.', type: ToastType.warning);
       return;
     }
 
@@ -340,8 +329,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (isMobile) {
           // Mobile: Thử mở bằng App Facebook trước (externalApplication)
           // Nếu không được (chưa cài App) -> Tự động fallback sang trình duyệt
-          bool launched =
-              await launchUrl(uri, mode: LaunchMode.externalApplication);
+          bool launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
           if (!launched) {
             await launchUrl(uri, mode: LaunchMode.platformDefault);
           }
@@ -384,8 +372,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Mobile: Dùng link https chuẩn
         final Uri uri = Uri.parse("https://zalo.me/$value");
 
-        bool launched =
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
+        bool launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
 
         if (!launched) {
           if (mounted) _showInfoPopup('Zalo', value);
@@ -408,26 +395,18 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Text(title, style: const TextStyle(fontSize: 18)),
         content: Row(
           children: [
-            Expanded(
-                child: Text(content,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold))),
+            Expanded(child: Text(content, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
             IconButton(
               icon: const Icon(Icons.copy, color: Colors.blue),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: content));
                 Navigator.of(ctx).pop();
-                ToastService().show(
-                    message: 'Đã sao chép $content', type: ToastType.success);
+                ToastService().show(message: 'Đã sao chép $content', type: ToastType.success);
               },
             )
           ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Đóng'))
-        ],
+        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Đóng'))],
       ),
     );
   }
@@ -435,32 +414,40 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _checkAndShowBusinessTypePicker() async {
     if (_currentUser == null) return;
     if (_currentUser!.role != 'owner') return;
+    // Nếu đang hiện popup rồi thì thôi
     if (_isShowingTypePicker) return;
 
+    // 1. Kiểm tra RAM trước
     if (_currentUser!.businessType != null && _currentUser!.businessType!.isNotEmpty) {
       return;
     }
 
     try {
+      // 2. Kiểm tra Server (Store Settings)
       final settings = await _settingsService.getStoreSettings(_currentUser!.storeId);
 
+      // Nếu Server đã có dữ liệu (trường hợp đăng nhập máy khác)
       if (settings.businessType != null && settings.businessType!.isNotEmpty) {
         if (mounted) {
           setState(() {
+            // Cập nhật ngay vào RAM để không hỏi lại nữa
             _currentUser = _currentUser!.copyWith(businessType: settings.businessType);
           });
         }
-        return;
+        return; // Đã có rồi -> KẾT THÚC, không hiện popup
       }
     } catch (e) {
-      debugPrint("Store Settings chưa tồn tại (User mới), chuẩn bị hiện Popup: $e");
+      debugPrint("Lỗi check businessType: $e");
     }
 
+    // 3. Nếu cả RAM và Server đều chưa có -> Mới hiện Popup
     _isShowingTypePicker = true;
 
+    // Delay nhỏ để tránh xung đột UI khi vừa vào app
     await Future.delayed(const Duration(milliseconds: 500));
 
     if (mounted) {
+      // Check lại lần cuối trước khi hiện (phòng trường hợp mạng lag load xong ngay lúc delay)
       if (_currentUser!.businessType != null && _currentUser!.businessType!.isNotEmpty) {
         _isShowingTypePicker = false;
         return;
@@ -480,10 +467,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _authService.signOut().then((_) {
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(
-                  builder: (context) =>
-                      SubscriptionExpiredScreen(expiryDate: expiry)),
-              (route) => false);
+              MaterialPageRoute(builder: (context) => SubscriptionExpiredScreen(expiryDate: expiry)), (route) => false);
         }
       });
     }
@@ -492,8 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startListeningToOwnerStatus(String ownerUid) {
     if (_ownerStatusSubscription != null) return;
 
-    _ownerStatusSubscription =
-        _firestoreService.streamUserProfile(ownerUid).listen((ownerProfile) {
+    _ownerStatusSubscription = _firestoreService.streamUserProfile(ownerUid).listen((ownerProfile) {
       if (ownerProfile != null) {
         _processExpiredUser(ownerProfile.subscriptionExpiryDate);
       }
@@ -508,9 +491,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_currentUser != null) {
       final navigator = Navigator.of(context);
 
-      _userStatusSubscription = _firestoreService
-          .streamUserProfile(_currentUser!.uid)
-          .listen((userProfile) {
+      _userStatusSubscription = _firestoreService.streamUserProfile(_currentUser!.uid).listen((userProfile) {
         // --- [SỬA LỖI CRASH WINDOWS TẠI ĐÂY] ---
         // Bao bọc logic bằng Future.delayed để ép nó chạy trên UI Thread
         Future.delayed(Duration.zero, () {
@@ -518,31 +499,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (userProfile == null) {
             _authService.signOut().then((_) {
-              navigator.pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (context) => const AuthGate()),
-                  (route) => false);
+              navigator.pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const AuthGate()), (route) => false);
             });
             return;
           }
 
           if (!userProfile.active) {
             bool isExpired = false;
-            if (userProfile.inactiveReason == 'store_expired' ||
-                userProfile.inactiveReason == 'expired_subscription') {
+            if (userProfile.inactiveReason == 'store_expired' || userProfile.inactiveReason == 'expired_subscription') {
               isExpired = true;
             } else if (userProfile.role == 'owner' &&
                 userProfile.subscriptionExpiryDate != null &&
-                DateTime.now()
-                    .isAfter(userProfile.subscriptionExpiryDate!.toDate())) {
+                DateTime.now().isAfter(userProfile.subscriptionExpiryDate!.toDate())) {
               isExpired = true;
             }
 
             if (isExpired) {
               // A. Xử lý cho NHÂN VIÊN
               if (userProfile.role != 'owner' && userProfile.ownerUid != null) {
-                _firestoreService
-                    .getUserProfile(userProfile.ownerUid!)
-                    .then((owner) {
+                _firestoreService.getUserProfile(userProfile.ownerUid!).then((owner) {
                   DateTime expiryDisplay = DateTime.now();
                   if (owner != null && owner.subscriptionExpiryDate != null) {
                     expiryDisplay = owner.subscriptionExpiryDate!.toDate();
@@ -553,10 +528,8 @@ class _HomeScreenState extends State<HomeScreen> {
               }
 
               // B. Xử lý cho CHỦ
-              if (userProfile.role == 'owner' &&
-                  userProfile.subscriptionExpiryDate != null) {
-                final expiryDisplay =
-                    userProfile.subscriptionExpiryDate!.toDate();
+              if (userProfile.role == 'owner' && userProfile.subscriptionExpiryDate != null) {
+                final expiryDisplay = userProfile.subscriptionExpiryDate!.toDate();
                 _executeLogoutAndShowExpiry(navigator, expiryDisplay);
                 return;
               }
@@ -569,9 +542,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             Future.delayed(const Duration(milliseconds: 500), () {
               _authService.signOut().then((_) {
-                navigator.pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (context) => const AuthGate()),
-                    (route) => false);
+                navigator.pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const AuthGate()), (route) => false);
               });
             });
             return;
@@ -593,43 +564,26 @@ class _HomeScreenState extends State<HomeScreen> {
             _canEditTax = true;
             _canViewContacts = true;
           } else {
-            _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']
-                    ?['canViewPurchaseOrder'] ??
-                false;
-            _canViewPromotions = userProfile.permissions?['promotions']
-                    ?['canViewPromotions'] ??
-                false;
-            _canViewListTable = userProfile.permissions?['listTable']
-                    ?['canViewListTable'] ??
-                false;
-            _canViewEmployee = userProfile.permissions?['employee']
-                    ?['canViewEmployee'] ??
-                false;
-            _canPrintLabel =
-                userProfile.permissions?['products']?['canPrintLabel'] ?? false;
-            _canEditTax =
-                userProfile.permissions?['products']?['canEditTax'] ?? false;
-            _canViewContacts = userProfile.permissions?['contacts']
-                    ?['canViewContacts'] ??
-                false;
+            _canViewPurchaseOrder = userProfile.permissions?['purchaseOrder']?['canViewPurchaseOrder'] ?? false;
+            _canViewPromotions = userProfile.permissions?['promotions']?['canViewPromotions'] ?? false;
+            _canViewListTable = userProfile.permissions?['listTable']?['canViewListTable'] ?? false;
+            _canViewEmployee = userProfile.permissions?['employee']?['canViewEmployee'] ?? false;
+            _canPrintLabel = userProfile.permissions?['products']?['canPrintLabel'] ?? false;
+            _canEditTax = userProfile.permissions?['products']?['canEditTax'] ?? false;
+            _canViewContacts = userProfile.permissions?['contacts']?['canViewContacts'] ?? false;
           }
 
           if (mounted) {
             setState(() {
-              _currentUser = userProfile.copyWith(
-                businessType:
-                    userProfile.businessType ?? _currentUser?.businessType,
-              );
+              _currentUser = userProfile.copyWith(businessType: userProfile.businessType ?? _currentUser?.businessType,);
             });
-            _checkAndShowBusinessTypePicker();
           }
         });
       });
     }
   }
 
-  void _executeLogoutAndShowExpiry(
-      NavigatorState navigator, DateTime expiryDate) {
+  void _executeLogoutAndShowExpiry(NavigatorState navigator, DateTime expiryDate) {
     _userStatusSubscription?.cancel();
     _ownerStatusSubscription?.cancel();
     _ownerStatusSubscription = null;
@@ -637,10 +591,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _authService.signOut().then((_) {
       if (mounted) {
         navigator.pushAndRemoveUntil(
-            MaterialPageRoute(
-                builder: (context) =>
-                    SubscriptionExpiredScreen(expiryDate: expiryDate)),
-            (route) => false);
+            MaterialPageRoute(builder: (context) => SubscriptionExpiredScreen(expiryDate: expiryDate)), (route) => false);
       }
     });
   }
@@ -660,23 +611,14 @@ class _HomeScreenState extends State<HomeScreen> {
             }
             try {
               // Lưu settings
-              await _settingsService.updateStoreSettings(
-                  _currentUser!.storeId,
-                  {'businessType': type}
-              );
+              await _settingsService.updateStoreSettings(_currentUser!.storeId, {'businessType': type});
 
               if (useSampleData) {
-                ToastService().show(
-                    message: 'Đang khởi tạo dữ liệu mẫu...',
-                    type: ToastType.warning
-                );
+                ToastService().show(message: 'Đang khởi tạo dữ liệu mẫu...', type: ToastType.warning);
 
                 await _firestoreService.copySampleDataFromTemplate(_currentUser!.storeId);
 
-                ToastService().show(
-                    message: 'Đã thêm dữ liệu mẫu thành công!',
-                    type: ToastType.success
-                );
+                ToastService().show(message: 'Đã thêm dữ liệu mẫu thành công!', type: ToastType.success);
               }
             } catch (e) {
               debugPrint("Lỗi khởi tạo store: $e");
@@ -733,12 +675,9 @@ class _HomeScreenState extends State<HomeScreen> {
             titleSpacing: 0,
             backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             elevation: 0,
-
-            title: (_currentUser?.role == 'owner' &&
-                    _currentUser?.subscriptionExpiryDate != null)
+            title: (_currentUser?.role == 'owner' && _currentUser?.subscriptionExpiryDate != null)
                 ? Builder(builder: (context) {
-                    final expiry =
-                        _currentUser!.subscriptionExpiryDate!.toDate();
+                    final expiry = _currentUser!.subscriptionExpiryDate!.toDate();
 
                     // Format thời gian
                     final hour = expiry.hour.toString().padLeft(2, '0');
@@ -750,8 +689,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Logic màu
                     final daysLeft = expiry.difference(DateTime.now()).inDays;
                     final isUrgent = daysLeft <= 30;
-                    final Color displayColor =
-                        isUrgent ? Colors.red : Theme.of(context).primaryColor;
+                    final Color displayColor = isUrgent ? Colors.red : Theme.of(context).primaryColor;
 
                     // Container đóng vai trò là dải nền cắt ngang
                     return Container(
@@ -785,20 +723,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   })
                 : Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                'Tài khoản: ${_currentUser?.name ?? "Lỗi hiển thị tên TK"}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      'Tài khoản: ${_currentUser?.name ?? "Lỗi hiển thị tên TK"}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
           ),
           body: ListView(
             children: [
               if (_contactInfo != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8), // Padding nhỏ
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // Padding nhỏ
                   child: Row(
                     children: [
                       // Tiêu đề nhỏ gọn bên trái
@@ -815,24 +752,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       _buildCompactIcon(
                           icon: Icons.phone,
                           color: Colors.blue,
-                          onTap: () => _handleContactAction(
-                              'phone', _contactInfo!['phone'] ?? '')),
+                          onTap: () => _handleContactAction('phone', _contactInfo!['phone'] ?? '')),
                       const SizedBox(width: 8),
 
                       // Icon Facebook
                       _buildCompactIcon(
                           icon: Icons.facebook,
                           color: Colors.blue[800]!, // Màu xanh đậm FB
-                          onTap: () => _handleContactAction(
-                              'facebook', _contactInfo!['facebook'] ?? '')),
+                          onTap: () => _handleContactAction('facebook', _contactInfo!['facebook'] ?? '')),
                       const SizedBox(width: 8),
 
                       // Icon Zalo (Dùng Icon chat + Chữ Z để giả lập)
                       _buildCompactIcon(
                         icon: Icons.circle,
                         color: const Color(0xFF0068FF),
-                        onTap: () => _handleContactAction(
-                            'zalo', _contactInfo!['zalo'] ?? ''),
+                        onTap: () => _handleContactAction('zalo', _contactInfo!['zalo'] ?? ''),
                         isZalo: true, // Cờ đánh dấu để xử lý hiển thị đặc biệt
                       ),
                     ],
@@ -848,15 +782,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     if (_currentUser != null && _canViewPurchaseOrder) {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                            builder: (context) => PurchaseOrdersListScreen(
-                                currentUser: _currentUser!)),
+                        MaterialPageRoute(builder: (context) => PurchaseOrdersListScreen(currentUser: _currentUser!)),
                       );
                     } else {
-                      ToastService().show(
-                          message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
+                      ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                     }
                   },
                 ),
@@ -868,15 +797,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (_currentUser != null && _canPrintLabel) {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                              builder: (context) => ProductLabelPrintScreen(
-                                  currentUser: _currentUser!)),
+                          MaterialPageRoute(builder: (context) => ProductLabelPrintScreen(currentUser: _currentUser!)),
                         );
                       } else {
-                        ToastService().show(
-                            message:
-                                'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                            type: ToastType.warning);
+                        ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                       }
                     },
                   ),
@@ -887,15 +811,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     if (_currentUser != null && _canViewPromotions) {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                            builder: (context) =>
-                                PromotionsScreen(currentUser: _currentUser!)),
+                        MaterialPageRoute(builder: (context) => PromotionsScreen(currentUser: _currentUser!)),
                       );
                     } else {
-                      ToastService().show(
-                          message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
+                      ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                     }
                   },
                 ),
@@ -913,10 +832,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         );
                       } else {
-                        ToastService().show(
-                            message:
-                                'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                            type: ToastType.warning);
+                        ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                       }
                     },
                   ),
@@ -933,10 +849,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     } else {
-                      ToastService().show(
-                          message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
+                      ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                     }
                   },
                 ),
@@ -953,10 +866,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     } else {
-                      ToastService().show(
-                          message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
+                      ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                     }
                   },
                 ),
@@ -967,8 +877,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () {
                       if (_currentUser != null) {
                         Navigator.of(context).push(MaterialPageRoute(
-                          builder: (context) =>
-                              PaymentMethodsScreen(currentUser: _currentUser!),
+                          builder: (context) => PaymentMethodsScreen(currentUser: _currentUser!),
                         ));
                       }
                     },
@@ -979,14 +888,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () {
                     if (_currentUser != null && _canEditTax) {
                       Navigator.of(context).push(MaterialPageRoute(
-                        builder: (context) =>
-                            TaxManagementScreen(currentUser: _currentUser!),
+                        builder: (context) => TaxManagementScreen(currentUser: _currentUser!),
                       ));
                     } else {
-                      ToastService().show(
-                          message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
+                      ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                     }
                   },
                 ),
@@ -996,14 +901,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () {
                     if (_currentUser != null && _canEditTax) {
                       Navigator.of(context).push(MaterialPageRoute(
-                        builder: (context) =>
-                            EInvoiceSettingsScreen(currentUser: _currentUser!),
+                        builder: (context) => EInvoiceSettingsScreen(currentUser: _currentUser!),
                       ));
                     } else {
-                      ToastService().show(
-                          message:
-                              'Bạn chưa được cấp quyền sử dụng tính năng này.',
-                          type: ToastType.warning);
+                      ToastService().show(message: 'Bạn chưa được cấp quyền sử dụng tính năng này.', type: ToastType.warning);
                     }
                   },
                 ),
@@ -1017,8 +918,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (_currentUser != null) {
                     Navigator.of(context)
                         .push(MaterialPageRoute(
-                      builder: (context) =>
-                          SettingsScreen(currentUser: _currentUser!),
+                      builder: (context) => SettingsScreen(currentUser: _currentUser!),
                     ))
                         .then((_) {
                       setState(() {
@@ -1079,18 +979,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: Colors.white,
                       fontSize: 7,
                       fontWeight: FontWeight.bold,
-                      shadows: [
-                        Shadow(
-                            offset: const Offset(1, 1),
-                            blurRadius: 2,
-                            color: color)
-                      ],
+                      shadows: [Shadow(offset: const Offset(1, 1), blurRadius: 2, color: color)],
                     ),
                   ),
                 ],
               )
-            : Icon(icon,
-                color: color, size: 23), // Icon bình thường nhỏ size 20
+            : Icon(icon, color: color, size: 23), // Icon bình thường nhỏ size 20
       ),
     );
   }
@@ -1136,20 +1030,15 @@ class _HomeScreenState extends State<HomeScreen> {
             labelType: NavigationRailLabelType.all,
             leading: Padding(
               padding: const EdgeInsets.symmetric(vertical: 20.0),
-              child: Icon(Icons.shopping_bag_outlined,
-                  size: 40, color: Theme.of(context).primaryColor),
+              child: Icon(Icons.shopping_bag_outlined, size: 40, color: Theme.of(context).primaryColor),
             ),
             destinations: const <NavigationRailDestination>[
               // Index 0: Sản phẩm
               NavigationRailDestination(
-                  icon: Icon(Icons.inventory_2),
-                  selectedIcon: Icon(Icons.inventory_2_outlined),
-                  label: Text('Sản phẩm')),
+                  icon: Icon(Icons.inventory_2), selectedIcon: Icon(Icons.inventory_2_outlined), label: Text('Sản phẩm')),
               // Index 1: Đơn hàng
               NavigationRailDestination(
-                  icon: Icon(Icons.receipt_long_outlined),
-                  selectedIcon: Icon(Icons.receipt_long),
-                  label: Text('Đơn hàng')),
+                  icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: Text('Đơn hàng')),
               // Index 2: Bán hàng (Ở giữa)
               NavigationRailDestination(
                   icon: Icon(Icons.add_shopping_cart_outlined),
@@ -1157,14 +1046,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: Text('Bán hàng')),
               // Index 3: Báo cáo
               NavigationRailDestination(
-                  icon: Icon(Icons.bar_chart_outlined),
-                  selectedIcon: Icon(Icons.bar_chart),
-                  label: Text('Báo cáo')),
+                  icon: Icon(Icons.bar_chart_outlined), selectedIcon: Icon(Icons.bar_chart), label: Text('Báo cáo')),
               // Index 4: Khác
               NavigationRailDestination(
-                  icon: Icon(Icons.more_horiz_outlined),
-                  selectedIcon: Icon(Icons.more_horiz),
-                  label: Text('Khác')),
+                  icon: Icon(Icons.more_horiz_outlined), selectedIcon: Icon(Icons.more_horiz), label: Text('Khác')),
             ],
           ),
           Expanded(
@@ -1181,30 +1066,17 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           // Index 0: Sản phẩm
-          BottomNavigationBarItem(
-              icon: Icon(Icons.inventory_2_outlined),
-              activeIcon: Icon(Icons.inventory_2),
-              label: 'Sản phẩm'),
+          BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined), activeIcon: Icon(Icons.inventory_2), label: 'Sản phẩm'),
           // Index 1: Đơn hàng
           BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_long_outlined),
-              activeIcon: Icon(Icons.receipt_long),
-              label: 'Đơn hàng'),
+              icon: Icon(Icons.receipt_long_outlined), activeIcon: Icon(Icons.receipt_long), label: 'Đơn hàng'),
           // Index 2: Bán hàng (Ở giữa) - Có thể làm icon to hơn hoặc màu khác nếu muốn
           BottomNavigationBarItem(
-              icon: Icon(Icons.add_shopping_cart_outlined),
-              activeIcon: Icon(Icons.add_shopping_cart),
-              label: 'Bán hàng'),
+              icon: Icon(Icons.add_shopping_cart_outlined), activeIcon: Icon(Icons.add_shopping_cart), label: 'Bán hàng'),
           // Index 3: Báo cáo
-          BottomNavigationBarItem(
-              icon: Icon(Icons.bar_chart_outlined),
-              activeIcon: Icon(Icons.bar_chart),
-              label: 'Báo cáo'),
+          BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined), activeIcon: Icon(Icons.bar_chart), label: 'Báo cáo'),
           // Index 4: Khác
-          BottomNavigationBarItem(
-              icon: Icon(Icons.more_horiz_outlined),
-              activeIcon: Icon(Icons.more_horiz),
-              label: 'Khác'),
+          BottomNavigationBarItem(icon: Icon(Icons.more_horiz_outlined), activeIcon: Icon(Icons.more_horiz), label: 'Khác'),
         ],
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
@@ -1221,8 +1093,7 @@ class BusinessTypePickerPopup extends StatefulWidget {
   const BusinessTypePickerPopup({super.key, required this.onConfirm});
 
   @override
-  State<BusinessTypePickerPopup> createState() =>
-      _BusinessTypePickerPopupState();
+  State<BusinessTypePickerPopup> createState() => _BusinessTypePickerPopupState();
 }
 
 class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
@@ -1238,8 +1109,7 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
 
     return AlertDialog(
       title: const Text('Chọn Ngành nghề Kinh doanh', textAlign: TextAlign.center),
-      content: Container(
-        // Giới hạn chiều rộng để popup không quá to trên desktop
+      content: SizedBox( // [SỬA LỖI 1] Dùng SizedBox thay Container để tối ưu layout
         width: isMobile ? double.maxFinite : 600,
         child: SingleChildScrollView(
           child: Column(
@@ -1286,7 +1156,9 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
               // Switch sử dụng dữ liệu mẫu
               SwitchListTile(
                 value: _useSampleData,
-                onChanged: _isUpdating ? null : (val) {
+                onChanged: _isUpdating
+                    ? null
+                    : (val) {
                   setState(() => _useSampleData = val);
                 },
                 title: const Text(
@@ -1297,7 +1169,9 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
                   'Tự động tạo danh mục và hàng hóa mẫu để bạn trải nghiệm ngay.',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
-                activeColor: Theme.of(context).primaryColor,
+                // Cách 2: Thanh nền màu chính, nút màu tương phản (thường là trắng)
+                activeTrackColor: Theme.of(context).primaryColor,
+                activeThumbColor: Theme.of(context).colorScheme.onPrimary, // Màu tương phản với màu chính
                 contentPadding: EdgeInsets.zero,
               ),
             ],
@@ -1309,20 +1183,20 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
           onPressed: (_selectedType == null || _isUpdating)
               ? null
               : () {
-            setState(() => _isUpdating = true);
+                  setState(() => _isUpdating = true);
 
-            // 1. Đóng Popup NGAY LẬP TỨC
-            Navigator.of(context).pop();
+                  // 1. Đóng Popup NGAY LẬP TỨC
+                  Navigator.of(context).pop();
 
-            // 2. Gửi dữ liệu về HomeScreen để xử lý sau
-            widget.onConfirm(_selectedType!, _useSampleData);
-          },
+                  // 2. Gửi dữ liệu về HomeScreen để xử lý sau
+                  widget.onConfirm(_selectedType!, _useSampleData);
+                },
           child: _isUpdating
               ? const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('Bắt đầu ngay'),
         ),
       ],
@@ -1330,10 +1204,7 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
   }
 
   Widget _buildTypeCard(BuildContext context,
-      {required IconData icon,
-        required String title,
-        required String value,
-        required String description}) {
+      {required IconData icon, required String title, required String value, required String description}) {
     final bool isSelected = _selectedType == value;
     final color = Theme.of(context).primaryColor;
 
