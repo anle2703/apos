@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -55,6 +57,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Ứng dụng cần camera để quét mã QR.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ứng dụng cần truy cập thư viện ảnh để tải hoặc up: ảnh sản phẩm, danh sách sản phẩm, lưu báo cáo dạng pdf hoặc excel.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Ứng dụng cần truy cập mạng nội bộ để kết nối máy in.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
