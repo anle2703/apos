@@ -140,7 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final Map<String, String> _supportInfo = {
     'phone': '0935417776',
-    'facebook': 'https://www.facebook.com/anlee2502',
+    'facebook': 'https://www.facebook.com/phanmemapos',
     'zalo': '0935417776',
   };
 
