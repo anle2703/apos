@@ -1,5 +1,3 @@
-// File: android/app/build.gradle
-
 plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"
@@ -25,36 +23,49 @@ if (flutterVersionName == null) {
 
 android {
     namespace "com.aposcompany.apos"
-    compileSdk 36
-
-    // --- BẮT ĐẦU ĐOẠN SỬA LỖI ---
-    // Ép phiên bản activity xuống 1.9.0 để sửa lỗi conflict Gradle
+    compileSdk 36 // Giữ nguyên 36 là tốt
     configurations.all {
         resolutionStrategy {
             // Ép dùng phiên bản cũ hơn để tương thích với Gradle hiện tại
-            force 'androidx.browser:browser:1.8.0'      // Sửa lỗi browser:1.9.0
-            force 'androidx.core:core-ktx:1.13.1'       // Sửa lỗi core-ktx:1.17.0
-            force 'androidx.core:core:1.13.1'           // Sửa lỗi core:1.17.0
-            force 'androidx.activity:activity:1.9.0'    // Giữ lại cái cũ của bạn nếu cần
+            force 'androidx.browser:browser:1.8.0'
+            force 'androidx.core:core-ktx:1.13.1'
+            force 'androidx.core:core:1.13.1'
+            force 'androidx.activity:activity:1.9.0'
             force 'androidx.activity:activity-ktx:1.9.0'
         }
     }
-    // --- KẾT THÚC ĐOẠN SỬA LỖI ---
 
     defaultConfig {
         applicationId "com.aposcompany.apos"
         minSdkVersion flutter.minSdkVersion
-        targetSdk 34
+        targetSdk 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         multiDexEnabled true
     }
 
+    signingConfigs {
+        release {
+            def keystoreProperties = new Properties()
+            def keystorePropertiesFile = rootProject.file('key.properties')
+            if (keystorePropertiesFile.exists()) {
+                keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+                storeFile = file(keystoreProperties['storeFile'])
+                storePassword = keystoreProperties['storePassword']
+                keyAlias = keystoreProperties['keyAlias']
+                keyPassword = keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // [ĐÃ SỬA] Chỉ giữ lại đúng dòng này để dùng khóa thật
+            signingConfig signingConfigs.release
+            
             minifyEnabled false
             shrinkResources false
-            signingConfig signingConfigs.debug
+            // Đã xóa dòng "signingConfig signingConfigs.debug" bị thừa ở đây
         }
     }
 
