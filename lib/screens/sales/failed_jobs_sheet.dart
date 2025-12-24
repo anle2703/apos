@@ -73,8 +73,7 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
             return Container(
               decoration: BoxDecoration(
                 color: Theme.of(context).scaffoldBackgroundColor,
-                borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(16)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
               ),
               child: Column(
                 children: [
@@ -83,11 +82,8 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Danh sách in lỗi (${failedJobs.length})',
-                            style: Theme.of(context).textTheme.titleLarge),
-                        IconButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.close)),
+                        Text('Danh sách in lỗi (${failedJobs.length})', style: Theme.of(context).textTheme.titleLarge),
+                        IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
                       ],
                     ),
                   ),
@@ -105,31 +101,28 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
                             child: ElevatedButton.icon(
                               icon: _isRetryingAll
                                   ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white))
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                   : const Icon(Icons.sync, size: 25),
                               label: const Text('In lại tất cả'),
                               onPressed: _isRetryingAll
                                   ? null
                                   : () async {
-                                setState(() => _isRetryingAll = true);
-                                final bool allSuccess =
-                                await printService.retryAllJobs();
+                                      setState(() => _isRetryingAll = true);
+                                      final bool allSuccess = await printService.retryAllJobs();
 
-                                if (!allSuccess && mounted) {
-                                  ToastService().show(
-                                    message:
-                                    'Một vài lệnh in lại đã thất bại.',
-                                    type: ToastType.warning,
-                                  );
-                                }
+                                      if (!allSuccess && mounted) {
+                                        ToastService().show(
+                                          message: 'Một vài lệnh in lại đã thất bại.',
+                                          type: ToastType.warning,
+                                        );
+                                      }
 
-                                if (mounted) {
-                                  setState(() => _isRetryingAll = false);
-                                }
-                              },
+                                      if (mounted) {
+                                        setState(() => _isRetryingAll = false);
+                                      }
+                                    },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.primaryColor,
                                 foregroundColor: Colors.white,
@@ -142,8 +135,7 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
                               icon: const Icon(Icons.delete_sweep_outlined, size: 25),
                               label: const Text('Xóa tất cả'),
                               onPressed: () => printService.deleteAllJobs(),
-                              style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.red),
+                              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                             ),
                           ),
                         ],
@@ -153,19 +145,17 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
                     child: failedJobs.isEmpty
                         ? const Center(child: Text('Đã xử lý hết lỗi.'))
                         : _isLoadingProducts
-                        ? const Center(child: CircularProgressIndicator())
-                        : ListView.builder(
-                      controller: scrollController,
-                      padding:
-                      const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: failedJobs.length,
-                      itemBuilder: (context, index) {
-                        final job = failedJobs[index];
-                        final isLoading =
-                        _loadingJobs.contains(job.id);
-                        return _buildJobCard(context, job, isLoading);
-                      },
-                    ),
+                            ? const Center(child: CircularProgressIndicator())
+                            : ListView.builder(
+                                controller: scrollController,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                itemCount: failedJobs.length,
+                                itemBuilder: (context, index) {
+                                  final job = failedJobs[index];
+                                  final isLoading = _loadingJobs.contains(job.id);
+                                  return _buildJobCard(context, job, isLoading);
+                                },
+                              ),
                   ),
                 ],
               ),
@@ -228,8 +218,7 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
         break;
     }
 
-    final tableName = job.data['tableName'] ??
-        (job.type == PrintJobType.cashFlow ? "Sổ quỹ" : 'N/A');
+    final tableName = job.data['tableName'] ?? (job.type == PrintJobType.cashFlow ? "Sổ quỹ" : 'N/A');
     final timeText = DateFormat('HH:mm dd/MM/yy').format(job.createdAt);
     final errorText = job.data['error'] as String?;
     final targetPrinterRole = job.data['targetPrinterRole'] as String?;
@@ -238,9 +227,7 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
     final List<OrderItem> items;
     if (job.type != PrintJobType.cashFlow && job.data['items'] != null) {
       final itemsList = (job.data['items'] as List?) ?? [];
-      items = itemsList
-          .map((i) => OrderItem.fromMap(i, allProducts: _allProducts))
-          .toList();
+      items = itemsList.map((i) => OrderItem.fromMap(i, allProducts: _allProducts)).toList();
     } else {
       items = [];
     }
@@ -254,10 +241,7 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
           leading: Icon(typeIcon, color: AppTheme.primaryColor),
           title: Text(
             '$typeText - $tableName${printerFriendlyName != null ? ' ($printerFriendlyName)' : ''}',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
           ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -267,10 +251,7 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
                   padding: const EdgeInsets.only(top: 2.0, bottom: 2.0),
                   child: Text(
                     errorText,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Colors.red),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.red),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -282,37 +263,35 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
             ],
           ),
           trailing: isLoading
-              ? const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.5))
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
               : Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.sync, color: Colors.blue, size: 25),
-                tooltip: 'In lại',
-                onPressed: () async {
-                  setState(() => _loadingJobs.add(job.id));
-                  final success = await printService.retryJob(job.id);
-                  if (!success && mounted) {
-                    ToastService().show(
-                        message: 'In lại thất bại!',
-                        type: ToastType.error);
-                  }
-                  if (mounted) {
-                    setState(() => _loadingJobs.remove(job.id));
-                  }
-                },
-              ),
-              IconButton(
-                icon:
-                const Icon(Icons.delete_outline, color: Colors.red, size: 25,),
-                tooltip: 'Xóa',
-                onPressed: () => printService.deleteJob(job.id),
-              ),
-            ],
-          ),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.sync, color: Colors.blue, size: 25),
+                      tooltip: 'In lại',
+                      onPressed: () async {
+                        setState(() => _loadingJobs.add(job.id));
+                        final success = await printService.retryJob(job.id);
+                        if (!success && mounted) {
+                          ToastService().show(message: 'In lại thất bại!', type: ToastType.error);
+                        }
+                        if (mounted) {
+                          setState(() => _loadingJobs.remove(job.id));
+                        }
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.red,
+                        size: 25,
+                      ),
+                      tooltip: 'Xóa',
+                      onPressed: () => printService.deleteJob(job.id),
+                    ),
+                  ],
+                ),
           children: [
             Container(
               color: Colors.grey.shade50,
@@ -322,51 +301,48 @@ class _FailedJobsSheetState extends State<FailedJobsSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: job.type == PrintJobType.cashFlow
                     ? [
-                  Text(
-                    'Người tạo: ${job.data['transaction']?['user'] ?? 'N/A'}',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  Text(
-                    'Nội dung: ${job.data['transaction']?['reason'] ?? 'N/A'}',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  Text(
-                    'Số tiền: ${formatNumber(job.data['transaction']?['amount'] ?? 0)} đ',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                ]
-                    : (items.isEmpty // Hiển thị chi tiết cho các phiếu khác
-                    ? [const Text('Không có chi tiết món ăn.')]
-                    : items.map((item) {
-                  String quantityText;
-                  if (job.type == PrintJobType.provisional) {
-                    quantityText =
-                        NumberFormat('#,##0.##').format(item.quantity);
-                  } else {
-                    final double change = item.unsentChange;
-                    final quantityToDisplay = change != 0 ? change : item.quantity;
-                    quantityText =
-                        NumberFormat('+ #,##0.##;- #,##0.##')
-                            .format(quantityToDisplay);
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2.0),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                            child: Text(
-                              '• ${item.product.productName}',
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            )),
                         Text(
-                          quantityText,
+                          'Người tạo: ${job.data['transaction']?['user'] ?? 'N/A'}',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
-                      ],
-                    ),
-                  );
-                }).toList()),
+                        Text(
+                          'Nội dung: ${job.data['transaction']?['reason'] ?? 'N/A'}',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        Text(
+                          'Số tiền: ${formatNumber(job.data['transaction']?['amount'] ?? 0)} đ',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ]
+                    : (items.isEmpty // Hiển thị chi tiết cho các phiếu khác
+                        ? [const Text('Không có chi tiết món ăn.')]
+                        : items.map((item) {
+                            String quantityText;
+                            if (job.type == PrintJobType.provisional) {
+                              quantityText = NumberFormat('#,##0.##').format(item.quantity);
+                            } else {
+                              final double change = item.unsentChange;
+                              final quantityToDisplay = change != 0 ? change : item.quantity;
+                              quantityText = NumberFormat('+ #,##0.##;- #,##0.##').format(quantityToDisplay);
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                      child: Text(
+                                    '• ${item.product.productName}',
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                  )),
+                                  Text(
+                                    quantityText,
+                                    style: Theme.of(context).textTheme.bodyMedium,
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList()),
               ),
             ),
           ],

@@ -128,9 +128,7 @@ class ReturnService {
 
       // 1. Kiểm tra nếu ĐVT khác ĐVT gốc, lấy giá từ additionalUnits
       if (item.selectedUnit.isNotEmpty && item.selectedUnit != item.product.unit) {
-        final unitData = item.product.additionalUnits.firstWhereOrNull(
-                (u) => u['unitName'] == item.selectedUnit
-        );
+        final unitData = item.product.additionalUnits.firstWhereOrNull((u) => u['unitName'] == item.selectedUnit);
         if (unitData != null) {
           originalSellPrice = (unitData['sellPrice'] as num?)?.toDouble() ?? originalSellPrice;
         }
@@ -182,9 +180,7 @@ class ReturnService {
       double itemBaseCost = item.product.costPrice; // Mặc định lấy giá vốn gốc
       String currentUnit = item.selectedUnit;
       if (currentUnit.isNotEmpty && currentUnit != item.product.unit) {
-        final additionalUnitData = item.product.additionalUnits.firstWhereOrNull(
-                (u) => u['unitName'] == currentUnit
-        );
+        final additionalUnitData = item.product.additionalUnits.firstWhereOrNull((u) => u['unitName'] == currentUnit);
         if (additionalUnitData != null && additionalUnitData['costPrice'] != null) {
           itemBaseCost = (additionalUnitData['costPrice'] as num).toDouble();
         }
@@ -192,7 +188,8 @@ class ReturnService {
 
       double toppingsCostTotal = 0;
       final List<dynamic> toppingsList = (originalItemData != null && originalItemData['toppings'] is List)
-          ? originalItemData['toppings'] : item.toppings.entries.map((e) => {'costPrice': e.key.costPrice, 'quantity': e.value}).toList();
+          ? originalItemData['toppings']
+          : item.toppings.entries.map((e) => {'costPrice': e.key.costPrice, 'quantity': e.value}).toList();
 
       for (var t in toppingsList) {
         if (t is Map) {
@@ -292,7 +289,6 @@ class ReturnService {
       returnBillDiscount = originalBill.discount;
       returnVoucherDiscount = originalBill.voucherDiscount;
       returnPointsValue = originalBill.customerPointsValue;
-
     } else {
       // === CASE 2: TRẢ 1 PHẦN HOẶC TRẢ NỐT PHẦN CÒN LẠI (TÍNH TOÁN) ===
 
@@ -319,7 +315,6 @@ class ReturnService {
 
       // 2. Xử lý Logic Tính Tỷ Lệ (Ratio)
       if (originalBill != null && originalBill.subtotal > 0) {
-
         if (isFullReturn) {
           // --- LOGIC TRẢ HẾT (FINAL RETURN - SWEEPER) ---
           // Công thức: Còn lại bao nhiêu trả bấy nhiêu để tránh lệch số làm tròn
@@ -347,7 +342,6 @@ class ReturnService {
 
           // C. Tính tỷ lệ dựa trên phần CÒN LẠI
           ratio = remainingSubtotal / originalBill.subtotal;
-
         } else {
           // --- LOGIC TRẢ 1 PHẦN ---
           ratio = totalReturnSubtotal / originalBill.subtotal;
@@ -403,7 +397,6 @@ class ReturnService {
 
         // Safety: Đảm bảo không trừ âm
         if (pointsToRetrieve < 0) pointsToRetrieve = 0;
-
       } else {
         // Logic cũ cho trả 1 phần
         pointsToRetrieve = (originalBill.pointsEarned * ratio).round();
@@ -560,12 +553,21 @@ class ReturnService {
     if (deltaVoucherDiscount != 0) reportUpdates['totalVoucherDiscount'] = FieldValue.increment(deltaVoucherDiscount);
     if (deltaPointsValue != 0) reportUpdates['totalPointsValue'] = FieldValue.increment(deltaPointsValue);
     if (deltaReturnRevenue != 0) reportUpdates['totalReturnRevenue'] = FieldValue.increment(deltaReturnRevenue);
-    if (deltaReturnProfit != 0) {reportUpdates['totalReturnProfit'] = FieldValue.increment(deltaReturnProfit);}
-    if (deltaReturnTax != 0) {reportUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);}
+    if (deltaReturnProfit != 0) {
+      reportUpdates['totalReturnProfit'] = FieldValue.increment(deltaReturnProfit);
+    }
+    if (deltaReturnTax != 0) {
+      reportUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);
+    }
     if (deltaReturnBillDiscount != 0) reportUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);
-    if (deltaReturnVoucherDiscount != 0) reportUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
-    if (deltaReturnSurcharges != 0) {reportUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);}
-    if (deltaReturnPointsValue != 0) {reportUpdates['totalReturnPointsValue'] = FieldValue.increment(deltaReturnPointsValue);}
+    if (deltaReturnVoucherDiscount != 0)
+      reportUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
+    if (deltaReturnSurcharges != 0) {
+      reportUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);
+    }
+    if (deltaReturnPointsValue != 0) {
+      reportUpdates['totalReturnPointsValue'] = FieldValue.increment(deltaReturnPointsValue);
+    }
     if (deltaBillCount != 0) reportUpdates['billCount'] = FieldValue.increment(deltaBillCount);
 
     // Cập nhật Payment Methods (Cấp 1)
@@ -596,12 +598,21 @@ class ReturnService {
       if (deltaVoucherDiscount != 0) shiftUpdates['totalVoucherDiscount'] = FieldValue.increment(deltaVoucherDiscount);
       if (deltaPointsValue != 0) shiftUpdates['totalPointsValue'] = FieldValue.increment(deltaPointsValue);
       if (deltaReturnRevenue != 0) shiftUpdates['totalReturnRevenue'] = FieldValue.increment(deltaReturnRevenue);
-      if (deltaReturnProfit != 0) {shiftUpdates['totalReturnProfit'] = FieldValue.increment(deltaReturnProfit);}
-      if (deltaReturnTax != 0) {shiftUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);}
+      if (deltaReturnProfit != 0) {
+        shiftUpdates['totalReturnProfit'] = FieldValue.increment(deltaReturnProfit);
+      }
+      if (deltaReturnTax != 0) {
+        shiftUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);
+      }
       if (deltaReturnBillDiscount != 0) shiftUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);
-      if (deltaReturnVoucherDiscount != 0) shiftUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
-      if (deltaReturnSurcharges != 0) {shiftUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);}
-      if (deltaReturnPointsValue != 0) {shiftUpdates['totalReturnPointsValue'] = FieldValue.increment(deltaReturnPointsValue);}
+      if (deltaReturnVoucherDiscount != 0)
+        shiftUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
+      if (deltaReturnSurcharges != 0) {
+        shiftUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);
+      }
+      if (deltaReturnPointsValue != 0) {
+        shiftUpdates['totalReturnPointsValue'] = FieldValue.increment(deltaReturnPointsValue);
+      }
       if (deltaBillCount != 0) shiftUpdates['billCount'] = FieldValue.increment(deltaBillCount);
 
       if (cashTransaction != 0) {
@@ -887,7 +898,6 @@ class ReturnService {
       revertReportData['totalBillDiscount'] = FieldValue.increment(rBillDisc);
       revertReportData['totalVoucherDiscount'] = FieldValue.increment(rVoucherDisc);
       revertReportData['totalPointsValue'] = FieldValue.increment(rPointsVal);
-
     } else {
       // Khác ngày: Trừ đi khỏi Doanh thu trả
       revertReportData['totalReturnRevenue'] = FieldValue.increment(-returnTotalPayable);
@@ -1070,7 +1080,6 @@ class ReturnService {
           if (totalToppingQty > 0) {
             if ((toppingProduct.productType == 'Thành phẩm/Combo' || toppingProduct.productType == 'Topping/Bán kèm') &&
                 toppingProduct.compiledMaterials.isNotEmpty) {
-
               for (final material in toppingProduct.compiledMaterials) {
                 final materialId = material['productId'] as String?;
                 final materialQty = (material['quantity'] as num?)?.toDouble() ?? 0.0;
@@ -1100,11 +1109,7 @@ class _SelectReturnItemsDialog extends StatefulWidget {
   final ReturnService returnService;
   final UserModel currentUser;
 
-  const _SelectReturnItemsDialog({
-    required this.originalBill,
-    required this.returnService,
-    required this.currentUser
-  });
+  const _SelectReturnItemsDialog({required this.originalBill, required this.returnService, required this.currentUser});
 
   @override
   State<_SelectReturnItemsDialog> createState() => _SelectReturnItemsDialogState();
@@ -1117,10 +1122,7 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
   @override
   void initState() {
     super.initState();
-    _billItems = widget.originalBill.items
-        .whereType<Map<String, dynamic>>()
-        .map((e) => OrderItem.fromMap(e))
-        .toList();
+    _billItems = widget.originalBill.items.whereType<Map<String, dynamic>>().map((e) => OrderItem.fromMap(e)).toList();
   }
 
   void _incrementQty(int index, double maxReturnable) {
@@ -1193,16 +1195,15 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
 
       Navigator.of(context).push(MaterialPageRoute(
           builder: (context) => Scaffold(
-            appBar: AppBar(title: Text("Đổi/Trả: ${widget.originalBill.billCode}")),
-            body: ExchangeProcessorWidget(
-              currentUser: widget.currentUser,
-              returnService: widget.returnService,
-              initialReturnItems: returnList,
-              originalBill: widget.originalBill,
-              customer: customer,
-            ),
-          )
-      ));
+                appBar: AppBar(title: Text("Đổi/Trả: ${widget.originalBill.billCode}")),
+                body: ExchangeProcessorWidget(
+                  currentUser: widget.currentUser,
+                  returnService: widget.returnService,
+                  initialReturnItems: returnList,
+                  originalBill: widget.originalBill,
+                  customer: customer,
+                ),
+              )));
     } catch (e) {
       ToastService().show(message: "Lỗi: $e", type: ToastType.error);
     }
@@ -1220,7 +1221,7 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
             Expanded(
               child: ListView.separated(
                 itemCount: _billItems.length,
-                separatorBuilder: (_,__) => const Divider(height: 1),
+                separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final item = _billItems[index];
                   final returnQty = _itemsToReturn[index] ?? 0;
@@ -1240,28 +1241,46 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        Expanded(child: Column(
+                        Expanded(
+                            child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold)),
                             if (item.toppings.isNotEmpty)
-                              Text("+ ${item.toppings.keys.map((p) => p.productName).join(', ')}", style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
+                              Text("+ ${item.toppings.keys.map((p) => p.productName).join(', ')}",
+                                  style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic)),
                             const SizedBox(height: 4),
-                            Text.rich(TextSpan(children: [
-                              TextSpan(text: "${formatNumber(displayPrice)} đ   ", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
-                              TextSpan(text: "Mua: ${formatNumber(item.quantity)} "),
-                              if (alreadyReturned > 0) TextSpan(text: "(Đã trả: ${formatNumber(alreadyReturned)}) ", style: const TextStyle(color: Colors.red)),
-                              TextSpan(text: "Còn: ${formatNumber(remainingQty)}", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                            ]), style: const TextStyle(fontSize: 13)),
+                            Text.rich(
+                                TextSpan(children: [
+                                  TextSpan(
+                                      text: "${formatNumber(displayPrice)} đ   ",
+                                      style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                                  TextSpan(text: "Mua: ${formatNumber(item.quantity)} "),
+                                  if (alreadyReturned > 0)
+                                    TextSpan(
+                                        text: "(Đã trả: ${formatNumber(alreadyReturned)}) ",
+                                        style: const TextStyle(color: Colors.red)),
+                                  TextSpan(
+                                      text: "Còn: ${formatNumber(remainingQty)}",
+                                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                                ]),
+                                style: const TextStyle(fontSize: 13)),
                           ],
                         )),
                         Container(
-                          decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
+                          decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(12)),
                           child: Row(
                             children: [
-                              IconButton(icon: const Icon(Icons.remove, color: Colors.red), onPressed: () => _decrementQty(index)),
-                              SizedBox(width: 30, child: Text(formatNumber(returnQty), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold))),
-                              IconButton(icon: const Icon(Icons.add, color: Colors.green), onPressed: () => _incrementQty(index, remainingQty)),
+                              IconButton(
+                                  icon: const Icon(Icons.remove, color: Colors.red), onPressed: () => _decrementQty(index)),
+                              SizedBox(
+                                  width: 30,
+                                  child: Text(formatNumber(returnQty),
+                                      textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold))),
+                              IconButton(
+                                  icon: const Icon(Icons.add, color: Colors.green),
+                                  onPressed: () => _incrementQty(index, remainingQty)),
                             ],
                           ),
                         )
@@ -1276,7 +1295,8 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text("Tổng hoàn dự kiến:", style: TextStyle(fontWeight: FontWeight.bold)),
-                Text(formatNumber(_calculateTotalRefund), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18)),
+                Text(formatNumber(_calculateTotalRefund),
+                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18)),
               ],
             )
           ],
@@ -1380,7 +1400,6 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
           return !bill.billCode.toUpperCase().startsWith('TH');
         }).toList();
       }
-
     } catch (e) {
       ToastService().show(message: "Lỗi tìm kiếm: $e", type: ToastType.error);
     } finally {
@@ -1393,10 +1412,7 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
     BillModel? freshBill;
 
     try {
-      final docSnapshot = await FirebaseFirestore.instance
-          .collection('bills')
-          .doc(cachedBill.id)
-          .get();
+      final docSnapshot = await FirebaseFirestore.instance.collection('bills').doc(cachedBill.id).get();
 
       if (docSnapshot.exists) {
         freshBill = BillModel.fromFirestore(docSnapshot);
@@ -1450,16 +1466,15 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
 
     final bool? result = await Navigator.of(context).push(MaterialPageRoute(
         builder: (context) => Scaffold(
-          appBar: AppBar(title: Text("Xử lý Đổi/Trả: ${freshBill!.billCode}")),
-          body: ExchangeProcessorWidget(
-            currentUser: widget.currentUser,
-            returnService: _returnService,
-            initialReturnItems: billItems,
-            originalBill: freshBill,
-            customer: customer,
-          ),
-        )
-    ));
+              appBar: AppBar(title: Text("Xử lý Đổi/Trả: ${freshBill!.billCode}")),
+              body: ExchangeProcessorWidget(
+                currentUser: widget.currentUser,
+                returnService: _returnService,
+                initialReturnItems: billItems,
+                originalBill: freshBill,
+                customer: customer,
+              ),
+            )));
 
     if (result == true) {
       _searchBills();
@@ -1484,8 +1499,7 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
             decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))]
-            ),
+                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))]),
             child: LayoutBuilder(
               builder: (context, constraints) {
                 // Nếu chiều rộng < 600px (Mobile) thì dùng Column, ngược lại Row
@@ -1499,8 +1513,10 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
                     filled: true,
                     fillColor: Colors.grey[50],
                     contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
                   ),
                   onSubmitted: (_) => _searchBills(),
                 );
@@ -1553,13 +1569,7 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
                 if (isMobile) {
                   // Giao diện Mobile: Xếp chồng dọc
                   return Column(
-                    children: [
-                      searchInput,
-                      const SizedBox(height: 10),
-                      datePicker,
-                      const SizedBox(height: 10),
-                      searchButton
-                    ],
+                    children: [searchInput, const SizedBox(height: 10), datePicker, const SizedBox(height: 10), searchButton],
                   );
                 } else {
                   // Giao diện PC: Xếp hàng ngang
@@ -1586,58 +1596,70 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _foundBills.isEmpty
-                ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[300]), const SizedBox(height: 16), Text("Không tìm thấy hóa đơn nào", style: TextStyle(color: Colors.grey[600]))]))
-                : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: _foundBills.length,
-              itemBuilder: (context, index) {
-                final bill = _foundBills[index];
-                final bool hasReturn = bill.items.any((i) => i is Map && (i['returnedQuantity'] ?? 0) > 0);
-                final bool isReturnBill = bill.billCode.startsWith("TH") || bill.status == 'return'; // Check cả mã TH
+                    ? Center(
+                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[300]),
+                        const SizedBox(height: 16),
+                        Text("Không tìm thấy hóa đơn nào", style: TextStyle(color: Colors.grey[600]))
+                      ]))
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: _foundBills.length,
+                        itemBuilder: (context, index) {
+                          final bill = _foundBills[index];
+                          final bool hasReturn = bill.items.any((i) => i is Map && (i['returnedQuantity'] ?? 0) > 0);
+                          final bool isReturnBill = bill.billCode.startsWith("TH") || bill.status == 'return'; // Check cả mã TH
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: InkWell(
-                    onTap: () => _onSelectBill(bill),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 50, height: 50,
-                            decoration: BoxDecoration(
-                                color: isReturnBill ? Colors.purple.shade50 : (hasReturn ? Colors.orange.shade50 : Colors.green.shade50),
-                                shape: BoxShape.circle
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: InkWell(
+                              onTap: () => _onSelectBill(bill),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 50,
+                                      height: 50,
+                                      decoration: BoxDecoration(
+                                          color: isReturnBill
+                                              ? Colors.purple.shade50
+                                              : (hasReturn ? Colors.orange.shade50 : Colors.green.shade50),
+                                          shape: BoxShape.circle),
+                                      child: Icon(
+                                          isReturnBill
+                                              ? Icons.assignment_return
+                                              : (hasReturn ? Icons.sync_problem : Icons.receipt_long),
+                                          color: isReturnBill ? Colors.purple : (hasReturn ? Colors.orange : Colors.green)),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(bill.billCode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                          const SizedBox(height: 4),
+                                          Text(bill.customerName ?? 'Khách lẻ',
+                                              style: TextStyle(color: Colors.grey[800], fontSize: 13)),
+                                          const SizedBox(height: 2),
+                                          Text(DateFormat('dd/MM HH:mm').format(bill.createdAt),
+                                              style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(formatNumber(bill.totalPayable),
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.primaryColor)),
+                                  ],
+                                ),
+                              ),
                             ),
-                            child: Icon(
-                                isReturnBill ? Icons.assignment_return : (hasReturn ? Icons.sync_problem : Icons.receipt_long),
-                                color: isReturnBill ? Colors.purple : (hasReturn ? Colors.orange : Colors.green)
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(bill.billCode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                const SizedBox(height: 4),
-                                Text(bill.customerName ?? 'Khách lẻ', style: TextStyle(color: Colors.grey[800], fontSize: 13)),
-                                const SizedBox(height: 2),
-                                Text(DateFormat('dd/MM HH:mm').format(bill.createdAt), style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                          Text(formatNumber(bill.totalPayable), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.primaryColor)),
-                        ],
+                          );
+                        },
                       ),
-                    ),
-                  ),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -1764,7 +1786,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
     } catch (e) {
       debugPrint("Lỗi load PTTT: $e");
     } finally {
-      if(mounted) setState(() => _isLoadingMethods = false);
+      if (mounted) setState(() => _isLoadingMethods = false);
     }
   }
 
@@ -1785,7 +1807,9 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           });
         });
       }
-    } catch (e) { debugPrint("Lỗi tải thuế: $e"); }
+    } catch (e) {
+      debugPrint("Lỗi tải thuế: $e");
+    }
   }
 
   Future<void> _preloadAllProducts() async {
@@ -1803,19 +1827,29 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
 
     if (calcMethod == 'deduction') {
       switch (taxKey) {
-        case 'VAT_10': return '(VAT 10%)';
-        case 'VAT_8': return '(VAT 8%)';
-        case 'VAT_5': return '(VAT 5%)';
-        case 'VAT_0': return '(VAT 0%)';
-        default: return '';
+        case 'VAT_10':
+          return '(VAT 10%)';
+        case 'VAT_8':
+          return '(VAT 8%)';
+        case 'VAT_5':
+          return '(VAT 5%)';
+        case 'VAT_0':
+          return '(VAT 0%)';
+        default:
+          return '';
       }
     } else {
       switch (taxKey) {
-        case 'HKD_RETAIL': return '(LST 1.5%)';
-        case 'HKD_PRODUCTION': return '(LST 4.5%)';
-        case 'HKD_SERVICE': return '(LST 7%)';
-        case 'HKD_LEASING': return '(LST 10%)';
-        default: return '';
+        case 'HKD_RETAIL':
+          return '(LST 1.5%)';
+        case 'HKD_PRODUCTION':
+          return '(LST 4.5%)';
+        case 'HKD_SERVICE':
+          return '(LST 7%)';
+        case 'HKD_LEASING':
+          return '(LST 10%)';
+        default:
+          return '';
       }
     }
   }
@@ -1867,9 +1901,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
         discountVal = widget.originalBill!.subtotal * (widget.originalBill!.discountInput / 100);
       }
 
-      originalBillTotalDiscount = discountVal +
-          widget.originalBill!.voucherDiscount +
-          widget.originalBill!.customerPointsValue;
+      originalBillTotalDiscount = discountVal + widget.originalBill!.voucherDiscount + widget.originalBill!.customerPointsValue;
     }
 
     for (var item in _returnList) {
@@ -2101,7 +2133,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           confirmMsg = "HOÀN TIỀN: ${formatNumber(refundAmt)}\n(Trừ hoàn toàn vào dư nợ)";
         } else {
           final cashReturn = refundAmt - debt;
-          confirmMsg = "HOÀN TIỀN: ${formatNumber(refundAmt)}\n(-${formatNumber(debt)} Dư nợ | -${formatNumber(cashReturn)} Tiền mặt)";
+          confirmMsg =
+              "HOÀN TIỀN: ${formatNumber(refundAmt)}\n(-${formatNumber(debt)} Dư nợ | -${formatNumber(cashReturn)} Tiền mặt)";
         }
       } else {
         confirmMsg = "HOÀN TIỀN KHÁCH: ${formatNumber(refundAmt)}";
@@ -2111,28 +2144,25 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
     final confirm = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text("Xác nhận Giao dịch"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildSummaryRow("Tổng giá trị trả:", _dispTotalRefundAmount, isBold: true, color: Colors.red),
-              _buildSummaryRow("Tổng giá trị mua đổi:", _totalExchangeValue, isBold: true, color: Colors.green),
-              const Divider(thickness: 1.5),
-              Center(
-                  child: Text(confirmMsg,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor)
-                  )
+              title: const Text("Xác nhận Giao dịch"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSummaryRow("Tổng giá trị trả:", _dispTotalRefundAmount, isBold: true, color: Colors.red),
+                  _buildSummaryRow("Tổng giá trị mua đổi:", _totalExchangeValue, isBold: true, color: Colors.green),
+                  const Divider(thickness: 1.5),
+                  Center(
+                      child: Text(confirmMsg,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor))),
+                ],
               ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Hủy")),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Xác nhận")),
-          ],
-        )
-    );
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Hủy")),
+                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Xác nhận")),
+              ],
+            ));
 
     if (confirm != true) return;
     setState(() {
@@ -2212,7 +2242,10 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: Colors.black87)),
-          Text("${isNegative ? '-' : ''}${formatNumber(value)}", style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: color ?? (isNegative ? Colors.red : Colors.black87))),
+          Text("${isNegative ? '-' : ''}${formatNumber(value)}",
+              style: TextStyle(
+                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                  color: color ?? (isNegative ? Colors.red : Colors.black87))),
         ],
       ),
     );
@@ -2222,17 +2255,18 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      color: bg, width: double.infinity,
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: text)),
-        if(action != null) action
-      ]),
+      color: bg,
+      width: double.infinity,
+      child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: text)), if (action != null) action]),
     );
   }
 
   Widget _buildReturnSummaryPanel() {
     return Container(
-      padding: const EdgeInsets.all(12), color: Colors.white,
+      padding: const EdgeInsets.all(12),
+      color: Colors.white,
       child: Column(
         children: [
           _buildSummaryRow("Tổng tiền hàng trả:", _dispReturnSubtotal),
@@ -2296,7 +2330,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           child: ListView.separated(
             padding: const EdgeInsets.all(8),
             itemCount: _returnList.length,
-            separatorBuilder: (_,__) => const Divider(height: 1, color: Colors.grey),
+            separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.grey),
             itemBuilder: (context, index) {
               final item = _returnList[index];
               final double discountVal = item.discountValue ?? 0;
@@ -2328,25 +2362,13 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                     RichText(
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      text: TextSpan(
-                          style: const TextStyle(fontSize: 13, color: Colors.black),
-                          children: [
-                            TextSpan(
-                                text: item.product.productName,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
-                            ),
-                            if (item.selectedUnit.isNotEmpty)
-                              TextSpan(
-                                  text: " (${item.selectedUnit})",
-                                  style: TextStyle(color: Colors.grey[700])
-                              ),
-                            if (discountStr.isNotEmpty)
-                              TextSpan(
-                                  text: discountStr,
-                                  style: TextStyle(color: discountColor)
-                              ),
-                          ]
-                      ),
+                      text: TextSpan(style: const TextStyle(fontSize: 13, color: Colors.black), children: [
+                        TextSpan(
+                            text: item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        if (item.selectedUnit.isNotEmpty)
+                          TextSpan(text: " (${item.selectedUnit})", style: TextStyle(color: Colors.grey[700])),
+                        if (discountStr.isNotEmpty) TextSpan(text: discountStr, style: TextStyle(color: discountColor)),
+                      ]),
                     ),
 
                     // HÀNG 2: Topping (nếu có)
@@ -2368,10 +2390,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween, // Căn đều 3 thành phần
                       children: [
                         // 3.1 Đơn giá
-                        Text(
-                            formatNumber(item.price),
-                            style: const TextStyle(fontSize: 13, color: Colors.grey)
-                        ),
+                        Text(formatNumber(item.price), style: const TextStyle(fontSize: 13, color: Colors.grey)),
 
                         // 3.2 Cụm nút tăng giảm (Nằm giữa)
                         Container(
@@ -2379,8 +2398,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                           decoration: BoxDecoration(
                               border: Border.all(color: Colors.grey.shade300),
                               borderRadius: BorderRadius.circular(12),
-                              color: Colors.grey.shade50
-                          ),
+                              color: Colors.grey.shade50),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -2394,11 +2412,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                               Container(
                                   constraints: const BoxConstraints(minWidth: 25),
                                   alignment: Alignment.center,
-                                  child: Text(
-                                      formatNumber(item.quantity),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)
-                                  )
-                              ),
+                                  child: Text(formatNumber(item.quantity),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
                               IconButton(
                                 icon: const Icon(Icons.add, size: 14, color: Colors.green),
                                 onPressed: () => _updateReturnItemQty(index, 1),
@@ -2411,10 +2426,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                         ),
 
                         // 3.3 Thành tiền
-                        Text(
-                            formatNumber(item.subtotal),
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 14)
-                        ),
+                        Text(formatNumber(item.subtotal),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 14)),
                       ],
                     ),
                   ],
@@ -2434,9 +2447,7 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
               // [FIX LỖI MẤT CARD TRÊN DESKTOP]
               // Nếu Mobile: Dùng SizedBox cố định chiều cao.
               // Nếu Desktop: Dùng Expanded để giãn hết chiều cao còn lại.
-              isMobile
-                  ? SizedBox(height: 300, child: returnListWidget)
-                  : Expanded(child: returnListWidget),
+              isMobile ? SizedBox(height: 300, child: returnListWidget) : Expanded(child: returnListWidget),
 
               _buildReturnSummaryPanel(),
             ],
@@ -2449,19 +2460,27 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
           child: _exchangeList.isEmpty
               ? const Center(child: Text("Chưa chọn sản phẩm đổi", style: TextStyle(color: Colors.grey)))
               : ListView.separated(
-            padding: const EdgeInsets.all(8),
-            itemCount: _exchangeList.length,
-            separatorBuilder: (_,__) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final item = _exchangeList[index];
-              return ExchangeItemCard(
-                item: item, index: index, taxDisplay: _getTaxDisplayString(item.product),
-                onUpdate: (newItem) { setState(() => _exchangeList[index] = newItem); _dispExchangeTax = _calculateExchangeTaxValue(); },
-                onRemove: () { setState(() => _exchangeList.removeAt(index)); _dispExchangeTax = _calculateExchangeTaxValue(); },
-                onTap: () => _editExchangeItem(index),
-              );
-            },
-          ),
+                  padding: const EdgeInsets.all(8),
+                  itemCount: _exchangeList.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = _exchangeList[index];
+                    return ExchangeItemCard(
+                      item: item,
+                      index: index,
+                      taxDisplay: _getTaxDisplayString(item.product),
+                      onUpdate: (newItem) {
+                        setState(() => _exchangeList[index] = newItem);
+                        _dispExchangeTax = _calculateExchangeTaxValue();
+                      },
+                      onRemove: () {
+                        setState(() => _exchangeList.removeAt(index));
+                        _dispExchangeTax = _calculateExchangeTaxValue();
+                      },
+                      onTap: () => _editExchangeItem(index),
+                    );
+                  },
+                ),
         );
 
         final Widget exchangeCard = Card(
@@ -2474,17 +2493,20 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                     onPressed: _pickExchangeProducts,
                     icon: const Icon(Icons.add, size: 16),
                     label: const Text("Thêm món"),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.green, elevation: 0, visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
-                  )
-              ),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.green,
+                        elevation: 0,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8)),
+                  )),
 
               // [FIX LỖI MẤT CARD TRÊN DESKTOP] Tương tự như trên
-              isMobile
-                  ? SizedBox(height: 300, child: exchangeListWidget)
-                  : Expanded(child: exchangeListWidget),
+              isMobile ? SizedBox(height: 300, child: exchangeListWidget) : Expanded(child: exchangeListWidget),
 
               Container(
-                padding: const EdgeInsets.all(12), color: Colors.green.shade50.withValues(alpha: 0.3),
+                padding: const EdgeInsets.all(12),
+                color: Colors.green.shade50.withValues(alpha: 0.3),
                 child: Column(children: [
                   if (_dispExchangeTax > 0) _buildSummaryRow("Thuế:", _dispExchangeTax),
                   _buildSummaryRow("GIÁ TRỊ ĐỔI:", _totalExchangeValue, isBold: true, color: Colors.green),
@@ -2531,7 +2553,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
 
             // FOOTER: Ghi chú & Nút Hoàn tất
             Card(
-              elevation: 4, margin: const EdgeInsets.all(8),
+              elevation: 4,
+              margin: const EdgeInsets.all(8),
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
@@ -2543,23 +2566,38 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                           flex: 6,
                           child: TextField(
                               controller: _noteCtrl,
-                              decoration: const InputDecoration(labelText: "Ghi chú đơn", border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12))
-                          ),
+                              decoration: const InputDecoration(
+                                  labelText: "Ghi chú đơn",
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
                         ),
                         const SizedBox(width: 12),
                         if (showPaymentMethod)
                           Expanded(
                             flex: 4,
                             child: InputDecorator(
-                              decoration: const InputDecoration(labelText: "Hoàn tiền qua", border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
+                              decoration: const InputDecoration(
+                                  labelText: "Hoàn tiền qua",
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
                                   value: _selectedRefundMethod,
-                                  isDense: true, isExpanded: true,
+                                  isDense: true,
+                                  isExpanded: true,
                                   items: _isLoadingMethods
                                       ? [const DropdownMenuItem(value: 'Tiền mặt', child: Text("Đang tải..."))]
-                                      : _paymentMethods.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)))).toList(),
-                                  onChanged: (val) { if (val != null) setState(() => _selectedRefundMethod = val); },
+                                      : _paymentMethods
+                                          .map((e) => DropdownMenuItem(
+                                              value: e,
+                                              child:
+                                                  Text(e, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))))
+                                          .toList(),
+                                  onChanged: (val) {
+                                    if (val != null) setState(() => _selectedRefundMethod = val);
+                                  },
                                 ),
                               ),
                             ),
@@ -2570,12 +2608,18 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(child: Text(diffText, style: TextStyle(fontSize: isMobile ? 18 : 20, fontWeight: FontWeight.bold, color: diffColor))),
+                        Expanded(
+                            child: Text(diffText,
+                                style: TextStyle(fontSize: isMobile ? 18 : 20, fontWeight: FontWeight.bold, color: diffColor))),
                         ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
                           onPressed: _isProcessing ? null : _submitTransaction,
                           child: _isProcessing
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              ? const SizedBox(
+                                  width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                               : const Text("HOÀN TẤT", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
                       ],
@@ -2662,10 +2706,7 @@ class _ReturnByBillTabState extends State<_ReturnByBillTab> {
 
     try {
       // [QUAN TRỌNG] Luôn fetch lại bill từ Firestore để đảm bảo data mới nhất (đã trừ returnedQuantity)
-      final docSnapshot = await FirebaseFirestore.instance
-          .collection('bills')
-          .doc(cachedBill.id)
-          .get();
+      final docSnapshot = await FirebaseFirestore.instance.collection('bills').doc(cachedBill.id).get();
 
       if (docSnapshot.exists) {
         freshBill = BillModel.fromFirestore(docSnapshot);
@@ -2725,16 +2766,16 @@ class _ReturnByBillTabState extends State<_ReturnByBillTab> {
     // Chuyển trang và chờ kết quả trả về để refresh lại list bên ngoài (nếu cần)
     final bool? result = await Navigator.of(context).push(MaterialPageRoute(
         builder: (context) => Scaffold(
-          appBar: AppBar(title: Text("Xử lý Đổi/Trả: ${freshBill!.billCode}")),
-          body: ExchangeProcessorWidget(
-            currentUser: widget.currentUser,
-            returnService: widget.returnService,
-            initialReturnItems: billItems,
-            originalBill: freshBill, // Truyền bill mới nhất vào
-            customer: customer,
-          ),
-        )
-    ));
+              appBar: AppBar(title: Text("Xử lý Đổi/Trả: ${freshBill!.billCode}")),
+              body: ExchangeProcessorWidget(
+                currentUser: widget.currentUser,
+                returnService: widget.returnService,
+                initialReturnItems: billItems,
+                originalBill: freshBill,
+                // Truyền bill mới nhất vào
+                customer: customer,
+              ),
+            )));
 
     // Nếu xử lý xong (result == true), tự động tìm kiếm lại để cập nhật danh sách bên ngoài
     if (result == true) {
@@ -2763,8 +2804,7 @@ class _ReturnByBillTabState extends State<_ReturnByBillTab> {
                       hintText: 'Tìm hóa đơn...',
                       isDense: true,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _searchBills)
-                  ),
+                      suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _searchBills)),
                   onSubmitted: (_) => _searchBills(),
                 ),
               ),
@@ -2776,17 +2816,17 @@ class _ReturnByBillTabState extends State<_ReturnByBillTab> {
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : ListView.builder(
-            itemCount: _foundBills.length,
-            itemBuilder: (context, index) {
-              final bill = _foundBills[index];
-              return ListTile(
-                title: Text('${bill.billCode} - ${bill.customerName}'),
-                subtitle: Text(DateFormat('HH:mm').format(bill.createdAt)),
-                trailing: Text(formatNumber(bill.totalPayable)),
-                onTap: () => _onSelectBill(bill),
-              );
-            },
-          ),
+                  itemCount: _foundBills.length,
+                  itemBuilder: (context, index) {
+                    final bill = _foundBills[index];
+                    return ListTile(
+                      title: Text('${bill.billCode} - ${bill.customerName}'),
+                      subtitle: Text(DateFormat('HH:mm').format(bill.createdAt)),
+                      trailing: Text(formatNumber(bill.totalPayable)),
+                      onTap: () => _onSelectBill(bill),
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -2804,7 +2844,6 @@ class _DirectReturnTab extends StatefulWidget {
 }
 
 class _DirectReturnTabState extends State<_DirectReturnTab> {
-
   void _startDirectReturn() async {
     // 1. Chọn sản phẩm để trả trước
     final List<ProductModel>? selectedProducts = await ProductSearchScreen.showMultiSelect(
@@ -2815,31 +2854,32 @@ class _DirectReturnTabState extends State<_DirectReturnTab> {
 
     if (selectedProducts == null || selectedProducts.isEmpty) return;
 
-    final List<OrderItem> returnItems = selectedProducts.map((p) => OrderItem(
-      product: p,
-      quantity: 1,
-      price: p.sellPrice,
-      selectedUnit: p.unit ?? '',
-      addedAt: Timestamp.now(),
-      addedBy: widget.currentUser.name ?? '',
-      discountValue: 0,
-      commissionStaff: {},
-    )).toList();
+    final List<OrderItem> returnItems = selectedProducts
+        .map((p) => OrderItem(
+              product: p,
+              quantity: 1,
+              price: p.sellPrice,
+              selectedUnit: p.unit ?? '',
+              addedAt: Timestamp.now(),
+              addedBy: widget.currentUser.name ?? '',
+              discountValue: 0,
+              commissionStaff: {},
+            ))
+        .toList();
 
     if (!mounted) return;
 
     Navigator.of(context).push(MaterialPageRoute(
         builder: (context) => Scaffold(
-          appBar: AppBar(title: const Text("Xử lý Đổi/Trả Trực Tiếp")),
-          body: ExchangeProcessorWidget(
-            currentUser: widget.currentUser,
-            returnService: widget.returnService,
-            initialReturnItems: returnItems,
-            originalBill: null,
-            customer: null, // Sẽ cần chọn khách hàng sau hoặc để khách lẻ
-          ),
-        )
-    ));
+              appBar: AppBar(title: const Text("Xử lý Đổi/Trả Trực Tiếp")),
+              body: ExchangeProcessorWidget(
+                currentUser: widget.currentUser,
+                returnService: widget.returnService,
+                initialReturnItems: returnItems,
+                originalBill: null,
+                customer: null, // Sẽ cần chọn khách hàng sau hoặc để khách lẻ
+              ),
+            )));
   }
 
   @override
@@ -3014,22 +3054,21 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                 ),
                 const SizedBox(height: 16),
               ],
-
               TextField(
                 controller: _priceCtrl,
                 keyboardType: TextInputType.number,
                 // Thêm formatter số
                 inputFormatters: [ThousandDecimalInputFormatter()],
-                decoration: const InputDecoration(labelText: "Đơn giá (đã gồm topping)", border: OutlineInputBorder(), suffixText: "đ"),
+                decoration:
+                    const InputDecoration(labelText: "Đơn giá (đã gồm topping)", border: OutlineInputBorder(), suffixText: "đ"),
               ),
               const SizedBox(height: 16),
-
               TextField(
                 controller: _noteCtrl,
-                decoration: const InputDecoration(labelText: "Ghi chú sản phẩm", border: OutlineInputBorder(), prefixIcon: Icon(Icons.note_alt_outlined)),
+                decoration: const InputDecoration(
+                    labelText: "Ghi chú sản phẩm", border: OutlineInputBorder(), prefixIcon: Icon(Icons.note_alt_outlined)),
               ),
               const SizedBox(height: 16),
-
               if (_accompanyingProducts.isNotEmpty) ...[
                 const Text("Topping / Bán kèm:", style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
@@ -3151,7 +3190,9 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                     child: Text.rich(TextSpan(children: [
                       TextSpan(text: item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       if (widget.taxDisplay.isNotEmpty)
-                        TextSpan(text: ' ${widget.taxDisplay}', style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.normal))
+                        TextSpan(
+                            text: ' ${widget.taxDisplay}',
+                            style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.normal))
                     ])),
                   ),
                   IconButton(
@@ -3169,21 +3210,23 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                   child: Wrap(
                     spacing: 4,
                     runSpacing: 4,
-                    children: item.toppings.entries.map((e) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
-                      child: Text("+${e.key.productName} (x${formatNumber(e.value)})", style: TextStyle(fontSize: 11, color: Colors.orange.shade900)),
-                    )).toList(),
+                    children: item.toppings.entries
+                        .map((e) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
+                              child: Text("+${e.key.productName} (x${formatNumber(e.value)})",
+                                  style: TextStyle(fontSize: 11, color: Colors.orange.shade900)),
+                            ))
+                        .toList(),
                   ),
                 ),
               if (item.note != null && item.note!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
-                  child: Text("Ghi chú: ${item.note}", style: const TextStyle(fontSize: 12, color: Colors.blue, fontStyle: FontStyle.italic)),
+                  child: Text("Ghi chú: ${item.note}",
+                      style: const TextStyle(fontSize: 12, color: Colors.blue, fontStyle: FontStyle.italic)),
                 ),
-
               const SizedBox(height: 8),
-
               Row(
                 children: [
                   SizedBox(
@@ -3192,7 +3235,10 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                     child: AppDropdown<String>(
                       labelText: 'ĐVT',
                       value: uniqueUnits.contains(item.selectedUnit) ? item.selectedUnit : uniqueUnits.first,
-                      items: uniqueUnits.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis))).toList(),
+                      items: uniqueUnits
+                          .map((e) => DropdownMenuItem(
+                              value: e, child: Text(e, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)))
+                          .toList(),
                       isDense: true,
                       onChanged: (val) {
                         if (val != null) {
@@ -3206,9 +3252,7 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                       },
                     ),
                   ),
-
                   const SizedBox(width: 8),
-
                   Container(
                     width: 100,
                     height: 35,
@@ -3221,7 +3265,8 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                       children: [
                         InkWell(
                           onTap: () => item.quantity > 1 ? widget.onUpdate(item.copyWith(quantity: item.quantity - 1)) : null,
-                          child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.remove, size: 14, color: Colors.black)),
+                          child:
+                              const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.remove, size: 14, color: Colors.black)),
                         ),
                         Expanded(
                           child: TextField(
@@ -3229,7 +3274,8 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                             textAlign: TextAlign.center,
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero),
+                            decoration:
+                                const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero),
                             onChanged: (val) {
                               final q = double.tryParse(val);
                               if (q != null && q > 0) widget.onUpdate(item.copyWith(quantity: q));
@@ -3238,19 +3284,19 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                         ),
                         InkWell(
                           onTap: () => widget.onUpdate(item.copyWith(quantity: item.quantity + 1)),
-                          child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.add, size: 14, color: AppTheme.primaryColor)),
+                          child: const Padding(
+                              padding: EdgeInsets.all(4), child: Icon(Icons.add, size: 14, color: AppTheme.primaryColor)),
                         ),
                       ],
                     ),
                   ),
-
                   const Spacer(),
-
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text("${formatNumber(item.price)} đ", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                      Text("${formatNumber(lineTotal)} đ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                      Text("${formatNumber(lineTotal)} đ",
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
                     ],
                   )
                 ],

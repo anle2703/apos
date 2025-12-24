@@ -28,10 +28,9 @@ class VietQRPopup extends StatelessWidget {
     );
 
     // Lấy tên ngân hàng
-    final bankName = vietnameseBanks.firstWhere(
-            (b) => b.bin == bankMethod.bankBin,
-        orElse: () => BankInfo(name: '', shortName: 'Ngân hàng', bin: '')
-    ).shortName;
+    final bankName = vietnameseBanks
+        .firstWhere((b) => b.bin == bankMethod.bankBin, orElse: () => BankInfo(name: '', shortName: 'Ngân hàng', bin: ''))
+        .shortName;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -46,8 +45,7 @@ class VietQRPopup extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             '${formatNumber(amount)} đ',
-            style: const TextStyle(
-                fontSize: 22, fontWeight: FontWeight.bold, color: Colors.red),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.red),
           ),
           const SizedBox(height: 20),
 

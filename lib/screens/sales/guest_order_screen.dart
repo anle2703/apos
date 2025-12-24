@@ -56,8 +56,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     return mergedCart;
   }
 
-  double get _totalAmount =>
-      _displayCart.values.fold(0, (total, item) => total + item.subtotal);
+  double get _totalAmount => _displayCart.values.fold(0, (total, item) => total + item.subtotal);
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
@@ -96,8 +95,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         .limit(1)
         .snapshots();
 
-    _productsStream =
-        _firestoreService.getAllProductsStream(widget.table.storeId);
+    _productsStream = _firestoreService.getAllProductsStream(widget.table.storeId);
 
     _searchController.addListener(() {
       if (mounted) {
@@ -110,9 +108,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         .where('tableId', isEqualTo: widget.table.id)
         .where('status', isEqualTo: 'cancelled')
         .where('type', isEqualTo: 'at_table')
-        .where('createdAt',
-            isGreaterThan: Timestamp.fromDate(
-                DateTime.now().subtract(const Duration(minutes: 15))))
+        .where('createdAt', isGreaterThan: Timestamp.fromDate(DateTime.now().subtract(const Duration(minutes: 15))))
         .snapshots()
         .listen(_handleCancelledWebOrders);
 
@@ -143,9 +139,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   }
 
   Future<void> _listenQuickNotes() async {
-    _quickNotesSub = _firestoreService
-        .getQuickNotes(widget.table.storeId)
-        .listen((notes) {
+    _quickNotesSub = _firestoreService.getQuickNotes(widget.table.storeId).listen((notes) {
       if (mounted) {
         setState(() {
           _quickNotes = notes;
@@ -160,8 +154,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     if (!mounted) return;
     bool didRevert = false;
 
-    final Map<String, OrderItem> currentPendingChanges =
-        Map.from(_pendingChanges);
+    final Map<String, OrderItem> currentPendingChanges = Map.from(_pendingChanges);
 
     for (final doc in snapshot.docs) {
       if (_processedCancellations.contains(doc.id)) continue;
@@ -172,8 +165,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final List<OrderItem> deltaItems = itemsData
           .map((itemMap) {
             try {
-              return OrderItem.fromMap((itemMap as Map).cast<String, dynamic>(),
-                  allProducts: _menuProducts);
+              return OrderItem.fromMap((itemMap as Map).cast<String, dynamic>(), allProducts: _menuProducts);
             } catch (e) {
               return null;
             }
@@ -190,8 +182,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         final double deltaQty = deltaItem.quantity; // e.g., +1 hoặc -1
 
         // 1. Kiểm tra PENDING changes
-        final pendingEntry = currentPendingChanges.entries.firstWhereOrNull(
-            (entry) => entry.value.groupKey == deltaItem.groupKey);
+        final pendingEntry =
+            currentPendingChanges.entries.firstWhereOrNull((entry) => entry.value.groupKey == deltaItem.groupKey);
 
         if (pendingEntry != null) {
           final pendingItem = pendingEntry.value;
@@ -205,8 +197,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           if (newPendingQty <= originalQty) {
             currentPendingChanges.remove(pendingKey);
           } else {
-            currentPendingChanges[pendingKey] =
-                pendingItem.copyWith(quantity: newPendingQty);
+            currentPendingChanges[pendingKey] = pendingItem.copyWith(quantity: newPendingQty);
           }
           didRevert = true;
         }
@@ -228,19 +219,12 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           final cartItem = _cart[key];
           // Nếu local item khớp với pending (đã revert) hoặc cart (gốc)
           // thì xóa local item
-          return (pendingItem != null &&
-                  localItem.quantity == pendingItem.quantity) ||
-              (pendingItem == null &&
-                  cartItem != null &&
-                  localItem.quantity == cartItem.quantity) ||
-              (pendingItem == null &&
-                  cartItem == null &&
-                  localItem.quantity == 0);
+          return (pendingItem != null && localItem.quantity == pendingItem.quantity) ||
+              (pendingItem == null && cartItem != null && localItem.quantity == cartItem.quantity) ||
+              (pendingItem == null && cartItem == null && localItem.quantity == 0);
         });
       });
-      ToastService().show(
-          message: "Một số món đã bị thu ngân từ chối.",
-          type: ToastType.warning);
+      ToastService().show(message: "Một số món đã bị thu ngân từ chối.", type: ToastType.warning);
     }
   }
 
@@ -261,9 +245,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
       for (final itemMap in itemsData) {
         try {
-          final deltaItem = OrderItem.fromMap(
-              (itemMap as Map).cast<String, dynamic>(),
-              allProducts: _menuProducts);
+          final deltaItem = OrderItem.fromMap((itemMap as Map).cast<String, dynamic>(), allProducts: _menuProducts);
           final double deltaQty = deltaItem.quantity;
           final String key = deltaItem.groupKey;
 
@@ -294,8 +276,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final proposedItem = proposedEntry.value;
 
       // Phải tìm lại item gốc trong _cart bằng groupKey
-      final cartItem =
-          _cart.values.firstWhereOrNull((item) => item.groupKey == key);
+      final cartItem = _cart.values.firstWhereOrNull((item) => item.groupKey == key);
 
       if (cartItem == null) {
         // Món này mới hoàn toàn
@@ -303,8 +284,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       } else if (cartItem.quantity != proposedItem.quantity) {
         // Món này bị thay đổi số lượng
         // Lưu ý: dùng lineId của món gốc (cartItem)
-        newPendingChanges[cartItem.lineId] =
-            proposedItem.copyWith(lineId: cartItem.lineId);
+        newPendingChanges[cartItem.lineId] = proposedItem.copyWith(lineId: cartItem.lineId);
       }
       // Nếu SL bằng nhau -> không phải pending change
     }
@@ -334,8 +314,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final pendingItem = _pendingChanges[lineId];
       final double pendingQty = pendingItem?.quantity ?? originalQty;
 
-      bool isRevertedToPending =
-          (pendingItem != null && newQuantity == pendingQty);
+      bool isRevertedToPending = (pendingItem != null && newQuantity == pendingQty);
       bool isRevertedToCart = (newQuantity == originalQty);
 
       if (isRevertedToPending || isRevertedToCart) {
@@ -348,8 +327,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   Future<bool> _saveOrderAtTable() async {
     // ... (Hàm này giữ nguyên như lần trước) ...
-    if (_currentOrder != null &&
-        ['paid', 'cancelled'].contains(_currentOrder!.status)) {
+    if (_currentOrder != null && ['paid', 'cancelled'].contains(_currentOrder!.status)) {
       return true;
     }
     final localChanges = Map<String, OrderItem>.from(_localChanges);
@@ -364,9 +342,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       final int currentVersion;
 
       if (_currentOrder != null && _currentOrder!.status == 'active') {
-        orderRef = FirebaseFirestore.instance
-            .collection('orders')
-            .doc(_currentOrder!.id);
+        orderRef = FirebaseFirestore.instance.collection('orders').doc(_currentOrder!.id);
         serverSnapshot = await orderRef.get();
         serverData = serverSnapshot.data() as Map<String, dynamic>?;
         currentVersion = (serverData?['version'] as num?)?.toInt() ?? 0;
@@ -377,8 +353,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         currentVersion = 0;
       }
 
-      ({List<Map<String, dynamic>> items, double total}) groupAndCalculate(
-          Map<String, OrderItem> itemsToProcess) {
+      ({List<Map<String, dynamic>> items, double total}) groupAndCalculate(Map<String, OrderItem> itemsToProcess) {
         final Map<String, OrderItem> grouped = {};
         for (final item in itemsToProcess.values) {
           if (item.quantity <= 0) continue;
@@ -389,16 +364,13 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
             grouped[key] = existing.copyWith(
               quantity: existing.quantity + item.quantity,
               sentQuantity: existing.sentQuantity + item.sentQuantity,
-              addedAt: (existing.addedAt.seconds < item.addedAt.seconds)
-                  ? existing.addedAt
-                  : item.addedAt,
+              addedAt: (existing.addedAt.seconds < item.addedAt.seconds) ? existing.addedAt : item.addedAt,
             );
           } else {
             grouped[key] = item;
           }
         }
-        final totalAmount =
-            grouped.values.fold(0.0, (tong, item) => tong + item.subtotal);
+        final totalAmount = grouped.values.fold(0.0, (tong, item) => tong + item.subtotal);
         final itemsToSave = grouped.values.map((e) => e.toMap()).toList();
         finalCart = {for (var item in grouped.values) item.lineId: item};
         return (items: itemsToSave, total: totalAmount);
@@ -410,8 +382,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       mergedForSaving.addAll(_pendingChanges);
       mergedForSaving.addAll(localChanges);
 
-      if (!serverSnapshot.exists ||
-          ['paid', 'cancelled'].contains(serverStatus)) {
+      if (!serverSnapshot.exists || ['paid', 'cancelled'].contains(serverStatus)) {
         final result = groupAndCalculate(mergedForSaving);
         if (result.items.isEmpty) return true;
 
@@ -442,30 +413,25 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         final currentVersion = (serverData!['version'] as num?)?.toInt() ?? 0;
 
         final serverItemsMap = {
-          for (var item in (serverData['items'] as List<dynamic>? ?? [])
-              .map((e) => OrderItem.fromMap(e, allProducts: _menuProducts)))
+          for (var item
+              in (serverData['items'] as List<dynamic>? ?? []).map((e) => OrderItem.fromMap(e, allProducts: _menuProducts)))
             item.lineId: item
         };
 
         bool hasUnprintedChanges = false;
 
-        final Map<String, OrderItem> finalMergedItems =
-            Map.from(mergedForSaving);
+        final Map<String, OrderItem> finalMergedItems = Map.from(mergedForSaving);
 
         for (final entry in localChanges.entries) {
           final key = entry.key;
           final localItem = entry.value;
-          final oldSentQty = _pendingChanges[key]?.sentQuantity ??
-              serverItemsMap[key]?.sentQuantity ??
-              0;
+          final oldSentQty = _pendingChanges[key]?.sentQuantity ?? serverItemsMap[key]?.sentQuantity ?? 0;
 
           if (localItem.quantity > oldSentQty) {
             hasUnprintedChanges = true;
-            finalMergedItems[key] =
-                localItem.copyWith(sentQuantity: localItem.quantity);
+            finalMergedItems[key] = localItem.copyWith(sentQuantity: localItem.quantity);
           } else {
-            finalMergedItems[key] =
-                localItem.copyWith(sentQuantity: localItem.quantity);
+            finalMergedItems[key] = localItem.copyWith(sentQuantity: localItem.quantity);
           }
         }
 
@@ -508,8 +474,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       return true;
     } catch (e) {
       debugPrint("==== GUEST SAVE ORDER FAILED ====\n$e");
-      ToastService()
-          .show(message: "Lỗi lưu đơn hàng: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi lưu đơn hàng: $e", type: ToastType.error);
       return false;
     }
   }
@@ -537,9 +502,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         final updatedItem = existingItem.copyWith(
           quantity: existingItem.quantity + newItem.quantity,
           sentQuantity: existingItem.sentQuantity + newItem.sentQuantity,
-          addedAt: (existingItem.addedAt.seconds < newItem.addedAt.seconds)
-              ? existingItem.addedAt
-              : newItem.addedAt,
+          addedAt: (existingItem.addedAt.seconds < newItem.addedAt.seconds) ? existingItem.addedAt : newItem.addedAt,
         );
         mergedCart[existingKey] = updatedItem;
       } else {
@@ -554,14 +517,12 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         // --- SỬA LỖI 2: Xóa local và pending nếu server đã cập nhật ---
         _localChanges.removeWhere((localKey, localItem) {
           final cartItem = _cart[localKey];
-          return cartItem != null &&
-              cartItem.sentQuantity >= localItem.quantity;
+          return cartItem != null && cartItem.sentQuantity >= localItem.quantity;
         });
 
         _pendingChanges.removeWhere((pendingKey, pendingItem) {
           final cartItem = _cart[pendingKey];
-          return cartItem != null &&
-              cartItem.sentQuantity >= pendingItem.quantity;
+          return cartItem != null && cartItem.sentQuantity >= pendingItem.quantity;
         });
       });
     }
@@ -573,39 +534,27 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       stream: _productsStream,
       builder: (context, productSnapshot) {
         if (!productSnapshot.hasData) {
-          return const Scaffold(
-              body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         _menuProducts = productSnapshot.data!
-            .where((p) =>
-                p.productType != 'Nguyên liệu' &&
-                p.productType != 'Vật liệu' &&
-                p.isVisibleInMenu == true)
+            .where((p) => p.productType != 'Nguyên liệu' && p.productType != 'Vật liệu' && p.isVisibleInMenu == true)
             .toList();
 
         return FutureBuilder<List<ProductGroupModel>>(
-          future:
-              _firestoreService.getProductGroups(widget.table.storeId),
+          future: _firestoreService.getProductGroups(widget.table.storeId),
           builder: (context, groupSnapshot) {
             if (groupSnapshot.hasData) {
-              _menuGroups = groupSnapshot.data!
-                  .where(
-                      (g) => _menuProducts.any((p) => p.productGroup == g.name))
-                  .toList();
-              final bool hasOrphanProducts = _menuProducts.any(
-                  (p) => p.productGroup == null || p.productGroup!.isEmpty);
-              if (hasOrphanProducts &&
-                  !_menuGroups.any((g) => g.name == 'Khác')) {
-                _menuGroups.add(ProductGroupModel(
-                    id: 'khac_group_id', name: 'Khác', stt: 9999));
+              _menuGroups = groupSnapshot.data!.where((g) => _menuProducts.any((p) => p.productGroup == g.name)).toList();
+              final bool hasOrphanProducts = _menuProducts.any((p) => p.productGroup == null || p.productGroup!.isEmpty);
+              if (hasOrphanProducts && !_menuGroups.any((g) => g.name == 'Khác')) {
+                _menuGroups.add(ProductGroupModel(id: 'khac_group_id', name: 'Khác', stt: 9999));
               }
             }
 
             return StreamBuilder<QuerySnapshot>(
               stream: _orderStream,
               builder: (context, orderSnapshot) {
-                if (orderSnapshot.connectionState == ConnectionState.active &&
-                    orderSnapshot.hasData) {
+                if (orderSnapshot.connectionState == ConnectionState.active && orderSnapshot.hasData) {
                   List<Map<String, dynamic>> newItemsFromFirestore = [];
 
                   if (orderSnapshot.data!.docs.isNotEmpty) {
@@ -613,16 +562,14 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
                     final data = doc.data() as Map<String, dynamic>;
                     _currentOrder = OrderModel.fromFirestore(doc);
-                    newItemsFromFirestore = List<Map<String, dynamic>>.from(
-                        (data['items'] ?? []) as List);
+                    newItemsFromFirestore = List<Map<String, dynamic>>.from((data['items'] ?? []) as List);
                   } else {
                     if (_displayCart.isEmpty) {
                       _currentOrder = null;
                     }
                   }
 
-                  final bool hasChanges = !const DeepCollectionEquality()
-                      .equals(newItemsFromFirestore, _lastFirestoreItems);
+                  final bool hasChanges = !const DeepCollectionEquality().equals(newItemsFromFirestore, _lastFirestoreItems);
                   if (hasChanges) {
                     _lastFirestoreItems = newItemsFromFirestore;
                     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -668,15 +615,11 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.store_mall_directory_outlined,
-                    size: 80, color: Colors.grey),
+                const Icon(Icons.store_mall_directory_outlined, size: 80, color: Colors.grey),
                 const SizedBox(height: 16),
                 Text(
                   "Rất tiếc!",
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -685,10 +628,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                    "Vui lòng quay lại sau hoặc liên hệ trực tiếp với cửa hàng.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey)),
+                const Text("Vui lòng quay lại sau hoặc liên hệ trực tiếp với cửa hàng.",
+                    textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
               ],
             ),
           ),
@@ -702,81 +643,79 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       length: groupNames.length,
       child: _isMenuView
           ? Scaffold(
-        resizeToAvoidBottomInset: true,
-        backgroundColor: Colors.white,
-        appBar: AppBar(
-          title: Text('Sản phẩm - ${widget.table.tableName}'),
-          automaticallyImplyLeading: false,
-          actions: [
-            _buildMobileCartIcon(),
-          ],
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(100.0),
-            child: Column(
-              children: [
-                _buildMobileSearchBar(),
-                TabBar(
-                  isScrollable: true,
-                  tabs: groupNames.map((name) => Tab(text: name)).toList(),
+              resizeToAvoidBottomInset: true,
+              backgroundColor: Colors.white,
+              appBar: AppBar(
+                title: Text('Sản phẩm - ${widget.table.tableName}'),
+                automaticallyImplyLeading: false,
+                actions: [
+                  _buildMobileCartIcon(),
+                ],
+                bottom: PreferredSize(
+                  preferredSize: const Size.fromHeight(100.0),
+                  child: Column(
+                    children: [
+                      _buildMobileSearchBar(),
+                      TabBar(
+                        isScrollable: true,
+                        tabs: groupNames.map((name) => Tab(text: name)).toList(),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            ),
-          ),
-        ),
-        body: TabBarView(
-          children: groupNames.map((groupName) {
-            final products = _menuProducts.where((p) {
-              bool groupMatch;
-              if (groupName == 'Tất cả') {
-                groupMatch = true;
-              } else if (groupName == 'Khác') {
-                groupMatch = (p.productGroup == null || p.productGroup!.isEmpty);
-              } else {
-                groupMatch = (p.productGroup == groupName);
-              }
-
-              final searchMatch = _searchQuery.isEmpty ||
-                  p.productName.toLowerCase().contains(_searchQuery) ||
-                  (p.productCode?.toLowerCase().contains(_searchQuery) ?? false);
-
-              return groupMatch && searchMatch;
-            }).toList();
-
-            return GridView.builder(
-              padding: EdgeInsets.fromLTRB(
-                  8.0, 8.0, 8.0, 80.0 + bottomPadding),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 200,
-                childAspectRatio: 0.85,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
               ),
-              itemCount: products.length,
-              itemBuilder: (context, index) =>
-                  _buildProductCard(products[index]),
-            );
-          }).toList(),
-        ),
-      )
-          : Scaffold(
-        resizeToAvoidBottomInset: true,
-        appBar: AppBar(
-          title: Text('Giỏ hàng - ${widget.table.tableName}'),
-          automaticallyImplyLeading: false,
-          actions: [
-            IconButton(
-              icon: const Icon(
-                Icons.add_shopping_cart,
-                color: AppTheme.primaryColor,
-                size: 30,
+              body: TabBarView(
+                children: groupNames.map((groupName) {
+                  final products = _menuProducts.where((p) {
+                    bool groupMatch;
+                    if (groupName == 'Tất cả') {
+                      groupMatch = true;
+                    } else if (groupName == 'Khác') {
+                      groupMatch = (p.productGroup == null || p.productGroup!.isEmpty);
+                    } else {
+                      groupMatch = (p.productGroup == groupName);
+                    }
+
+                    final searchMatch = _searchQuery.isEmpty ||
+                        p.productName.toLowerCase().contains(_searchQuery) ||
+                        (p.productCode?.toLowerCase().contains(_searchQuery) ?? false);
+
+                    return groupMatch && searchMatch;
+                  }).toList();
+
+                  return GridView.builder(
+                    padding: EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 80.0 + bottomPadding),
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 200,
+                      childAspectRatio: 0.85,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                    ),
+                    itemCount: products.length,
+                    itemBuilder: (context, index) => _buildProductCard(products[index]),
+                  );
+                }).toList(),
               ),
-              tooltip: 'Thêm món',
-              onPressed: () => setState(() => _isMenuView = true),
             )
-          ],
-        ),
-        body: _buildCartView(bottomPadding),
-      ),
+          : Scaffold(
+              resizeToAvoidBottomInset: true,
+              appBar: AppBar(
+                title: Text('Giỏ hàng - ${widget.table.tableName}'),
+                automaticallyImplyLeading: false,
+                actions: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.add_shopping_cart,
+                      color: AppTheme.primaryColor,
+                      size: 30,
+                    ),
+                    tooltip: 'Thêm món',
+                    onPressed: () => setState(() => _isMenuView = true),
+                  )
+                ],
+              ),
+              body: _buildCartView(bottomPadding),
+            ),
     );
   }
 
@@ -794,8 +733,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
           ),
           filled: true,
           fillColor: Colors.grey[200],
-          contentPadding:
-              const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
           isDense: true,
         ),
       ),
@@ -808,14 +746,11 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       alignment: Alignment.center,
       children: [
         IconButton(
-          icon: const Icon(Icons.shopping_cart_outlined,
-              color: AppTheme.primaryColor, size: 30),
+          icon: const Icon(Icons.shopping_cart_outlined, color: AppTheme.primaryColor, size: 30),
           onPressed: () {
             if (_displayCart.isEmpty) {
               setState(() => _isMenuView = true);
-              ToastService().show(
-                  message: "Giỏ hàng trống, vui lòng chọn sản phẩm.",
-                  type: ToastType.warning);
+              ToastService().show(message: "Giỏ hàng trống, vui lòng chọn sản phẩm.", type: ToastType.warning);
             } else {
               setState(() => _isMenuView = false);
             }
@@ -833,10 +768,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
               ),
               constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
               child: Text(
-                _displayCart.values
-                    .fold<double>(0.0, (total, item) => total + item.quantity)
-                    .toInt()
-                    .toString(),
+                _displayCart.values.fold<double>(0.0, (total, item) => total + item.quantity).toInt().toString(),
                 style: const TextStyle(color: Colors.white, fontSize: 10),
                 textAlign: TextAlign.center,
               ),
@@ -860,8 +792,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('Giỏ hàng của bạn đang trống.',
-                        style: textTheme.bodyMedium),
+                    Text('Giỏ hàng của bạn đang trống.', style: textTheme.bodyMedium),
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
                       icon: const Icon(Icons.add_shopping_cart),
@@ -871,38 +802,29 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   ],
                 ))
               : ListView.builder(
-                  padding:
-                      EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 8.0 + bottomInset),
+                  padding: EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 8.0 + bottomInset),
                   itemCount: cartEntries.length,
                   itemBuilder: (context, index) {
                     final entry = cartEntries[index];
-                    return _buildCartItemCard(
-                        entry.key, entry.value, currencyFormat);
+                    return _buildCartItemCard(entry.key, entry.value, currencyFormat);
                   },
                 ),
         ),
         Container(
           padding: const EdgeInsets.all(16.0),
-          decoration:
-              BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
-            BoxShadow(
-                color: Colors.black.withAlpha(12),
-                blurRadius: 10,
-                offset: const Offset(0, -5))
-          ]),
+          decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              boxShadow: [BoxShadow(color: Colors.black.withAlpha(12), blurRadius: 10, offset: const Offset(0, -5))]),
           child: Column(
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Tổng cộng:',
-                      style: textTheme.displaySmall?.copyWith(fontSize: 18)),
+                  Text('Tổng cộng:', style: textTheme.displaySmall?.copyWith(fontSize: 18)),
                   Text(
                     currencyFormat.format(_totalAmount),
-                    style: textTheme.displaySmall?.copyWith(
-                        fontSize: 18,
-                        color: AppTheme.primaryColor,
-                        fontWeight: FontWeight.bold),
+                    style:
+                        textTheme.displaySmall?.copyWith(fontSize: 18, color: AppTheme.primaryColor, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -918,8 +840,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         backgroundColor: AppTheme.primaryColor,
                         foregroundColor: Colors.white,
                       ),
-                      onPressed:
-                          _displayCart.isNotEmpty ? _handleCheckout : null,
+                      onPressed: _displayCart.isNotEmpty ? _handleCheckout : null,
                     ),
                   ),
                 ],
@@ -933,21 +854,18 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   Future<void> _addItemToCart(ProductModel product) async {
     // ... (Hàm này giữ nguyên) ...
-    final bool needsOptionDialog = product.additionalUnits.isNotEmpty ||
-        product.accompanyingItems.isNotEmpty;
+    final bool needsOptionDialog = product.additionalUnits.isNotEmpty || product.accompanyingItems.isNotEmpty;
     OrderItem newItem;
 
     if (needsOptionDialog) {
       final result = await showDialog<Map<String, dynamic>>(
         context: context,
-        builder: (context) =>
-            _ProductOptionsDialog(product: product, allProducts: _menuProducts),
+        builder: (context) => _ProductOptionsDialog(product: product, allProducts: _menuProducts),
       );
       if (result == null) return;
       final selectedUnit = result['selectedUnit'] as String;
       final priceForUnit = result['price'] as double;
-      final selectedToppings =
-          result['selectedToppings'] as Map<ProductModel, double>;
+      final selectedToppings = result['selectedToppings'] as Map<ProductModel, double>;
       newItem = OrderItem(
         product: product,
         selectedUnit: selectedUnit,
@@ -968,13 +886,11 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
     final gk = newItem.groupKey;
     setState(() {
-      final existingEntry = _displayCart.entries
-          .firstWhereOrNull((entry) => entry.value.groupKey == gk);
+      final existingEntry = _displayCart.entries.firstWhereOrNull((entry) => entry.value.groupKey == gk);
       if (existingEntry != null) {
         final existingItem = existingEntry.value;
         final existingKey = existingEntry.key;
-        _localChanges[existingKey] =
-            existingItem.copyWith(quantity: existingItem.quantity + 1);
+        _localChanges[existingKey] = existingItem.copyWith(quantity: existingItem.quantity + 1);
       } else {
         _localChanges[newItem.lineId] = newItem;
       }
@@ -983,16 +899,12 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   void _handleCheckout() {
     if (_displayCart.isEmpty) {
-      ToastService().show(
-          message: "Giỏ hàng của bạn đang trống.", type: ToastType.warning);
+      ToastService().show(message: "Giỏ hàng của bạn đang trống.", type: ToastType.warning);
       return;
     }
     // Check _localChanges (chỉ những thay đổi MỚI)
-    if (_localChanges.isEmpty &&
-        widget.table.id != 'web_ship_order' &&
-        widget.table.id != 'web_schedule_order') {
-      ToastService()
-          .show(message: "Bạn chưa thay đổi món nào.", type: ToastType.warning);
+    if (_localChanges.isEmpty && widget.table.id != 'web_ship_order' && widget.table.id != 'web_schedule_order') {
+      ToastService().show(message: "Bạn chưa thay đổi món nào.", type: ToastType.warning);
       return;
     }
     if (_isSavingOrder) return;
@@ -1011,30 +923,20 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   Future<void> _handleShippingOrder(String type) async {
     if (!_formKey.currentState!.validate()) return;
 
-    final int numberOfCustomers =
-        int.tryParse(_numberOfCustomersController.text) ?? 1;
+    final int numberOfCustomers = int.tryParse(_numberOfCustomersController.text) ?? 1;
 
     final customerInfo = {
       'name': (type == 'ship') ? '' : _nameController.text.trim(),
       'phone': _phoneController.text.trim(),
-      'address': (type == 'ship')
-          ? _addressController.text.trim()
-          : _scheduleTimeController.text.trim(),
+      'address': (type == 'ship') ? _addressController.text.trim() : _scheduleTimeController.text.trim(),
       'note': _noteController.text.trim(),
-      'numberOfCustomers':
-          (type == 'schedule' && widget.settings.businessType == "fnb")
-              ? numberOfCustomers
-              : 1,
+      'numberOfCustomers': (type == 'schedule' && widget.settings.businessType == "fnb") ? numberOfCustomers : 1,
     };
 
     final itemsToSend = _displayCart.values.toList();
     final totalAmount = _totalAmount;
 
-    await _saveOrderToWeb(
-        type: type,
-        customerInfo: customerInfo,
-        items: itemsToSend,
-        totalAmount: totalAmount);
+    await _saveOrderToWeb(type: type, customerInfo: customerInfo, items: itemsToSend, totalAmount: totalAmount);
   }
 
   Future<void> _handleAtTableOrder() async {
@@ -1050,8 +952,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
       for (final changedItem in _localChanges.values) {
         // Tìm trạng thái gốc (trong _cart + _pending)
-        final originalItem =
-            _pendingChanges[changedItem.lineId] ?? _cart[changedItem.lineId];
+        final originalItem = _pendingChanges[changedItem.lineId] ?? _cart[changedItem.lineId];
         final double originalQty = originalItem?.quantity ?? 0;
         final double newQty = changedItem.quantity;
 
@@ -1065,17 +966,12 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
       }
 
       if (itemsDelta.isEmpty) {
-        ToastService().show(
-            message: "Không có thay đổi nào để gửi.", type: ToastType.warning);
+        ToastService().show(message: "Không có thay đổi nào để gửi.", type: ToastType.warning);
         if (mounted) setState(() => _isSavingOrder = false);
         return;
       }
 
-      await _saveOrderToWeb(
-          type: 'at_table',
-          customerInfo: null,
-          items: itemsDelta,
-          totalAmount: totalDelta);
+      await _saveOrderToWeb(type: 'at_table', customerInfo: null, items: itemsDelta, totalAmount: totalDelta);
     } else {
       // 2. KHÔNG CẦN XÁC NHẬN -> Gửi thẳng vào 'orders' và báo bếp
       await _saveOrderToTableAndPrint();
@@ -1103,9 +999,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         'createdAt': FieldValue.serverTimestamp(),
         'tableName': widget.table.tableName,
         'tableId': widget.table.id,
-        'note': (type != 'at_table' && customerInfo != null)
-            ? customerInfo['note']
-            : null,
+        'note': (type != 'at_table' && customerInfo != null) ? customerInfo['note'] : null,
       };
 
       await _firestoreService.addWebOrder(webOrderData);
@@ -1128,8 +1022,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         _clearCartCompletelyAndReset();
       }
     } catch (e) {
-      ToastService()
-          .show(message: "Lỗi gửi yêu cầu: $e", type: ToastType.error);
+      ToastService().show(message: "Lỗi gửi yêu cầu: $e", type: ToastType.error);
       if (mounted) setState(() => _isSavingOrder = false);
     }
   }
@@ -1137,14 +1030,12 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
   Future<void> _saveOrderToTableAndPrint() async {
     final success = await _saveOrderAtTable();
     if (!success) {
-      ToastService()
-          .show(message: "Gửi yêu cầu thất bại", type: ToastType.error);
+      ToastService().show(message: "Gửi yêu cầu thất bại", type: ToastType.error);
       if (mounted) setState(() => _isSavingOrder = false);
       return;
     }
 
-    _showOrderSuccessDialog("Gửi yêu cầu thành công!",
-        "Yêu cầu của bạn đã được gửi thẳng đến bếp.");
+    _showOrderSuccessDialog("Gửi yêu cầu thành công!", "Yêu cầu của bạn đã được gửi thẳng đến bếp.");
     _resetUiFlagsAfterSave();
   }
 
@@ -1191,8 +1082,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   DateTime? pickedDate = await showOmniDateTimePicker(
                     context: context,
                     initialDate: DateTime.now(),
-                    firstDate:
-                        DateTime.now().subtract(const Duration(minutes: 10)),
+                    firstDate: DateTime.now().subtract(const Duration(minutes: 10)),
                     lastDate: DateTime.now().add(const Duration(days: 30)),
                     is24HourMode: true,
                     isShowSeconds: false,
@@ -1200,8 +1090,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   );
 
                   if (pickedDate != null) {
-                    final formattedTime =
-                        DateFormat('HH:mm - dd/MM/yyyy').format(pickedDate);
+                    final formattedTime = DateFormat('HH:mm - dd/MM/yyyy').format(pickedDate);
                     setStateDialog(() {
                       _scheduleTimeController.text = formattedTime;
                     });
@@ -1228,10 +1117,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                                   labelText: 'Tên của bạn (*)',
                                   prefixIcon: Icon(Icons.person_outline),
                                 ),
-                                validator: (value) =>
-                                    (value == null || value.isEmpty)
-                                        ? 'Vui lòng nhập tên'
-                                        : null,
+                                validator: (value) => (value == null || value.isEmpty) ? 'Vui lòng nhập tên' : null,
                               ),
                               const SizedBox(height: 16),
                             ],
@@ -1267,10 +1153,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                                   labelText: 'Địa chỉ giao hàng (*)',
                                   prefixIcon: Icon(Icons.location_on_outlined),
                                 ),
-                                validator: (value) =>
-                                    (value == null || value.isEmpty)
-                                        ? 'Vui lòng nhập địa chỉ'
-                                        : null,
+                                validator: (value) => (value == null || value.isEmpty) ? 'Vui lòng nhập địa chỉ' : null,
                               ),
                             ],
                             if (!isShipping) ...[
@@ -1279,14 +1162,10 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                                 readOnly: true,
                                 decoration: const InputDecoration(
                                   labelText: 'Thời gian đặt lịch (*)',
-                                  prefixIcon:
-                                      Icon(Icons.calendar_month_outlined),
+                                  prefixIcon: Icon(Icons.calendar_month_outlined),
                                 ),
                                 onTap: pickScheduleTime,
-                                validator: (value) =>
-                                    (value == null || value.isEmpty)
-                                        ? 'Vui lòng chọn thời gian'
-                                        : null,
+                                validator: (value) => (value == null || value.isEmpty) ? 'Vui lòng chọn thời gian' : null,
                               ),
                               if (widget.settings.businessType == "fnb") ...[
                                 const SizedBox(height: 16),
@@ -1325,9 +1204,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
-                            onPressed: _isSavingOrder
-                                ? null
-                                : () => Navigator.of(context).pop(),
+                            onPressed: _isSavingOrder ? null : () => Navigator.of(context).pop(),
                             child: const Text('Hủy'),
                           ),
                           const SizedBox(width: 12),
@@ -1335,20 +1212,17 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                             onPressed: _isSavingOrder
                                 ? null
                                 : () async {
-                              if (_formKey.currentState!.validate()) {
-                                setStateDialog(() => _isSavingOrder = true);
-                                await _handleShippingOrder(type);
-                                if (mounted) {
-                                  setStateDialog(() => _isSavingOrder = false);
-                                }
-                              }
-                            },
+                                    if (_formKey.currentState!.validate()) {
+                                      setStateDialog(() => _isSavingOrder = true);
+                                      await _handleShippingOrder(type);
+                                      if (mounted) {
+                                        setStateDialog(() => _isSavingOrder = false);
+                                      }
+                                    }
+                                  },
                             child: _isSavingOrder
                                 ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
+                                    width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                 : const Text('Xác nhận'),
                           ),
                         ],
@@ -1413,8 +1287,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         .where((item) => item.product.id == product.id)
         .fold<double>(0.0, (total, item) => total + item.quantity);
 
-    final bool hasLocalChanges =
-        _localChanges.values.any((item) => item.product.id == product.id);
+    final bool hasLocalChanges = _localChanges.values.any((item) => item.product.id == product.id);
 
     return GestureDetector(
       onTap: () => _addItemToCart(product),
@@ -1423,8 +1296,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
         children: [
           Card(
             clipBehavior: Clip.antiAlias,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1435,28 +1307,21 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14),
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
                 Expanded(
-                  child: (product.imageUrl != null &&
-                          product.imageUrl!.isNotEmpty)
+                  child: (product.imageUrl != null && product.imageUrl!.isNotEmpty)
                       ? Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12.0),
                           child: CachedNetworkImage(
                             imageUrl: product.imageUrl!,
                             fit: BoxFit.contain,
-                            placeholder: (context, url) => const Center(
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2.0)),
-                            errorWidget: (context, url, error) => const Icon(
-                                Icons.image_not_supported,
-                                color: Colors.grey),
+                            placeholder: (context, url) => const Center(child: CircularProgressIndicator(strokeWidth: 2.0)),
+                            errorWidget: (context, url, error) => const Icon(Icons.image_not_supported, color: Colors.grey),
                           ),
                         )
-                      : const Icon(Icons.fastfood,
-                          size: 50, color: Colors.grey),
+                      : const Icon(Icons.fastfood, size: 50, color: Colors.grey),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
@@ -1488,10 +1353,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                 ),
                 child: Text(
                   formatNumber(quantityInCart),
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -1524,25 +1386,21 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
 
   Future<void> _clearProductFromCart(String productId) async {
     setState(() {
-      final keysToRemove = _localChanges.entries
-          .where((entry) => entry.value.product.id == productId)
-          .map((entry) => entry.key)
-          .toList();
+      final keysToRemove =
+          _localChanges.entries.where((entry) => entry.value.product.id == productId).map((entry) => entry.key).toList();
       for (final key in keysToRemove) {
         _localChanges.remove(key);
       }
     });
   }
 
-  Widget _buildCartItemCard(
-      String cartId, OrderItem item, NumberFormat currencyFormat) {
+  Widget _buildCartItemCard(String cartId, OrderItem item, NumberFormat currencyFormat) {
     final textTheme = Theme.of(context).textTheme;
     final originalItem = _cart[cartId];
     final sentQuantity = originalItem?.sentQuantity ?? 0;
     final bool isPending = _pendingChanges.containsKey(cartId);
     final bool isLocal = _localChanges.containsKey(cartId);
-    final double baseQuantity =
-        _pendingChanges[cartId]?.quantity ?? sentQuantity;
+    final double baseQuantity = _pendingChanges[cartId]?.quantity ?? sentQuantity;
     final change = item.quantity - baseQuantity;
     final bool isCancelled = item.quantity == 0;
 
@@ -1586,11 +1444,8 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   if (isLocal && change != 0 && !isCancelled) ...[
                     const SizedBox(width: 4),
                     Text(
-                      change > 0
-                          ? "+${formatNumber(change)}"
-                          : formatNumber(change),
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, color: Colors.red),
+                      change > 0 ? "+${formatNumber(change)}" : formatNumber(change),
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
                     ),
                   ],
                   const SizedBox(width: 8),
@@ -1601,22 +1456,16 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                           text: '${item.product.productName} ',
                           style: textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color:
-                                isCancelled ? Colors.grey : AppTheme.textColor,
-                            decoration:
-                                isCancelled ? TextDecoration.lineThrough : null,
+                            color: isCancelled ? Colors.grey : AppTheme.textColor,
+                            decoration: isCancelled ? TextDecoration.lineThrough : null,
                           ),
                         ),
                         if (item.selectedUnit.isNotEmpty)
                           TextSpan(
                             text: '(${item.selectedUnit})',
                             style: textTheme.bodyMedium?.copyWith(
-                              color: isCancelled
-                                  ? Colors.grey
-                                  : Colors.grey.shade700,
-                              decoration: isCancelled
-                                  ? TextDecoration.lineThrough
-                                  : null,
+                              color: isCancelled ? Colors.grey : Colors.grey.shade700,
+                              decoration: isCancelled ? TextDecoration.lineThrough : null,
                             ),
                           ),
                       ]),
@@ -1626,20 +1475,15 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                   ),
                 ],
               ),
-              if (item.toppings.isNotEmpty ||
-                  (item.note != null && item.note!.isNotEmpty))
+              if (item.toppings.isNotEmpty || (item.note != null && item.note!.isNotEmpty))
                 Padding(
                   padding: const EdgeInsets.only(left: 32, bottom: 4),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (item.toppings.isNotEmpty)
-                        _buildToppingsList(item.toppings, currencyFormat),
+                      if (item.toppings.isNotEmpty) _buildToppingsList(item.toppings, currencyFormat),
                       if (item.note != null && item.note!.isNotEmpty)
-                        Text('Ghi chú: ${item.note}',
-                            style: const TextStyle(
-                                color: Colors.red,
-                                fontStyle: FontStyle.italic)),
+                        Text('Ghi chú: ${item.note}', style: const TextStyle(color: Colors.red, fontStyle: FontStyle.italic)),
                     ],
                   ),
                 ),
@@ -1651,14 +1495,12 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                     width: 100,
                     child: Text(
                       currencyFormat.format(item.price),
-                      style: textTheme.bodyMedium
-                          ?.copyWith(color: isCancelled ? Colors.grey : null),
+                      style: textTheme.bodyMedium?.copyWith(color: isCancelled ? Colors.grey : null),
                     ),
                   ),
                   Container(
                     decoration: BoxDecoration(
-                      color:
-                          isCancelled ? Colors.transparent : Colors.grey[100],
+                      color: isCancelled ? Colors.transparent : Colors.grey[100],
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -1666,8 +1508,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           splashRadius: 18,
-                          icon: Icon(Icons.remove,
-                              size: 18, color: Colors.red.shade400),
+                          icon: Icon(Icons.remove, size: 18, color: Colors.red.shade400),
                           onPressed: () => _updateQuantity(cartId, -1),
                         ),
                         InkWell(
@@ -1676,23 +1517,19 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                             decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(12.0),
-                                border: Border.all(
-                                    color: Colors.grey.shade300, width: 0.5)),
+                                border: Border.all(color: Colors.grey.shade300, width: 0.5)),
                             alignment: Alignment.center,
                             constraints: const BoxConstraints(
                               minWidth: 40,
                               maxWidth: 65,
                             ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 4.0, vertical: 1.0),
+                            padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
                             child: Text(
                               formatNumber(item.quantity),
                               style: textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: isCancelled ? Colors.grey : null,
-                                decoration: isCancelled
-                                    ? TextDecoration.lineThrough
-                                    : null,
+                                decoration: isCancelled ? TextDecoration.lineThrough : null,
                               ),
                             ),
                           ),
@@ -1700,8 +1537,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           splashRadius: 18,
-                          icon: const Icon(Icons.add,
-                              size: 18, color: AppTheme.primaryColor),
+                          icon: const Icon(Icons.add, size: 18, color: AppTheme.primaryColor),
                           onPressed: () => _updateQuantity(cartId, 1),
                         ),
                       ],
@@ -1715,8 +1551,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
                       style: textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: isCancelled ? Colors.grey : null,
-                        decoration:
-                            isCancelled ? TextDecoration.lineThrough : null,
+                        decoration: isCancelled ? TextDecoration.lineThrough : null,
                       ),
                     ),
                   ),
@@ -1733,8 +1568,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     if (item.quantity <= 0) return;
 
     final relevantNotes = _quickNotes.where((note) {
-      return note.productIds.isEmpty ||
-          note.productIds.contains(item.product.id);
+      return note.productIds.isEmpty || note.productIds.contains(item.product.id);
     }).toList();
 
     final result = await showDialog<Map<String, dynamic>>(
@@ -1763,8 +1597,7 @@ class _GuestOrderScreenState extends State<GuestOrderScreen> {
     });
   }
 
-  Widget _buildToppingsList(
-      Map<ProductModel, double> toppings, NumberFormat currencyFormat) {
+  Widget _buildToppingsList(Map<ProductModel, double> toppings, NumberFormat currencyFormat) {
     return Padding(
       padding: const EdgeInsets.only(top: 2.0),
       child: Wrap(
@@ -1787,8 +1620,7 @@ class _ProductOptionsDialog extends StatefulWidget {
   final ProductModel product;
   final List<ProductModel> allProducts;
 
-  const _ProductOptionsDialog(
-      {required this.product, required this.allProducts});
+  const _ProductOptionsDialog({required this.product, required this.allProducts});
 
   @override
   State<_ProductOptionsDialog> createState() => _ProductOptionsDialogState();
@@ -1804,10 +1636,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
   @override
   void initState() {
     super.initState();
-    _baseUnitData = {
-      'unitName': widget.product.unit ?? '',
-      'sellPrice': widget.product.sellPrice
-    };
+    _baseUnitData = {'unitName': widget.product.unit ?? '', 'sellPrice': widget.product.sellPrice};
     _allUnitOptions = [_baseUnitData, ...widget.product.additionalUnits];
     _selectedUnit = _baseUnitData['unitName'] as String;
 
@@ -1820,15 +1649,12 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
   }
 
   void _onConfirm() {
-    final selectedUnitData =
-        _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
-    final priceForSelectedUnit =
-        (selectedUnitData['sellPrice'] as num).toDouble();
+    final selectedUnitData = _allUnitOptions.firstWhere((u) => u['unitName'] == _selectedUnit);
+    final priceForSelectedUnit = (selectedUnitData['sellPrice'] as num).toDouble();
     final Map<ProductModel, double> toppingsMap = {};
     _selectedToppings.forEach((productId, quantity) {
       if (quantity > 0) {
-        final product =
-            _accompanyingProducts.firstWhere((p) => p.id == productId);
+        final product = _accompanyingProducts.firstWhere((p) => p.id == productId);
         toppingsMap[product] = quantity;
       }
     });
@@ -1871,8 +1697,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (widget.product.additionalUnits.isNotEmpty) ...[
-                  const Text('Chọn đơn vị tính:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Chọn đơn vị tính:', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   SegmentedButton<String>(
                     segments: _allUnitOptions.map((unitData) {
@@ -1889,8 +1714,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                   const Divider(height: 24),
                 ],
                 if (_accompanyingProducts.isNotEmpty) ...[
-                  const Text('Chọn Topping/Bán kèm:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Chọn Topping/Bán kèm:', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   ..._accompanyingProducts.map((topping) {
                     final quantity = _selectedToppings[topping.id] ?? 0;
@@ -1899,27 +1723,20 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: Text(
-                                '${topping.productName} (+${formatNumber(topping.sellPrice)}đ)'),
+                            child: Text('${topping.productName} (+${formatNumber(topping.sellPrice)}đ)'),
                           ),
                           Container(
-                            decoration: BoxDecoration(
-                                color: Colors.grey[100],
-                                borderRadius: BorderRadius.circular(8)),
+                            decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
                             child: Row(
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.remove,
-                                      size: 18, color: Colors.red),
-                                  onPressed: () =>
-                                      _updateToppingQuantity(topping.id, -1),
+                                  icon: const Icon(Icons.remove, size: 18, color: Colors.red),
+                                  onPressed: () => _updateToppingQuantity(topping.id, -1),
                                 ),
                                 Text(formatNumber(quantity)),
                                 IconButton(
-                                  icon: const Icon(Icons.add,
-                                      size: 18, color: AppTheme.primaryColor),
-                                  onPressed: () =>
-                                      _updateToppingQuantity(topping.id, 1),
+                                  icon: const Icon(Icons.add, size: 18, color: AppTheme.primaryColor),
+                                  onPressed: () => _updateToppingQuantity(topping.id, 1),
                                 ),
                               ],
                             ),
@@ -1934,9 +1751,7 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Hủy')),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Hủy')),
           ElevatedButton(onPressed: _onConfirm, child: const Text('Xác nhận')),
         ],
       ),
@@ -1964,10 +1779,8 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
   @override
   void initState() {
     super.initState();
-    _quantityController =
-        TextEditingController(text: formatNumber(widget.initialItem.quantity));
-    _noteController =
-        TextEditingController(text: widget.initialItem.note ?? '');
+    _quantityController = TextEditingController(text: formatNumber(widget.initialItem.quantity));
+    _noteController = TextEditingController(text: widget.initialItem.note ?? '');
   }
 
   @override
@@ -1981,8 +1794,7 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
     final double quantity = parseVN(_quantityController.text);
     if (quantity < 0) {
       // Cho phép bằng 0 (để hủy)
-      ToastService()
-          .show(message: "Số lượng không hợp lệ", type: ToastType.warning);
+      ToastService().show(message: "Số lượng không hợp lệ", type: ToastType.warning);
       return;
     }
 
@@ -2015,8 +1827,7 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
         }
       },
       child: AlertDialog(
-        title: Text(widget.initialItem.product.productName,
-            textAlign: TextAlign.center),
+        title: Text(widget.initialItem.product.productName, textAlign: TextAlign.center),
         content: SizedBox(
           width: MediaQuery.of(context).size.width * 0.9,
           child: SingleChildScrollView(
@@ -2031,12 +1842,12 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
                     labelText: 'Số lượng',
                     prefixIcon: Icon(Icons.calculate_outlined),
                   ),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [ThousandDecimalInputFormatter()],
                   validator: (value) {
-                    if (value == null || value.isEmpty){
-                      return 'Không được trống';}
+                    if (value == null || value.isEmpty) {
+                      return 'Không được trống';
+                    }
                     final val = parseVN(value);
                     if (val < 0) return 'Số lượng không hợp lệ';
                     return null;
@@ -2053,8 +1864,7 @@ class _GuestEditItemDialogState extends State<_GuestEditItemDialog> {
                 ),
                 const SizedBox(height: 16),
                 if (widget.relevantQuickNotes.isNotEmpty) ...[
-                  Text('Ghi chú nhanh:',
-                      style: Theme.of(context).textTheme.titleSmall),
+                  Text('Ghi chú nhanh:', style: Theme.of(context).textTheme.titleSmall),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8.0,

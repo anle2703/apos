@@ -118,7 +118,6 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
       );
 
       ToastService().show(message: "Đã gửi lệnh in ${_settings.labelColumns} tem", type: ToastType.success);
-
     } catch (e) {
       ToastService().show(message: "Lỗi in thử: $e", type: ToastType.error);
     } finally {
@@ -134,23 +133,43 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
             sellPrice: 25000,
             productCode: 'SP893',
             additionalBarcodes: ['893456789012'],
-            additionalUnits: [], costPrice: 0, stock: 0, minStock: 0,
-            storeId: '', ownerUid: '',
-            accompanyingItems: [], recipeItems: [], compiledMaterials: [], kitchenPrinters: []
-        ),
+            additionalUnits: [],
+            costPrice: 0,
+            stock: 0,
+            minStock: 0,
+            storeId: '',
+            ownerUid: '',
+            accompanyingItems: [],
+            recipeItems: [],
+            compiledMaterials: [],
+            kitchenPrinters: []),
         quantity: 1,
         price: 25000,
         selectedUnit: _isRetailMode ? 'Gói' : 'Ly L',
-        toppings: _isRetailMode ? {} : {
-          ProductModel(id: 't1', productName: 'Trân châu trắng', sellPrice: 5000,
-              additionalBarcodes: [], additionalUnits: [], accompanyingItems: [], recipeItems: [], compiledMaterials: [], kitchenPrinters: [], costPrice: 0, stock: 0, minStock: 0, storeId: '', ownerUid: ''): 1
-        },
+        toppings: _isRetailMode
+            ? {}
+            : {
+                ProductModel(
+                    id: 't1',
+                    productName: 'Trân châu trắng',
+                    sellPrice: 5000,
+                    additionalBarcodes: [],
+                    additionalUnits: [],
+                    accompanyingItems: [],
+                    recipeItems: [],
+                    compiledMaterials: [],
+                    kitchenPrinters: [],
+                    costPrice: 0,
+                    stock: 0,
+                    minStock: 0,
+                    storeId: '',
+                    ownerUid: ''): 1
+              },
         note: _isRetailMode ? '' : '50% đường, ít đá',
         addedAt: Timestamp.now(),
         addedBy: 'Admin',
         lineId: 'line_1',
-        commissionStaff: {}
-    );
+        commissionStaff: {});
   }
 
   @override
@@ -216,7 +235,8 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
   // Panel Xem trước (Bên phải hoặc Bên trên) - Dùng Widget thật
   Widget _buildPreviewPanel() {
     return Container(
-      color: Colors.grey[300], // Màu nền xám để nổi bật tem trắng
+      color: Colors.grey[300],
+      // Màu nền xám để nổi bật tem trắng
       width: double.infinity,
       height: double.infinity,
       alignment: Alignment.center,
@@ -255,14 +275,13 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
 
     // Tạo dữ liệu giả giống PrintingService
     List<LabelItemData?> previewItems = [];
-    for(int i=0; i< _settings.labelColumns; i++) {
+    for (int i = 0; i < _settings.labelColumns; i++) {
       previewItems.add(LabelItemData(
           item: dummyItem,
           headerTitle: _isRetailMode ? "HD001" : "Bàn 5",
-          index: i+1,
+          index: i + 1,
           total: _settings.labelColumns,
-          dailySeq: 101
-      ));
+          dailySeq: 101));
     }
 
     // Tính toán kích thước pixel (8 dots/mm)
@@ -282,7 +301,6 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
       ),
     );
   }
-
 
   Widget _buildPaperSettings() {
     return Column(
@@ -341,21 +359,21 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
               children: [
                 Expanded(
                     child: CustomTextFormField(
-                      key: ValueKey(_settings.labelWidth),
-                      initialValue: _settings.labelWidth.toInt().toString(),
-                      decoration: const InputDecoration(labelText: 'Rộng (mm)', isDense: true),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => setState(() => _settings.labelWidth = (double.tryParse(v) ?? 50)),
-                    )),
+                  key: ValueKey(_settings.labelWidth),
+                  initialValue: _settings.labelWidth.toInt().toString(),
+                  decoration: const InputDecoration(labelText: 'Rộng (mm)', isDense: true),
+                  keyboardType: TextInputType.number,
+                  onChanged: (v) => setState(() => _settings.labelWidth = (double.tryParse(v) ?? 50)),
+                )),
                 const SizedBox(width: 12),
                 Expanded(
                     child: CustomTextFormField(
-                      key: ValueKey(_settings.labelHeight),
-                      initialValue: _settings.labelHeight.toInt().toString(),
-                      decoration: const InputDecoration(labelText: 'Cao (mm)', isDense: true),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => setState(() => _settings.labelHeight = (double.tryParse(v) ?? 30)),
-                    )),
+                  key: ValueKey(_settings.labelHeight),
+                  initialValue: _settings.labelHeight.toInt().toString(),
+                  decoration: const InputDecoration(labelText: 'Cao (mm)', isDense: true),
+                  keyboardType: TextInputType.number,
+                  onChanged: (v) => setState(() => _settings.labelHeight = (double.tryParse(v) ?? 30)),
+                )),
               ],
             ),
           ),
@@ -422,8 +440,10 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
         _buildSwitch("In đậm", _settings.retailProductBold, (v) => setState(() => _settings.retailProductBold = v)),
         const SizedBox(height: 12),
         _buildSectionHeader("Hàng 3: Mã vạch & Mã SP"),
-        _buildSlider("Cao Barcode", _settings.retailBarcodeHeight, 10, 40, (v) => setState(() => _settings.retailBarcodeHeight = v)),
-        _buildSlider("Rộng Barcode", _settings.retailBarcodeWidth, 20, 120, (v) => setState(() => _settings.retailBarcodeWidth = v)),
+        _buildSlider(
+            "Cao Barcode", _settings.retailBarcodeHeight, 10, 40, (v) => setState(() => _settings.retailBarcodeHeight = v)),
+        _buildSlider(
+            "Rộng Barcode", _settings.retailBarcodeWidth, 20, 120, (v) => setState(() => _settings.retailBarcodeWidth = v)),
         _buildSlider("Cỡ chữ Mã SP", _settings.retailCodeSize, 5, 20, (v) => setState(() => _settings.retailCodeSize = v)),
         _buildSwitch("Mã SP In đậm", _settings.retailCodeBold, (v) => setState(() => _settings.retailCodeBold = v)),
         const SizedBox(height: 12),

@@ -121,7 +121,9 @@ class ReceiptWidget extends StatelessWidget {
     final String? eInvoiceUrl = summary['eInvoiceFullUrl'] as String?;
     final String? eInvoiceCode = summary['eInvoiceCode'] as String?;
     final String? eInvoiceMst = summary['eInvoiceMst'] as String?;
-    final bool isShipOrder = tableName.toLowerCase().contains('giao hàng') || tableName.toLowerCase().contains('ship') || (isRetailMode && tableName.isEmpty);
+    final bool isShipOrder = tableName.toLowerCase().contains('giao hàng') ||
+        tableName.toLowerCase().contains('ship') ||
+        (isRetailMode && tableName.isEmpty);
     final String? originalBillCode = summary['originalBillCode'] as String?;
 
     String finalTitleStr = displayTitle;
@@ -138,11 +140,18 @@ class ReceiptWidget extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (settings.billShowStoreName && (storeInfo['name'] ?? '').isNotEmpty)
-            Text(storeInfo['name']!.toUpperCase(), textAlign: TextAlign.center, style: boldTextStyle.copyWith(fontSize: fsHeader)),
+            Text(storeInfo['name']!.toUpperCase(),
+                textAlign: TextAlign.center, style: boldTextStyle.copyWith(fontSize: fsHeader)),
           if (settings.billShowStoreAddress && (storeInfo['address'] ?? '').isNotEmpty)
-            Padding(padding: const EdgeInsets.only(top: 4), child: Text(storeInfo['address']!, textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsAddress))),
+            Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child:
+                    Text(storeInfo['address']!, textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsAddress))),
           if (settings.billShowStorePhone && (storeInfo['phone'] ?? '').isNotEmpty)
-            Padding(padding: const EdgeInsets.only(top: 2), child: Text('ĐT: ${storeInfo['phone']}', textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsPhone))),
+            Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('ĐT: ${storeInfo['phone']}',
+                    textAlign: TextAlign.center, style: baseTextStyle.copyWith(fontSize: fsPhone))),
 
           const SizedBox(height: 16),
 
@@ -154,7 +163,8 @@ class ReceiptWidget extends StatelessWidget {
           if (originalBillCode != null && originalBillCode.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4.0),
-              child: Text('Hóa đơn gốc: $originalBillCode', textAlign: TextAlign.center, style: italicTextStyle.copyWith(fontSize: fsInfo)),
+              child: Text('Hóa đơn gốc: $originalBillCode',
+                  textAlign: TextAlign.center, style: italicTextStyle.copyWith(fontSize: fsInfo)),
             ),
 
           const SizedBox(height: 12),
@@ -169,25 +179,35 @@ class ReceiptWidget extends StatelessWidget {
           if (startTime != null && !isRetailMode && !isReturnBill)
             _buildInfoRow('Giờ vào:', timeFormat.format(startTime), baseTextStyle.copyWith(fontSize: fsInfo)),
           _buildInfoRow('Giờ in:', timeFormat.format(DateTime.now()), baseTextStyle.copyWith(fontSize: fsInfo)),
-          if (settings.billShowCashierName)
-            _buildInfoRow('Thu ngân:', userName, baseTextStyle.copyWith(fontSize: fsInfo)),
+          if (settings.billShowCashierName) _buildInfoRow('Thu ngân:', userName, baseTextStyle.copyWith(fontSize: fsInfo)),
 
           const SizedBox(height: 16),
 
-          // PHẦN 1: HÀNG TRẢ
           _buildTableHeader(
-              isReturnSection: true,
-              customProductName: "Sản phẩm hoàn",
-              fontSize: fsItemName, boldStyle: boldTextStyle
-          ),
+              isReturnSection: isReturnBill || hasExchange,
+              customProductName: (isReturnBill || hasExchange) ? "Sản phẩm hoàn" : "Tên sản phẩm",
+              fontSize: fsItemName,
+              boldStyle: boldTextStyle),
 
           ...items.asMap().entries.map((entry) {
             return _buildSingleItemRow(
-              entry.key, entry.value, items.length,
-              isCheckDish: isCheckDish, isFinancialBill: isFinancialBill, isTimeBased: entry.value.product.serviceSetup?['isTimeBased'] == true,
-              fsItemName: fsItemName, fsItemDetail: fsItemDetail,
-              baseTextStyle: baseTextStyle, boldTextStyle: boldTextStyle, italicTextStyle: italicTextStyle, strikeThroughStyle: strikeThroughStyle,
-              currencyFormat: currencyFormat, quantityFormat: quantityFormat, timeFormat: timeFormat, shortDateTimeFormat: shortDateTimeFormat, percentFormat: percentFormat,
+              entry.key,
+              entry.value,
+              items.length,
+              isCheckDish: isCheckDish,
+              isFinancialBill: isFinancialBill,
+              isTimeBased: entry.value.product.serviceSetup?['isTimeBased'] == true,
+              fsItemName: fsItemName,
+              fsItemDetail: fsItemDetail,
+              baseTextStyle: baseTextStyle,
+              boldTextStyle: boldTextStyle,
+              italicTextStyle: italicTextStyle,
+              strikeThroughStyle: strikeThroughStyle,
+              currencyFormat: currencyFormat,
+              quantityFormat: quantityFormat,
+              timeFormat: timeFormat,
+              shortDateTimeFormat: shortDateTimeFormat,
+              percentFormat: percentFormat,
               taxSettingsList: (summary['items'] is List) ? summary['items'] : [],
             );
           }),
@@ -204,14 +224,15 @@ class ReceiptWidget extends StatelessWidget {
             if (pointsValue > 0)
               _buildRow('Hoàn điểm thưởng:', '- ${currencyFormat.format(pointsValue)}', baseTextStyle.copyWith(fontSize: fsInfo)),
             if (settings.billShowSurcharge && surcharges.isNotEmpty)
-              ...surcharges.map((s) => _buildRow('Hoàn phụ thu ${s['name']}:', '+ ${currencyFormat.format((s['amount'] as num).toDouble())}', baseTextStyle.copyWith(fontSize: fsInfo))),
-
+              ...surcharges.map((s) => _buildRow('Hoàn phụ thu ${s['name']}:',
+                  '+ ${currencyFormat.format((s['amount'] as num).toDouble())}', baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Text("Giá trị hoàn: ", style: baseTextStyle.copyWith(fontSize: fsInfo)),
-                Text(currencyFormat.format(returnTotalPayable), style: boldTextStyle.copyWith(fontSize: fsInfo, color: Colors.red)),
+                Text(currencyFormat.format(returnTotalPayable),
+                    style: boldTextStyle.copyWith(fontSize: fsInfo, color: Colors.red)),
               ],
             ),
           ],
@@ -220,18 +241,27 @@ class ReceiptWidget extends StatelessWidget {
           if (hasExchange) ...[
             const SizedBox(height: 24),
             _buildTableHeader(
-                isReturnSection: false,
-                customProductName: "Sản phẩm đổi",
-                fontSize: fsItemName, boldStyle: boldTextStyle
-            ),
+                isReturnSection: false, customProductName: "Sản phẩm đổi", fontSize: fsItemName, boldStyle: boldTextStyle),
 
             ...exchangeItems!.asMap().entries.map((entry) {
               return _buildSingleItemRow(
-                entry.key, entry.value, exchangeItems!.length,
-                isCheckDish: isCheckDish, isFinancialBill: isFinancialBill, isTimeBased: entry.value.product.serviceSetup?['isTimeBased'] == true,
-                fsItemName: fsItemName, fsItemDetail: fsItemDetail,
-                baseTextStyle: baseTextStyle, boldTextStyle: boldTextStyle, italicTextStyle: italicTextStyle, strikeThroughStyle: strikeThroughStyle,
-                currencyFormat: currencyFormat, quantityFormat: quantityFormat, timeFormat: timeFormat, shortDateTimeFormat: shortDateTimeFormat, percentFormat: percentFormat,
+                entry.key,
+                entry.value,
+                exchangeItems!.length,
+                isCheckDish: isCheckDish,
+                isFinancialBill: isFinancialBill,
+                isTimeBased: entry.value.product.serviceSetup?['isTimeBased'] == true,
+                fsItemName: fsItemName,
+                fsItemDetail: fsItemDetail,
+                baseTextStyle: baseTextStyle,
+                boldTextStyle: boldTextStyle,
+                italicTextStyle: italicTextStyle,
+                strikeThroughStyle: strikeThroughStyle,
+                currencyFormat: currencyFormat,
+                quantityFormat: quantityFormat,
+                timeFormat: timeFormat,
+                shortDateTimeFormat: shortDateTimeFormat,
+                percentFormat: percentFormat,
                 taxSettingsList: (exchangeSummary?['items'] is List) ? exchangeSummary!['items'] : [],
               );
             }),
@@ -259,12 +289,12 @@ class ReceiptWidget extends StatelessWidget {
                       }
                       return const SizedBox.shrink();
                     }),
-
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Text("Giá trị đổi: ", style: baseTextStyle.copyWith(fontSize: fsInfo)),
-                      Text(currencyFormat.format(exchangeTotalPayable), style: boldTextStyle.copyWith(fontSize: fsInfo, color: Colors.green)),
+                      Text(currencyFormat.format(exchangeTotalPayable),
+                          style: boldTextStyle.copyWith(fontSize: fsInfo, color: Colors.green)),
                     ],
                   ),
                 ],
@@ -275,23 +305,29 @@ class ReceiptWidget extends StatelessWidget {
           // PHẦN 3: TỔNG KẾT
           if (isFinancialBill) ...[
             const SizedBox(height: 24),
-
             if (!hasExchange) ...[
               if (!isSimplifiedMode) ...[
-                _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
+                _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal),
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
                 if (settings.billShowTax && returnTax > 0)
-                  _buildRow(isReturnBill ? 'Hoàn thuế:' : 'Thuế:', '+ ${currencyFormat.format(returnTax)}', baseTextStyle.copyWith(fontSize: fsInfo)),
+                  _buildRow(isReturnBill ? 'Hoàn thuế:' : 'Thuế:', '+ ${currencyFormat.format(returnTax)}',
+                      baseTextStyle.copyWith(fontSize: fsInfo)),
                 if (settings.billShowDiscount && discount > 0)
-                  _buildRow(isReturnBill ? 'Hoàn chiết khấu:' : (summary['discountName'] ?? 'Chiết khấu:'), '- ${currencyFormat.format(discount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
+                  _buildRow(isReturnBill ? 'Hoàn chiết khấu:' : (summary['discountName'] ?? 'Chiết khấu:'),
+                      '- ${currencyFormat.format(discount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
                 if (voucherDiscount > 0)
-                  _buildRow(isReturnBill ? 'Hoàn voucher:' : 'Voucher ($voucherCode):', '- ${currencyFormat.format(voucherDiscount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
+                  _buildRow(isReturnBill ? 'Hoàn voucher:' : 'Voucher ($voucherCode):',
+                      '- ${currencyFormat.format(voucherDiscount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
                 if (pointsValue > 0)
-                  _buildRow(isReturnBill ? 'Hoàn điểm thưởng:' : 'Điểm thưởng:', '- ${currencyFormat.format(pointsValue)}', baseTextStyle.copyWith(fontSize: fsInfo)),
+                  _buildRow(isReturnBill ? 'Hoàn điểm thưởng:' : 'Điểm thưởng:', '- ${currencyFormat.format(pointsValue)}',
+                      baseTextStyle.copyWith(fontSize: fsInfo)),
                 if (settings.billShowSurcharge && surcharges.isNotEmpty)
-                  ...surcharges.map((s) => _buildRow(isReturnBill ? 'Hoàn phụ thu ${s['name']}:' : '${s['name']}:', '+ ${currencyFormat.format((s['amount'] as num).toDouble())}', baseTextStyle.copyWith(fontSize: fsInfo))),
+                  ...surcharges.map((s) => _buildRow(isReturnBill ? 'Hoàn phụ thu ${s['name']}:' : '${s['name']}:',
+                      '+ ${currencyFormat.format((s['amount'] as num).toDouble())}', baseTextStyle.copyWith(fontSize: fsInfo))),
               ],
               if (isSimplifiedMode)
-                _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal), baseTextStyle.copyWith(fontSize: fsInfo)),
+                _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal),
+                    baseTextStyle.copyWith(fontSize: fsInfo)),
               const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -300,8 +336,7 @@ class ReceiptWidget extends StatelessWidget {
                   Text(currencyFormat.format(returnTotalPayable), style: boldTextStyle.copyWith(fontSize: fsTotal + 4)),
                 ],
               ),
-            ]
-            else ...[
+            ] else ...[
               // [SỬA] Đã xóa dòng "Tổng giá trị trả" ở đây vì đã hiện ở Phần 1
               // Chỉ hiện "Giá trị mua" để so sánh nếu cần, nhưng ở trên cũng có rồi.
               // Vậy ở đây chỉ cần hiện dòng kết luận.
@@ -325,16 +360,13 @@ class ReceiptWidget extends StatelessWidget {
               else
                 Center(child: Text('KHÔNG CẦN THANH TOÁN', style: boldTextStyle.copyWith(fontSize: fsTotal))),
             ],
-
             if (!isSimplifiedMode) ...[
               if (settings.billShowPaymentMethod && summary['payments'] is Map && (summary['payments'] as Map).isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text((isReturnBill && netDifference <= 0) ? 'Phương thức hoàn:' : 'Thanh toán qua:', style: baseTextStyle.copyWith(fontSize: fsInfo)),
-                ...(summary['payments'] as Map).entries.map((entry) => _buildRow(
-                    '- ${entry.key}:',
-                    currencyFormat.format((entry.value as num).toDouble()),
-                    baseTextStyle.copyWith(fontSize: fsInfo))),
-
+                Text((isReturnBill && netDifference <= 0) ? 'Phương thức hoàn:' : 'Thanh toán qua:',
+                    style: baseTextStyle.copyWith(fontSize: fsInfo)),
+                ...(summary['payments'] as Map).entries.map((entry) => _buildRow('- ${entry.key}:',
+                    currencyFormat.format((entry.value as num).toDouble()), baseTextStyle.copyWith(fontSize: fsInfo))),
                 if (isReturnBill && debtAmount > 0)
                   _buildRow('- Trừ vào dư nợ:', currencyFormat.format(debtAmount), baseTextStyle.copyWith(fontSize: fsInfo)),
               ],
@@ -350,45 +382,98 @@ class ReceiptWidget extends StatelessWidget {
             Center(child: Text('Quét mã chuyển khoản', style: baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 4),
             Center(
-              child: SizedBox(width: 140, height: 140, child: QrImageView(data: qrData!, version: QrVersions.auto, size: 140.0, backgroundColor: Colors.white, gapless: false, padding: EdgeInsets.zero)),
+              child: SizedBox(
+                  width: 140,
+                  height: 140,
+                  child: QrImageView(
+                      data: qrData!,
+                      version: QrVersions.auto,
+                      size: 140.0,
+                      backgroundColor: Colors.white,
+                      gapless: false,
+                      padding: EdgeInsets.zero)),
             ),
           ],
           if (eInvoiceUrl != null && eInvoiceUrl.isNotEmpty && isFinancialBill) ...[
             const SizedBox(height: 24),
             Center(child: Text('QUÉT MÃ TRA CỨU HĐĐT', style: boldTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 8),
-            if (eInvoiceMst != null) Center(child: Text('MST bên bán: $eInvoiceMst', style: baseTextStyle.copyWith(fontSize: fsInfo))),
-            if (eInvoiceCode != null) Center(child: Text('Mã tra cứu: $eInvoiceCode', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+            if (eInvoiceMst != null)
+              Center(child: Text('MST bên bán: $eInvoiceMst', style: baseTextStyle.copyWith(fontSize: fsInfo))),
+            if (eInvoiceCode != null)
+              Center(child: Text('Mã tra cứu: $eInvoiceCode', style: baseTextStyle.copyWith(fontSize: fsInfo))),
             const SizedBox(height: 8),
             Center(
-              child: SizedBox(width: 140, height: 140, child: QrImageView(data: eInvoiceUrl, version: QrVersions.auto, size: 140.0, backgroundColor: Colors.white, gapless: false, padding: EdgeInsets.zero)),
+              child: SizedBox(
+                  width: 140,
+                  height: 140,
+                  child: QrImageView(
+                      data: eInvoiceUrl,
+                      version: QrVersions.auto,
+                      size: 140.0,
+                      backgroundColor: Colors.white,
+                      gapless: false,
+                      padding: EdgeInsets.zero)),
             ),
           ],
           if (settings.billShowFooter && isFinancialBill) ...[
             const SizedBox(height: 24),
-            if (settings.footerText1.isNotEmpty) Center(child: Text(settings.footerText1, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
-            if (settings.footerText2.isNotEmpty) Center(child: Text(settings.footerText2, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
+            if (settings.footerText1.isNotEmpty)
+              Center(
+                  child:
+                      Text(settings.footerText1, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
+            if (settings.footerText2.isNotEmpty)
+              Center(
+                  child:
+                      Text(settings.footerText2, style: italicTextStyle.copyWith(fontSize: fsInfo), textAlign: TextAlign.center)),
           ]
         ],
       ),
     );
   }
 
-  Widget _buildTableHeader({required bool isReturnSection, bool isCheckDish = false, required double fontSize, required TextStyle boldStyle, String? customProductName}) {
+  Widget _buildTableHeader(
+      {required bool isReturnSection,
+      bool isCheckDish = false,
+      required double fontSize,
+      required TextStyle boldStyle,
+      String? customProductName}) {
     return Container(
-      decoration: const BoxDecoration(border: Border(top: BorderSide(width: 2, color: Colors.black), bottom: BorderSide(width: 2, color: Colors.black))),
+      decoration: const BoxDecoration(
+          border: Border(top: BorderSide(width: 2, color: Colors.black), bottom: BorderSide(width: 2, color: Colors.black))),
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
           SizedBox(width: 50, child: Text('STT', style: boldStyle.copyWith(fontSize: fontSize))),
-          Expanded(flex: 6, child: Text(customProductName ?? (isReturnSection ? 'Sản phẩm hoàn' : 'Tên sản phẩm'), style: boldStyle.copyWith(fontSize: fontSize), textAlign: TextAlign.center)),
-          Expanded(flex: 4, child: Text(isReturnSection ? 'Hoàn tiền' : (isCheckDish ? 'SL' : 'Thành tiền'), textAlign: TextAlign.right, style: boldStyle.copyWith(fontSize: fontSize))),
+          Expanded(
+              flex: 6,
+              child: Text(customProductName ?? (isReturnSection ? 'Sản phẩm hoàn' : 'Tên sản phẩm'),
+                  style: boldStyle.copyWith(fontSize: fontSize), textAlign: TextAlign.center)),
+          Expanded(
+              flex: 4,
+              child: Text(isReturnSection ? 'Hoàn tiền' : (isCheckDish ? 'SL' : 'Thành tiền'),
+                  textAlign: TextAlign.right, style: boldStyle.copyWith(fontSize: fontSize))),
         ],
       ),
     );
   }
 
-  Widget _buildSingleItemRow(int i, OrderItem item, int totalCount, {required bool isCheckDish, required bool isFinancialBill, required bool isTimeBased, required double fsItemName, required double fsItemDetail, required TextStyle baseTextStyle, required TextStyle boldTextStyle, required TextStyle italicTextStyle, required TextStyle strikeThroughStyle, required NumberFormat currencyFormat, required NumberFormat quantityFormat, required DateFormat timeFormat, required DateFormat shortDateTimeFormat, required NumberFormat percentFormat, required List<dynamic> taxSettingsList}) {
+  Widget _buildSingleItemRow(int i, OrderItem item, int totalCount,
+      {required bool isCheckDish,
+      required bool isFinancialBill,
+      required bool isTimeBased,
+      required double fsItemName,
+      required double fsItemDetail,
+      required TextStyle baseTextStyle,
+      required TextStyle boldTextStyle,
+      required TextStyle italicTextStyle,
+      required TextStyle strikeThroughStyle,
+      required NumberFormat currencyFormat,
+      required NumberFormat quantityFormat,
+      required DateFormat timeFormat,
+      required DateFormat shortDateTimeFormat,
+      required NumberFormat percentFormat,
+      required List<dynamic> taxSettingsList}) {
     final bool isLastItem = i == totalCount - 1;
     final String itemName = item.product.productName;
     final String unit = item.selectedUnit.isNotEmpty ? item.selectedUnit : '';
@@ -396,10 +481,7 @@ class ReceiptWidget extends StatelessWidget {
     // --- BƯỚC 1: LẤY GIÁ GỐC (CATALOG) ĐÚNG THEO ĐVT ---
     double originalCatalogPrice = item.product.sellPrice;
     if (item.selectedUnit.isNotEmpty && item.selectedUnit != item.product.unit) {
-      final unitData = item.product.additionalUnits.firstWhere(
-              (u) => u['unitName'] == item.selectedUnit,
-          orElse: () => {}
-      );
+      final unitData = item.product.additionalUnits.firstWhere((u) => u['unitName'] == item.selectedUnit, orElse: () => {});
       if (unitData.isNotEmpty) {
         originalCatalogPrice = (unitData['sellPrice'] as num).toDouble();
       }
@@ -468,44 +550,53 @@ class ReceiptWidget extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 6),
-
         if (isTimeBased && isFinancialBill)
-        // ... (Giữ nguyên phần TimeBased) ...
+          // ... (Giữ nguyên phần TimeBased) ...
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 SizedBox(width: 30, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
-                Expanded(child: RichText(text: TextSpan(style: boldTextStyle.copyWith(fontSize: fsItemName), children: [
+                Expanded(
+                    child: RichText(
+                        text: TextSpan(style: boldTextStyle.copyWith(fontSize: fsItemName), children: [
                   TextSpan(text: itemName),
                   if (taxStr.isNotEmpty) TextSpan(text: ' $taxStr', style: baseTextStyle.copyWith(fontSize: fsItemName - 2)),
-                  if (discountBadge.isNotEmpty) TextSpan(text: ' [$discountBadge]', style: boldTextStyle.copyWith(fontSize: fsItemName - 1, color: Colors.black)),
+                  if (discountBadge.isNotEmpty)
+                    TextSpan(
+                        text: ' [$discountBadge]', style: boldTextStyle.copyWith(fontSize: fsItemName - 1, color: Colors.black)),
                 ]))),
                 Text(currencyFormat.format(item.subtotal), style: boldTextStyle.copyWith(fontSize: fsItemDetail)),
               ]),
               _buildTimeBasedDetails(item, fsItemDetail, timeFormat, currencyFormat, baseTextStyle, boldTextStyle),
             ],
           )
-
         else if (isCheckDish)
-        // ... (Giữ nguyên phần CheckDish) ...
+          // ... (Giữ nguyên phần CheckDish) ...
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             SizedBox(width: 35, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
-            Expanded(flex: 6, child: RichText(text: TextSpan(style: boldTextStyle.copyWith(fontSize: fsItemName), children: [
-              TextSpan(text: itemName),
-              if (unit.isNotEmpty) TextSpan(text: ' ($unit)', style: baseTextStyle.copyWith(fontSize: fsItemName)),
-            ]))),
-            Expanded(flex: 4, child: Text(isTimeBased ? "${quantityFormat.format(item.quantity)}h" : quantityFormat.format(item.quantity), textAlign: TextAlign.right, style: boldTextStyle.copyWith(fontSize: fsItemName + 2))),
+            Expanded(
+                flex: 6,
+                child: RichText(
+                    text: TextSpan(style: boldTextStyle.copyWith(fontSize: fsItemName), children: [
+                  TextSpan(text: itemName),
+                  if (unit.isNotEmpty) TextSpan(text: ' ($unit)', style: baseTextStyle.copyWith(fontSize: fsItemName)),
+                ]))),
+            Expanded(
+                flex: 4,
+                child: Text(isTimeBased ? "${quantityFormat.format(item.quantity)}h" : quantityFormat.format(item.quantity),
+                    textAlign: TextAlign.right, style: boldTextStyle.copyWith(fontSize: fsItemName + 2))),
           ])
-
         else
-        // --- BILL TÀI CHÍNH (SỬA Ở ĐÂY) ---
+          // --- BILL TÀI CHÍNH (SỬA Ở ĐÂY) ---
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 SizedBox(width: 30, child: Text('${i + 1}.', style: boldTextStyle.copyWith(fontSize: fsItemName))),
-                Expanded(child: RichText(text: TextSpan(style: boldTextStyle.copyWith(fontSize: fsItemName), children: [
+                Expanded(
+                    child: RichText(
+                        text: TextSpan(style: boldTextStyle.copyWith(fontSize: fsItemName), children: [
                   TextSpan(text: itemName),
                   if (unit.isNotEmpty) TextSpan(text: ' ($unit) ', style: baseTextStyle.copyWith(fontSize: fsItemName)),
                   if (taxStr.isNotEmpty) TextSpan(text: '$taxStr ', style: baseTextStyle.copyWith(fontSize: fsItemName - 2)),
@@ -536,38 +627,49 @@ class ReceiptWidget extends StatelessWidget {
                       ),
                     ),
                   ],
-
-                  if (discountBadge.isNotEmpty) TextSpan(text: ' [$discountBadge]', style: boldTextStyle.copyWith(fontSize: fsItemName - 1, color: Colors.black)),
+                  if (discountBadge.isNotEmpty)
+                    TextSpan(
+                        text: ' [$discountBadge]', style: boldTextStyle.copyWith(fontSize: fsItemName - 1, color: Colors.black)),
                 ]))),
               ]),
 
               // Dòng 2: SL x Đơn giá ......... Thành tiền
-              Padding(padding: const EdgeInsets.only(left: 30, top: 2), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('${quantityFormat.format(item.quantity)} x ${currencyFormat.format(displayUnitPrice)}', style: baseTextStyle.copyWith(fontSize: fsItemDetail)),
-                Text(currencyFormat.format(displayLineTotal), style: boldTextStyle.copyWith(fontSize: fsItemDetail)),
-              ]))
+              Padding(
+                  padding: const EdgeInsets.only(left: 30, top: 2),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('${quantityFormat.format(item.quantity)} x ${currencyFormat.format(displayUnitPrice)}',
+                        style: baseTextStyle.copyWith(fontSize: fsItemDetail)),
+                    Text(currencyFormat.format(displayLineTotal), style: boldTextStyle.copyWith(fontSize: fsItemDetail)),
+                  ]))
             ],
           ),
-
         if (item.toppings.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(left: 30),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: item.toppings.entries.map((e) {
-              return Text(isCheckDish
-                  ? '+ ${e.key.productName} x${quantityFormat.format(e.value)}'
-                  : '(${e.key.productName} ${quantityFormat.format(e.value)} x ${currencyFormat.format(e.key.sellPrice)})',
-                  style: italicTextStyle.copyWith(fontSize: fsItemDetail - 2));
-            }).toList()),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: item.toppings.entries.map((e) {
+                  return Text(
+                      isCheckDish
+                          ? '+ ${e.key.productName} x${quantityFormat.format(e.value)}'
+                          : '(${e.key.productName} ${quantityFormat.format(e.value)} x ${currencyFormat.format(e.key.sellPrice)})',
+                      style: italicTextStyle.copyWith(fontSize: fsItemDetail - 2));
+                }).toList()),
           ),
-
         if (item.note != null && item.note!.isNotEmpty)
-          Padding(padding: const EdgeInsets.only(left: 30), child: Text('(${item.note})', style: italicTextStyle.copyWith(fontSize: fsItemDetail))),
-        if (!isLastItem) const Divider(thickness: 1, color: Colors.black, height: 12) else const Divider(thickness: 2, color: Colors.black, height: 24),
+          Padding(
+              padding: const EdgeInsets.only(left: 30),
+              child: Text('(${item.note})', style: italicTextStyle.copyWith(fontSize: fsItemDetail))),
+        if (!isLastItem)
+          const Divider(thickness: 1, color: Colors.black, height: 12)
+        else
+          const Divider(thickness: 2, color: Colors.black, height: 24),
       ],
     );
   }
 
-  Widget _buildTimeBasedDetails(OrderItem item, double fontSize, DateFormat timeFormat, NumberFormat currencyFormat, TextStyle baseStyle, TextStyle boldStyle) {
+  Widget _buildTimeBasedDetails(OrderItem item, double fontSize, DateFormat timeFormat, NumberFormat currencyFormat,
+      TextStyle baseStyle, TextStyle boldStyle) {
     final blocks = item.priceBreakdown;
     if (blocks.isEmpty) return const SizedBox.shrink();
     final startTime = item.addedAt.toDate();
@@ -597,7 +699,8 @@ class ReceiptWidget extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("${timeFormat.format(startTime)} - ${timeFormat.format(endTime)} (${_formatMinutes(totalMinutes)})", style: baseStyle.copyWith(fontSize: fontSize)),
+          Text("${timeFormat.format(startTime)} - ${timeFormat.format(endTime)} (${_formatMinutes(totalMinutes)})",
+              style: baseStyle.copyWith(fontSize: fontSize)),
           ...blocks.map((rawBlock) {
             final dynamic block = rawBlock;
             int bMinutes = 0;
@@ -628,7 +731,9 @@ class ReceiptWidget extends StatelessWidget {
             }
             if (bRate < 0) bRate = 0;
             String details = "+ $timeRange (${_formatMinutes(bMinutes)} x ${currencyFormat.format(bRate)}/h)";
-            return Padding(padding: const EdgeInsets.only(top: 2.0), child: Text(details, style: baseStyle.copyWith(fontSize: fontSize - 2, color: Colors.black87)));
+            return Padding(
+                padding: const EdgeInsets.only(top: 2.0),
+                child: Text(details, style: baseStyle.copyWith(fontSize: fontSize - 2, color: Colors.black87)));
           }),
         ],
       ),
@@ -643,10 +748,18 @@ class ReceiptWidget extends StatelessWidget {
   }
 
   Widget _buildInfoRow(String label, String value, TextStyle style) {
-    return Padding(padding: const EdgeInsets.symmetric(vertical: 1), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: style), Expanded(child: Text(value, textAlign: TextAlign.right, style: style))]));
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 1),
+        child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [Text(label, style: style), Expanded(child: Text(value, textAlign: TextAlign.right, style: style))]));
   }
 
   Widget _buildRow(String label, String value, TextStyle style) {
-    return Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label, style: style), Text(value, style: style.copyWith(fontWeight: FontWeight.bold))]));
+    return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [Text(label, style: style), Text(value, style: style.copyWith(fontWeight: FontWeight.bold))]));
   }
 }

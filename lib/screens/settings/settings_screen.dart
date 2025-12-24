@@ -4,8 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart'
-    as pos_printer;
+import 'package:flutter_pos_printer_platform_image_3_sdt/flutter_pos_printer_platform_image_3_sdt.dart' as pos_printer;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:collection/collection.dart';
 import '../../models/configured_printer_model.dart';
@@ -56,8 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _promptForCash = true;
   bool _receivePaymentNotification = false;
 
-  bool get isDesktop =>
-      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+  bool get isDesktop => !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
   bool _printLabelOnKitchen = false;
   bool _printLabelOnPayment = false;
   double _labelWidth = 50.0;
@@ -164,8 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _allowProvisionalBill = s.allowProvisionalBill;
           _showPricesOnBill = s.showPricesOnProvisional;
           _promptForCash = s.promptForCash ?? true;
-          _reportCutoffTime = TimeOfDay(
-              hour: s.reportCutoffHour ?? 0, minute: s.reportCutoffMinute ?? 0);
+          _reportCutoffTime = TimeOfDay(hour: s.reportCutoffHour ?? 0, minute: s.reportCutoffMinute ?? 0);
           _skipKitchenPrint = s.skipKitchenPrint ?? false;
           _printLabelOnKitchen = s.printLabelOnKitchen ?? false;
           _printLabelOnPayment = s.printLabelOnPayment ?? false;
@@ -205,8 +202,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final List<dynamic> jsonList = jsonDecode(jsonString);
       if (mounted) {
         setState(() {
-          final assignments =
-          jsonList.map((json) => ConfiguredPrinter.fromJson(json)).toList();
+          final assignments = jsonList.map((json) => ConfiguredPrinter.fromJson(json)).toList();
           _printerAssignments = {for (var v in assignments) v.logicalName: v};
 
           _printerAssignments.values.where((p) => p != null).forEach((p) {
@@ -252,7 +248,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (settings.authorizationStatus == AuthorizationStatus.authorized) {
                 await _settingsService.updateStoreSettings(
                   storeId,
-                  {'fcmTokens': FieldValue.arrayUnion([token])},
+                  {
+                    'fcmTokens': FieldValue.arrayUnion([token])
+                  },
                 );
               } else {
                 setState(() => _receivePaymentNotification = false);
@@ -260,17 +258,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                 await _settingsService.updateStoreSettings(
                   storeId,
-                  {'fcmTokens': FieldValue.arrayRemove([token])},
+                  {
+                    'fcmTokens': FieldValue.arrayRemove([token])
+                  },
                 );
 
-                ToastService().show(
-                    message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.",
-                    type: ToastType.warning);
+                ToastService().show(message: "Vui lòng cấp quyền thông báo trong Cài đặt điện thoại.", type: ToastType.warning);
               }
             } else {
               await _settingsService.updateStoreSettings(
                 storeId,
-                {'fcmTokens': FieldValue.arrayRemove([token])},
+                {
+                  'fcmTokens': FieldValue.arrayRemove([token])
+                },
               );
             }
           }
@@ -306,16 +306,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
       // 5. Lưu cấu hình máy in (Giữ nguyên code cũ)
-      final List<Map<String, dynamic>> listToSave = _printerAssignments.values
-          .where((p) => p != null)
-          .map((p) => p!.toJson())
-          .toList();
+      final List<Map<String, dynamic>> listToSave =
+          _printerAssignments.values.where((p) => p != null).map((p) => p!.toJson()).toList();
       await prefs.setString('printer_assignments', jsonEncode(listToSave));
 
-      final newPrinterConfig = _printerAssignments.values
-          .where((p) => p != null)
-          .cast<ConfiguredPrinter>()
-          .toList();
+      final newPrinterConfig = _printerAssignments.values.where((p) => p != null).cast<ConfiguredPrinter>().toList();
 
       PrintQueueService().updateLocalConfig(newPrinterConfig);
 
@@ -323,23 +318,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // 6. Khởi động/Tắt Server in (Giữ nguyên code cũ)
       if (_isThisDeviceTheServer) {
-        await CloudPrintService().startListener(
-            widget.currentUser.storeId, _serverListenModeOnDevice);
+        await CloudPrintService().startListener(widget.currentUser.storeId, _serverListenModeOnDevice);
       } else {
         await CloudPrintService().stopListener();
       }
 
       if (mounted) Navigator.of(context).pop(true);
-
     } catch (e) {
       if (mounted) {
         setState(() {
           _isSaving = false;
         });
       }
-      ToastService().show(
-          message: "Lỗi khi lưu cài đặt: ${e.toString()}",
-          type: ToastType.error);
+      ToastService().show(message: "Lỗi khi lưu cài đặt: ${e.toString()}", type: ToastType.error);
     }
   }
 
@@ -376,8 +367,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final systemPrinters = await Printing.listPrinters();
         for (var p in systemPrinters) {
           _scannedPrinters.add(ScannedPrinter(
-            device: pos_printer.PrinterDevice(
-                name: p.name, address: p.name, vendorId: 'DRIVER_WINDOWS'),
+            device: pos_printer.PrinterDevice(name: p.name, address: p.name, vendorId: 'DRIVER_WINDOWS'),
             type: pos_printer.PrinterType.usb,
           ));
         }
@@ -402,14 +392,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             productId: pid,
           );
 
-          final scanned =
-          ScannedPrinter(device: p, type: pos_printer.PrinterType.usb);
+          final scanned = ScannedPrinter(device: p, type: pos_printer.PrinterType.usb);
 
           if (mounted) {
             setState(() {
               final uniqueId = _getPrinterUniqueId(scanned);
-              if (!_scannedPrinters
-                  .any((p) => _getPrinterUniqueId(p) == uniqueId)) {
+              if (!_scannedPrinters.any((p) => _getPrinterUniqueId(p) == uniqueId)) {
                 _scannedPrinters.add(scanned);
               }
             });
@@ -434,15 +422,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // Logic tự động cập nhật cổng USB nếu thay đổi (Logic cũ của bạn)
         bool hasChanged = false;
         _printerAssignments.forEach((role, config) {
-          if (config != null &&
-              config.physicalPrinter.type == pos_printer.PrinterType.usb) {
+          if (config != null && config.physicalPrinter.type == pos_printer.PrinterType.usb) {
             final savedVid = config.physicalPrinter.device.vendorId.toString();
             final savedPid = config.physicalPrinter.device.productId.toString();
 
             // Tìm máy in USB tương ứng trong danh sách vừa quét
             final savedId = _getPrinterUniqueId(config.physicalPrinter);
-            var foundPrinter = _scannedPrinters
-                .firstWhereOrNull((p) => _getPrinterUniqueId(p) == savedId);
+            var foundPrinter = _scannedPrinters.firstWhereOrNull((p) => _getPrinterUniqueId(p) == savedId);
 
             foundPrinter ??= _scannedPrinters.firstWhereOrNull((p) {
               final pVid = p.device.vendorId.toString();
@@ -452,10 +438,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             // Nếu tìm thấy và địa chỉ cổng thay đổi -> Cập nhật
             if (foundPrinter != null) {
-              if (config.physicalPrinter.device.address !=
-                  foundPrinter.device.address) {
-                _printerAssignments[role] = ConfiguredPrinter(
-                    logicalName: role, physicalPrinter: foundPrinter);
+              if (config.physicalPrinter.device.address != foundPrinter.device.address) {
+                _printerAssignments[role] = ConfiguredPrinter(logicalName: role, physicalPrinter: foundPrinter);
                 hasChanged = true;
               }
             }
@@ -475,10 +459,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveAutoUpdatedPrinters() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final List<Map<String, dynamic>> listToSave = _printerAssignments.values
-          .where((p) => p != null)
-          .map((p) => p!.toJson())
-          .toList();
+      final List<Map<String, dynamic>> listToSave =
+          _printerAssignments.values.where((p) => p != null).map((p) => p!.toJson()).toList();
       await prefs.setString('printer_assignments', jsonEncode(listToSave));
       debugPrint(">>> Đã tự động cập nhật địa chỉ USB mới.");
     } catch (e) {
@@ -488,8 +470,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<String?> _checkPort9100(String ip) async {
     try {
-      final socket = await Socket.connect(ip, 9100,
-          timeout: const Duration(milliseconds: 600));
+      final socket = await Socket.connect(ip, 9100, timeout: const Duration(milliseconds: 600));
       socket.destroy();
       return ip;
     } catch (e) {
@@ -533,8 +514,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           productId: '',
         );
 
-        final scanned = ScannedPrinter(
-            device: device, type: pos_printer.PrinterType.network);
+        final scanned = ScannedPrinter(device: device, type: pos_printer.PrinterType.network);
 
         if (mounted) {
           setState(() {
@@ -557,28 +537,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: TextField(
           controller: ipController,
           autofocus: true,
-          decoration: const InputDecoration(
-              labelText: 'Địa chỉ IP của máy in',
-              hintText: 'Ví dụ: 192.168.1.101'),
+          decoration: const InputDecoration(labelText: 'Địa chỉ IP của máy in', hintText: 'Ví dụ: 192.168.1.101'),
           keyboardType: TextInputType.text,
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Hủy')),
-          ElevatedButton(
-              onPressed: () =>
-                  Navigator.of(context).pop(ipController.text.trim()),
-              child: const Text('Thêm')),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Hủy')),
+          ElevatedButton(onPressed: () => Navigator.of(context).pop(ipController.text.trim()), child: const Text('Thêm')),
         ],
       ),
     );
 
     if (ip != null && ip.isNotEmpty) {
-      final newPrinterDevice =
-          pos_printer.PrinterDevice(name: 'LAN Printer ($ip)', address: ip);
-      final newScannedPrinter = ScannedPrinter(
-          device: newPrinterDevice, type: pos_printer.PrinterType.network);
+      final newPrinterDevice = pos_printer.PrinterDevice(name: 'LAN Printer ($ip)', address: ip);
+      final newScannedPrinter = ScannedPrinter(device: newPrinterDevice, type: pos_printer.PrinterType.network);
 
       if (mounted) {
         setState(() {
@@ -587,9 +558,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
         });
       }
-      ToastService().show(
-          message: 'Đã thêm máy in vào danh sách lựa chọn.',
-          type: ToastType.success);
+      ToastService().show(message: 'Đã thêm máy in vào danh sách lựa chọn.', type: ToastType.success);
     }
   }
 
@@ -610,24 +579,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildStoreInfoContent() {
     if (widget.currentUser.role != 'owner') {
-      return const Center(
-          child: Text("Chỉ chủ cửa hàng mới được truy cập mục này."));
+      return const Center(child: Text("Chỉ chủ cửa hàng mới được truy cập mục này."));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('Thông tin Cửa hàng'),
-        CustomTextFormField(
-            controller: _storeNameController,
-            decoration: const InputDecoration(labelText: 'Tên cửa hàng')),
+        CustomTextFormField(controller: _storeNameController, decoration: const InputDecoration(labelText: 'Tên cửa hàng')),
         const SizedBox(height: 16),
-        CustomTextFormField(
-            controller: _storePhoneController,
-            decoration: const InputDecoration(labelText: 'Số điện thoại')),
+        CustomTextFormField(controller: _storePhoneController, decoration: const InputDecoration(labelText: 'Số điện thoại')),
         const SizedBox(height: 16),
-        CustomTextFormField(
-            controller: _storeAddressController,
-            decoration: const InputDecoration(labelText: 'Địa chỉ')),
+        CustomTextFormField(controller: _storeAddressController, decoration: const InputDecoration(labelText: 'Địa chỉ')),
       ],
     );
   }
@@ -645,8 +607,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         SwitchListTile(
           title: const Text('In hóa đơn sau khi Thanh toán'),
           value: _printBillAfterPayment,
-          onChanged: (bool value) =>
-              setState(() => _printBillAfterPayment = value),
+          onChanged: (bool value) => setState(() => _printBillAfterPayment = value),
           secondary: const Icon(Icons.print_outlined),
         ),
 
@@ -667,24 +628,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             title: const Text('In báo chế biến trước khi thanh toán'),
             value: _notifyKitchenAfterPayment,
-            onChanged: (bool value) =>
-                setState(() => _notifyKitchenAfterPayment = value),
+            onChanged: (bool value) => setState(() => _notifyKitchenAfterPayment = value),
             secondary: const Icon(Icons.fastfood_outlined),
           ),
           SwitchListTile(
             title: const Text('Không in báo chế biến khi lưu đơn'),
-            subtitle: const Text(
-                'Nếu bật sẽ không gởi lệnh in phiếu chế biến đến các máy in A B C D.'),
+            subtitle: const Text('Nếu bật sẽ không gởi lệnh in phiếu chế biến đến các máy in A B C D.'),
             value: _skipKitchenPrint,
-            onChanged: (bool value) =>
-                setState(() => _skipKitchenPrint = value),
+            onChanged: (bool value) => setState(() => _skipKitchenPrint = value),
             secondary: const Icon(Icons.print_disabled_outlined),
           ),
           SwitchListTile(
             title: const Text('Hiển thị nút in kiểm món'),
             value: _allowProvisionalBill,
-            onChanged: (bool value) =>
-                setState(() => _allowProvisionalBill = value),
+            onChanged: (bool value) => setState(() => _allowProvisionalBill = value),
             secondary: const Icon(Icons.receipt_outlined),
           ),
         ],
@@ -701,11 +658,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (role == 'owner' || role == 'manager') ...[
           SwitchListTile(
             title: const Text('Nhận thông báo'),
-            subtitle: const Text(
-                'Nhận thông báo khi nhân viên hoàn tất đơn hàng và cảnh báo tồn kho.'),
+            subtitle: const Text('Nhận thông báo khi nhân viên hoàn tất đơn hàng và cảnh báo tồn kho.'),
             value: _receivePaymentNotification,
-            onChanged: (bool value) =>
-                setState(() => _receivePaymentNotification = value),
+            onChanged: (bool value) => setState(() => _receivePaymentNotification = value),
             secondary: const Icon(Icons.notifications_active_outlined),
           ),
         ],
@@ -719,14 +674,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           isThreeLine: true,
           leading: const Icon(Icons.access_time),
           title: const Text('Giờ chốt sổ báo cáo hàng ngày'),
-          subtitle: Text(
-              'Báo cáo hàng ngày chỉ áp dụng từ thời đểm thay đổi cài đặt giờ chốt sổ trở về sau.'),
+          subtitle: Text('Báo cáo hàng ngày chỉ áp dụng từ thời đểm thay đổi cài đặt giờ chốt sổ trở về sau.'),
           trailing: Text(
             _reportCutoffTime.format(context),
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(color: AppTheme.primaryColor, fontSize: 20),
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppTheme.primaryColor, fontSize: 20),
           ),
           onTap: _selectReportCutoffTime,
         ),
@@ -746,14 +697,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           subtitle: Text(_deviceIp),
         ),
         if (!isOrderAccount)
-        SwitchListTile(
-          title: const Text('Kích hoạt chế độ máy chủ'),
-          subtitle: const Text('Bật để nhận lệnh in từ các thiết bị khác.'),
-          value: _isThisDeviceTheServer,
-          onChanged: (bool value) =>
-              setState(() => _isThisDeviceTheServer = value),
-          secondary: const Icon(Icons.connected_tv),
-        ),
+          SwitchListTile(
+            title: const Text('Kích hoạt chế độ máy chủ'),
+            subtitle: const Text('Bật để nhận lệnh in từ các thiết bị khác.'),
+            value: _isThisDeviceTheServer,
+            onChanged: (bool value) => setState(() => _isThisDeviceTheServer = value),
+            secondary: const Icon(Icons.connected_tv),
+          ),
         if (_isThisDeviceTheServer) ...[
           _buildSectionTitle('Chọn chế độ cho phép kết nối'),
           Padding(
@@ -761,12 +711,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'server', label: Text('Nội bộ (LAN)')),
-                ButtonSegment(
-                    value: 'internet', label: Text('Internet (Cloud)')),
+                ButtonSegment(value: 'internet', label: Text('Internet (Cloud)')),
               ],
               selected: {_serverListenModeOnDevice},
-              onSelectionChanged: (newSelection) => setState(
-                  () => _serverListenModeOnDevice = newSelection.first),
+              onSelectionChanged: (newSelection) => setState(() => _serverListenModeOnDevice = newSelection.first),
             ),
           ),
         ],
@@ -790,12 +738,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   return;
                 }
                 if (mode != _activeServerListenMode) {
-                  final serverModeText = _activeServerListenMode == 'server'
-                      ? 'Nội bộ (LAN)'
-                      : 'Internet (Cloud)';
+                  final serverModeText = _activeServerListenMode == 'server' ? 'Nội bộ (LAN)' : 'Internet (Cloud)';
                   ToastService().show(
-                    message:
-                        'Máy chủ đang hoạt động ở chế độ "$serverModeText". Bạn không thể chọn chế độ khác.',
+                    message: 'Máy chủ đang hoạt động ở chế độ "$serverModeText". Bạn không thể chọn chế độ khác.',
                     type: ToastType.error,
                   );
                   return;
@@ -819,10 +764,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 8),
                 Text(
                   'Chỉ những thiết bị có kết nối chung mạng wifi với máy chủ mới có thể gởi lệnh in!',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(color: Colors.red),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.red),
                 ),
               ],
             ),
@@ -835,10 +777,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               TextButton.icon(
                 icon: _isScanning
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.refresh),
                 label: Text(_isScanning ? 'Đang quét...' : 'Quét máy in'),
                 onPressed: _isScanning ? null : _discoverPrinters,
@@ -847,8 +786,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: const Icon(Icons.add, size: 20),
                 label: const Text('Thêm máy in LAN'),
                 onPressed: _addManualPrinter,
-                style: TextButton.styleFrom(
-                    foregroundColor: AppTheme.primaryColor),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.primaryColor),
               ),
             ],
           ),
@@ -897,16 +835,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 16),
             children: [
-              if (isOwner)
-                _buildMenuTile('store_info', 'Thông tin cửa hàng', Icons.store),
+              if (isOwner) _buildMenuTile('store_info', 'Thông tin cửa hàng', Icons.store),
               if (canAccessSettings) ...[
-                _buildMenuTile(
-                    'general_settings', 'Thiết lập chung', Icons.settings),
-                _buildMenuTile(
-                    'print_options', 'Tùy chọn in', Icons.print_outlined),
+                _buildMenuTile('general_settings', 'Thiết lập chung', Icons.settings),
+                _buildMenuTile('print_options', 'Tùy chọn in', Icons.print_outlined),
               ],
-              _buildMenuTile(
-                  'printer_connection', 'Kết nối máy in', Icons.compare_arrows),
+              _buildMenuTile('printer_connection', 'Kết nối máy in', Icons.compare_arrows),
             ],
           ),
         ),
@@ -918,8 +852,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(24),
               child: Card(
                 elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 color: Colors.white,
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
@@ -942,8 +875,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         borderRadius: BorderRadius.circular(10),
       ),
       child: ListTile(
-        leading: Icon(icon,
-            color: isSelected ? AppTheme.primaryColor : Colors.grey[700]),
+        leading: Icon(icon, color: isSelected ? AppTheme.primaryColor : Colors.grey[700]),
         title: Text(
           title,
           style: TextStyle(
@@ -994,10 +926,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           )
         else
-          IconButton(
-              icon: const Icon(Icons.save,
-                  color: AppTheme.primaryColor, size: 30),
-              onPressed: _saveSettings)
+          IconButton(icon: const Icon(Icons.save, color: AppTheme.primaryColor, size: 30), onPressed: _saveSettings)
       ]),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
@@ -1045,9 +974,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       children: visibleRoles.map((roleKey) {
         final assignedPrinterConfig = _printerAssignments[roleKey];
-        final currentSelectedId = assignedPrinterConfig != null
-            ? _getPrinterUniqueId(assignedPrinterConfig.physicalPrinter)
-            : null;
+        final currentSelectedId =
+            assignedPrinterConfig != null ? _getPrinterUniqueId(assignedPrinterConfig.physicalPrinter) : null;
 
         final availablePrinters = _scannedPrinters.where((p) {
           final pId = _getPrinterUniqueId(p);
@@ -1063,8 +991,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           return true;
         }).toList();
 
-        final bool isPrinterAvailable = _scannedPrinters
-            .any((p) => _getPrinterUniqueId(p) == currentSelectedId);
+        final bool isPrinterAvailable = _scannedPrinters.any((p) => _getPrinterUniqueId(p) == currentSelectedId);
 
         final validValue = isPrinterAvailable ? currentSelectedId : null;
 
@@ -1093,9 +1020,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         if (newValueId == null) return;
 
                         // Tìm máy in trong danh sách vừa quét
-                        final selectedPrinter =
-                            _scannedPrinters.firstWhereOrNull(
-                                (p) => _getPrinterUniqueId(p) == newValueId);
+                        final selectedPrinter = _scannedPrinters.firstWhereOrNull((p) => _getPrinterUniqueId(p) == newValueId);
 
                         if (selectedPrinter != null) {
                           setState(() {
@@ -1127,30 +1052,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: InkWell(
                         onTap: () {
                           Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (context) => ReceiptSetupScreen(
-                                    currentUser: widget.currentUser)),
+                            MaterialPageRoute(builder: (context) => ReceiptSetupScreen(currentUser: widget.currentUser)),
                           );
                         },
                         borderRadius: BorderRadius.circular(12),
                         child: InputDecorator(
                           decoration: InputDecoration(
                             labelText: 'Cấu hình mẫu in',
-                            labelStyle:
-                                Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      color: Colors.grey[600],
-                                    ),
+                            labelStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                  color: Colors.grey[600],
+                                ),
                             suffixIcon: const Padding(
                               padding: EdgeInsets.only(right: 12.0),
-                              child: Icon(Icons.arrow_forward_ios,
-                                  size: 16, color: AppTheme.primaryColor),
+                              child: Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.primaryColor),
                             ),
-                            contentPadding:
-                                const EdgeInsets.fromLTRB(12, 16, 12, 16),
+                            contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  BorderSide(color: Colors.grey.shade300),
+                              borderSide: BorderSide(color: Colors.grey.shade300),
                             ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -1159,10 +1078,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           child: Text(
                             "Thiết lập mẫu in",
-                            style:
-                                Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                  fontWeight: FontWeight.w500,
+                                ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1170,13 +1088,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.settings_suggest_outlined,
-                          color: Colors.grey),
+                      icon: const Icon(Icons.settings_suggest_outlined, color: Colors.grey),
                       onPressed: () {
                         Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (context) => ReceiptSetupScreen(
-                                  currentUser: widget.currentUser)),
+                          MaterialPageRoute(builder: (context) => ReceiptSetupScreen(currentUser: widget.currentUser)),
                         );
                       },
                     ),
@@ -1191,31 +1106,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: InkWell(
                         onTap: () {
                           Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (context) => LabelSetupScreen(
-                                    currentUser: widget.currentUser)),
+                            MaterialPageRoute(builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
                           );
                         },
                         borderRadius: BorderRadius.circular(12),
                         child: InputDecorator(
                           decoration: InputDecoration(
                             labelText: 'Thiết kế mẫu tem',
-                            labelStyle:
-                                Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      color: Colors.grey[600],
-                                    ),
+                            labelStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                  color: Colors.grey[600],
+                                ),
                             prefixIcon: null,
                             suffixIcon: const Padding(
                               padding: EdgeInsets.only(right: 12.0),
-                              child: Icon(Icons.arrow_forward_ios,
-                                  size: 16, color: AppTheme.primaryColor),
+                              child: Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.primaryColor),
                             ),
-                            contentPadding:
-                                const EdgeInsets.fromLTRB(12, 16, 12, 16),
+                            contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  BorderSide(color: Colors.grey.shade300),
+                              borderSide: BorderSide(color: Colors.grey.shade300),
                             ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -1224,10 +1133,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           child: Text(
                             "Thiết lập mẫu in tem",
-                            style:
-                                Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                  fontWeight: FontWeight.w500,
+                                ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1235,13 +1143,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.picture_as_pdf_outlined,
-                          color: Colors.grey),
+                      icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.grey),
                       onPressed: () {
                         Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (context) => LabelSetupScreen(
-                                  currentUser: widget.currentUser)),
+                          MaterialPageRoute(builder: (context) => LabelSetupScreen(currentUser: widget.currentUser)),
                         );
                       },
                     ),
