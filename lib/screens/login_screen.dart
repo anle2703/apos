@@ -16,6 +16,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -137,6 +138,127 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  final Map<String, String> _supportInfo = {
+    'phone': '0935417776',
+    'facebook': 'https://www.facebook.com/anlee2502',
+    'zalo': '0935417776',
+  };
+
+  Future<void> _handleContactAction(String type, String value) async {
+    if (value.isEmpty) return;
+
+    try {
+      if (type == 'facebook') {
+        String urlString = value;
+        if (!urlString.startsWith('http')) {
+          urlString = 'https://www.facebook.com/$value';
+        }
+        final Uri uri = Uri.parse(urlString);
+
+        if (!isDesktop) {
+          bool launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+          if (!launched) {
+            await launchUrl(uri, mode: LaunchMode.platformDefault);
+          }
+        } else {
+          await launchUrl(uri, mode: LaunchMode.platformDefault);
+        }
+        return;
+      }
+
+      if (type == 'phone') {
+        if (isDesktop) {
+          _showInfoPopup('Số điện thoại', value);
+          return;
+        }
+
+        final Uri uri = Uri(scheme: 'tel', path: value);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri);
+        } else {
+          if (mounted) _showInfoPopup('Số điện thoại', value);
+        }
+        return;
+      }
+
+      if (type == 'zalo') {
+        if (isDesktop) {
+          _showInfoPopup('Zalo', value);
+          return;
+        }
+
+        final Uri uri = Uri.parse("https://zalo.me/$value");
+        bool launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+        if (!launched) {
+          if (mounted) _showInfoPopup('Zalo', value);
+        }
+        return;
+      }
+    } catch (e) {
+      if (mounted) _showInfoPopup('Thông tin liên hệ', value);
+    }
+  }
+
+  void _showInfoPopup(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontSize: 18)),
+        content: Row(
+          children: [
+            Expanded(child: Text(content, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+            IconButton(
+              icon: const Icon(Icons.copy, color: Colors.blue),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: content));
+                Navigator.of(ctx).pop();
+                ToastService().show(message: 'Đã sao chép $content', type: ToastType.success);
+              },
+            )
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Đóng'))],
+      ),
+    );
+  }
+
+  Widget _buildCompactIcon({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+    bool isZalo = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withAlpha(25),
+          shape: BoxShape.circle,
+        ),
+        child: isZalo
+            ? Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, color: color, size: 28),
+            Text(
+              'Zalo',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                shadows: [Shadow(offset: const Offset(1, 1), blurRadius: 2, color: color)],
+              ),
+            ),
+          ],
+        )
+            : Icon(icon, color: color, size: 28),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
@@ -228,21 +350,58 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                   const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Column(
                     children: [
-                      Text("Chưa có tài khoản?", style: textTheme.bodyMedium),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.of(context).push(MaterialPageRoute(
-                              builder: (context) => const SignupScreen()));
-                        },
-                        child: Text(
-                          "Đăng ký ngay",
-                          style: textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.bold, color: Colors.red),
+                      if (!Platform.isIOS) ...[
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text("Chưa có tài khoản?", style: textTheme.bodyMedium),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (context) => const SignupScreen()));
+                              },
+                              child: Text(
+                                "Đăng ký ngay",
+                                style: textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.bold, color: Colors.red),
+                              ),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 10),
+                      ],
+
+                      // 2. PHẦN HỖ TRỢ (Hiện trên TẤT CẢ các máy)
+                      Text('Liên hệ hỗ trợ:',
+                        style: textTheme.bodyMedium?.copyWith(color: Colors.grey[600], fontSize: 13),
                       ),
+                      const SizedBox(height: 15),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildCompactIcon(
+                              icon: Icons.phone,
+                              color: Colors.blue,
+                              onTap: () => _handleContactAction('phone', _supportInfo['phone']!)),
+                          const SizedBox(width: 20),
+
+                          _buildCompactIcon(
+                              icon: Icons.facebook,
+                              color: const Color(0xFF1877F2),
+                              onTap: () => _handleContactAction('facebook', _supportInfo['facebook']!)),
+                          const SizedBox(width: 20),
+
+                          _buildCompactIcon(
+                            icon: Icons.circle, // Giả lập icon Zalo tròn
+                            color: const Color(0xFF0068FF),
+                            onTap: () => _handleContactAction('zalo', _supportInfo['zalo']!),
+                            isZalo: true,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20), // Khoảng cách dưới cùng
                     ],
                   ),
                 ],
