@@ -4,23 +4,23 @@ echo [1/6] DANG DON DEP DU LIEU CU...
 call flutter clean
 
 echo [2/6] DANG BUILD FLUTTER WEB (BASE HREF /app/)...
+:: QUAN TRỌNG: Dấu / ở cuối "/app/" là bắt buộc
 call flutter build web --base-href "/app/" --release
 
 echo [3/6] DANG TAO CAU TRUC THU MUC...
-:: Di chuyen vao thu muc build
 cd build
 
-:: Doi ten thu muc 'web' thanh 'app_temp' (tam thoi)
+:: Doi ten thu muc 'web' thanh 'app_temp'
 move web app_temp
 
-:: Tao thu muc 'web' moi (se la thu muc goc public)
+:: Tao thu muc 'web' moi (thu muc public goc)
 mkdir web
 
 :: Di chuyen 'app_temp' vao trong 'web' va doi ten thanh 'app'
 move app_temp web\app
 
 echo [4/6] DANG COPY LANDING PAGE VAO...
-:: Copy toan bo file tu thu muc web_landing vao build/web
+:: Copy Landing Page tu web_landing vao thu muc goc
 xcopy /s /e /y ..\web_landing\* web\
 
 echo [5/6] KIEM TRA LAI...

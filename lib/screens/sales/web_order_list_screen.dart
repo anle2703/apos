@@ -52,7 +52,7 @@ class _WebOrderListScreenState extends State<WebOrderListScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   bool _enableShipQr = true;
   bool _enableBookingQr = true;
-  final String _qrOrderBaseUrl = "https://cash-bae5d.web.app/order";
+  final String _qrOrderBaseUrl = "https://phanmemapos.vn/app/";
   late Future<List<ProductModel>> _productsFuture;
 
   String? _expandedOrderId;

@@ -40,7 +40,7 @@ class _QrOrderManagementScreenState extends State<QrOrderManagementScreen> {
   bool _isQrOrderRequiresConfirmation = true;
   bool _enableShip = true;
   bool _enableBooking = true;
-  final String _qrOrderBaseUrl = "https://cash-bae5d.web.app/order";
+  final String _qrOrderBaseUrl = "https://phanmemapos.vn/app/";
 
   @override
   void initState() {

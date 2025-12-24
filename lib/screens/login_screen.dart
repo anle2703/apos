@@ -7,7 +7,7 @@ import '../services/toast_service.dart';
 import '../theme/responsive_helper.dart';
 import 'signup_screen.dart';
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb; // Quan trọng
 import '../../widgets/custom_text_form_field.dart';
 import 'auth_gate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -26,8 +26,13 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  // SỬA: Thêm check kIsWeb để tránh crash trên trình duyệt
   bool get isDesktop =>
       !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
+  // SỬA: Tạo biến kiểm tra iOS an toàn cho Web
+  bool get isIOS => !kIsWeb && Platform.isIOS;
+
   final AuthService _authService = AuthService();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -46,7 +51,6 @@ class _LoginScreenState extends State<LoginScreen> {
   void _signIn() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Ẩn bàn phím
     FocusScope.of(context).unfocus();
 
     final phoneNumber = _phoneController.text.trim();
@@ -57,8 +61,9 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       Map<String, dynamic> resultData;
 
-      // BƯỚC 1: GỌI SERVER ĐỂ KIỂM TRA SĐT LÀ AI
-      if (isDesktop) {
+      if (isDesktop || kIsWeb) { // SỬA: Web cũng dùng HTTP request
+        // Lưu ý: Nếu Cloud Function chặn CORS thì web sẽ cần config lại,
+        // nhưng tạm thời giữ luồng logic này.
         const String functionUrl = 'https://loginemployee-ve2xhbykka-as.a.run.app';
 
         final url = Uri.parse(functionUrl);
@@ -76,33 +81,26 @@ class _LoginScreenState extends State<LoginScreen> {
           throw Exception(errorMsg);
         }
       } else {
-        // Mobile gọi qua SDK
         final result = await FirebaseFunctions.instanceFor(region: 'asia-southeast1')
             .httpsCallable('loginEmployee')
             .call({'phoneNumber': phoneNumber, 'password': password});
         resultData = Map<String, dynamic>.from(result.data);
       }
 
-      // BƯỚC 2: XỬ LÝ KẾT QUẢ TRẢ VỀ
       UserCredential? userCredential;
 
       if (resultData['isOwner'] == true) {
-        // === LUỒNG CHỦ: Đăng nhập bằng Email/Pass chuẩn của Firebase ===
         final String ownerEmail = resultData['email'];
-        // Dùng mật khẩu người dùng vừa nhập để login Auth
         userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: ownerEmail,
           password: password,
         );
       } else {
-        // === LUỒNG NHÂN VIÊN: Đăng nhập bằng Custom Token ===
         final String token = resultData['token'];
         userCredential = await FirebaseAuth.instance.signInWithCustomToken(token);
       }
 
-      // BƯỚC 3: HOÀN TẤT
       if (userCredential.user != null) {
-        // Lưu UID
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('employee_uid', userCredential.user!.uid);
 
@@ -140,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final Map<String, String> _supportInfo = {
     'phone': '0935417776',
-    'facebook': 'https://www.facebook.com/anlee2502',
+    'facebook': 'https://www.facebook.com/phanmemapos',
     'zalo': '0935417776',
   };
 
@@ -167,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (type == 'phone') {
-        if (isDesktop) {
+        if (isDesktop || kIsWeb) { // SỬA: Web cũng hiện popup thay vì gọi
           _showInfoPopup('Số điện thoại', value);
           return;
         }
@@ -182,7 +180,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (type == 'zalo') {
-        if (isDesktop) {
+        if (isDesktop || kIsWeb) { // SỬA: Web cũng hiện popup
           _showInfoPopup('Zalo', value);
           return;
         }
@@ -276,11 +274,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(
-                    height: 120, // Chiều cao logo (bạn tự chỉnh cho vừa mắt)
-                    width: 120,  // Chiều rộng logo
+                    height: 120,
+                    width: 120,
                     child: Image.asset(
-                      'assets/images/logo.png', // Đảm bảo đúng tên file và đường dẫn bạn đã lưu
-                      fit: BoxFit.contain, // Giúp ảnh co giãn mà không bị méo
+                      'assets/images/logo.png',
+                      fit: BoxFit.contain,
                     ),
                   ),
                   Text(
@@ -293,8 +291,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
                     inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly, // Chỉ cho nhập số
-                      LengthLimitingTextInputFormatter(10),   // Chặn tối đa 10 ký tự
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
                     ],
                     validator: (value) {
                       if (value == null || value.isEmpty) {
@@ -333,26 +331,28 @@ class _LoginScreenState extends State<LoginScreen> {
                   _isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            ElevatedButton(
-                              onPressed: _signIn,
-                              child: const Text('Đăng nhập'),
-                            ),
-                            const SizedBox(height: 12),
-                            if (kIsWeb || (!isDesktop && !Platform.isIOS))
-                              OutlinedButton.icon(
-                                label: const Text('Đăng ký/Đăng nhập bằng Google'),
-                                icon: const FaIcon(FontAwesomeIcons.google,
-                                    color: Colors.red, size: 16),
-                                onPressed: _signInWithGoogle,
-                              ),
-                          ],
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _signIn,
+                        child: const Text('Đăng nhập'),
+                      ),
+                      const SizedBox(height: 12),
+                      // SỬA: Dùng !isIOS đã định nghĩa ở trên để tránh lỗi Web
+                      if (kIsWeb || (!isDesktop && !isIOS))
+                        OutlinedButton.icon(
+                          label: const Text('Đăng ký/Đăng nhập bằng Google'),
+                          icon: const FaIcon(FontAwesomeIcons.google,
+                              color: Colors.red, size: 16),
+                          onPressed: _signInWithGoogle,
                         ),
+                    ],
+                  ),
                   const SizedBox(height: 20),
                   Column(
                     children: [
-                      if (!Platform.isIOS) ...[
+                      // SỬA: Check !isIOS an toàn cho Web
+                      if (!isIOS) ...[
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -373,7 +373,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 10),
                       ],
 
-                      // 2. PHẦN HỖ TRỢ (Hiện trên TẤT CẢ các máy)
                       Text('Liên hệ hỗ trợ:',
                         style: textTheme.bodyMedium?.copyWith(color: Colors.grey[600], fontSize: 13),
                       ),
@@ -394,14 +393,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(width: 20),
 
                           _buildCompactIcon(
-                            icon: Icons.circle, // Giả lập icon Zalo tròn
+                            icon: Icons.circle,
                             color: const Color(0xFF0068FF),
                             onTap: () => _handleContactAction('zalo', _supportInfo['zalo']!),
                             isZalo: true,
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20), // Khoảng cách dưới cùng
+                      const SizedBox(height: 20),
                     ],
                   ),
                 ],

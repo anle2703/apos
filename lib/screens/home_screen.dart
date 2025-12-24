@@ -35,6 +35,7 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/settings_service.dart';
+import 'package:flutter/foundation.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserModel? user;
@@ -46,10 +47,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
-  'high_importance_channel_v4', // id bắt buộc phải khớp với server gửi về
-  'Thông báo thanh toán', // title hiện trong setting điện thoại
+  'high_importance_channel_v4',
+  'Thông báo thanh toán',
   description: 'Kênh thông báo nhận tiền và đơn hàng',
-  importance: Importance.max, // QUAN TRỌNG: Để hiện popup (heads-up)
+  importance: Importance.max,
   playSound: true,
 );
 
@@ -309,12 +310,13 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 1. Kiểm tra xem đang chạy trên Mobile hay Desktop
     bool isMobile = false;
-    try {
-      isMobile = Platform.isAndroid || Platform.isIOS;
-    } catch (e) {
-      isMobile = false; // Fallback (ví dụ chạy web)
+    if (!kIsWeb) { // Nếu KHÔNG phải web thì mới được check Platform
+      try {
+        isMobile = Platform.isAndroid || Platform.isIOS;
+      } catch (e) {
+        isMobile = false;
+      }
     }
 
     try {
