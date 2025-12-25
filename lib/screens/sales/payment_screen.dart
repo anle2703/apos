@@ -997,12 +997,8 @@ class _PaymentPanelState extends State<_PaymentPanel> {
       final double cashPaid = _paymentAmounts[_cashMethod!.id] ?? 0.0;
 
       if (cashNeeded > 0 && cashPaid < cashNeeded) {
-        ToastService().show(message: 'Vui lòng xác nhận tiền mặt', type: ToastType.warning);
-
         final bool isDebtConfirmed = await _showCashDialog();
-
         _calculateTotal();
-
         if (_debtAmount > 0 && !isDebtConfirmed) {
           return;
         }
@@ -1023,8 +1019,6 @@ class _PaymentPanelState extends State<_PaymentPanel> {
         }
       }
       if (firstUnconfirmedBankMethod != null) {
-        ToastService().show(
-            message: 'Vui lòng xác nhận đã nhận thanh toán qua ${firstUnconfirmedBankMethod.name}', type: ToastType.warning);
         final bool wasConfirmed = await _showQrPopup(firstUnconfirmedBankMethod);
         if (!wasConfirmed) return;
       } else {

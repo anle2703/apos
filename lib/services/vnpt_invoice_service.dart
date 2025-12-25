@@ -368,12 +368,17 @@ class VnptEInvoiceService implements EInvoiceProvider {
     }
 
     final double finalPayment = totalAmountNet + totalTaxVal;
-
+    String rawTaxId = customer?.taxId?.trim() ?? "";
+    final bool hasValidTaxId = rawTaxId.length >= 10;
+    String finalAddress = customer?.address ?? "Không có địa chỉ";
+    if (hasValidTaxId && customer?.companyAddress != null && customer!.companyAddress!.trim().isNotEmpty) {
+      finalAddress = customer.companyAddress!.trim();
+    }
     return {
       "thongtinchung": {
         "mau": config.templateCode,
         "kyhieu": config.invoiceSeries,
-        "loaihd": 1, // VNPT thường dùng 1 chung, phân biệt bằng Ký hiệu/Mẫu
+        "loaihd": 1,
         "httt": "TM",
         "tinhchat": 1,
         "tygia": 1,
@@ -381,9 +386,9 @@ class VnptEInvoiceService implements EInvoiceProvider {
       },
       "thongtinnguoimua": {
         "ten": customer?.name ?? billData['customerName'] ?? "Khách lẻ",
-        "tendv": customer?.companyName,
-        "mst": customer?.taxId,
-        "diachi": customer?.companyAddress ?? customer?.address ?? "Không có địa chỉ",
+        "tendv": hasValidTaxId ? (customer?.companyName?.trim() ?? "") : "",
+        "mst": hasValidTaxId ? rawTaxId : "",
+        "diachi": finalAddress,
         "sdt": customer?.phone ?? billData['customerPhone'],
         "email": customer?.email,
       },

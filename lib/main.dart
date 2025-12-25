@@ -55,14 +55,19 @@ void main() async {
     WidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-    if (!kIsWeb) {
+    // [SỬA LỖI 1]: Thêm kiểm tra Platform cho Crashlytics
+    // Windows không phải Web, nên nếu chỉ check !kIsWeb thì Windows vẫn lọt vào đây
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
     }
 
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-    await _createNotificationChannel();
+    // [SỬA LỖI 2]: FirebaseMessaging cũng chưa hỗ trợ Windows, cần bọc lại
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      await _createNotificationChannel();
+    }
 
-    // App Check logic của bạn (GIỮ NGUYÊN)
+    // Phần App Check này bạn ĐÃ LÀM ĐÚNG, giữ nguyên
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       await FirebaseAppCheck.instance.activate(
         androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
@@ -74,8 +79,11 @@ void main() async {
 
     runApp(const MyApp());
   }, (error, stack) {
-    if (!kIsWeb) {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    } else {
+      debugPrint(">>> Error: $error");
+      debugPrint(">>> Stack: $stack");
     }
   });
 }

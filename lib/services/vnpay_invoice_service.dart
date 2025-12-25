@@ -435,21 +435,17 @@ class VnpayEInvoiceService implements EInvoiceProvider {
         "paymentMethod": vnpayPaymentMethod,
         "currencyUnit": "VND",
         "currencyExchangeRate": 1,
-        "buyerTaxCode": customer?.taxId,
-        "buyerName": customer?.companyName ?? customer?.name ?? "Khách lẻ",
-        "buyerAddress": customer?.companyAddress ?? customer?.address ?? "Không có địa chỉ",
+        "buyerTaxCode": customer?.taxId ?? "",
+        "buyerName": customer?.name ?? "Khách lẻ",
+        "buyerFullName": customer?.companyName ?? "",
+        "buyerAddress": customer?.companyAddress ?? customer?.address ?? "",
         "buyerEmail": customer?.email,
         "isSendMail": hasEmail,
-
-        // Vì ta đã trừ hết vào đơn giá nên DiscountAmount tổng ở đây cũng bằng 0 hoặc
-        // hiển thị cho có (nhưng VNPAY sẽ dựa vào items để tính lại)
         "totalAmountWithoutDiscount": totalAmountNet.round(),
         "totalDiscountAmount": 0,
-
         "totalAmount": totalAmountNet.round(),
         "totalTaxAmount": totalTaxVal.round(),
         "totalAmountAfterTax": totalPayable.round(),
-
         "products": products,
       }
     };

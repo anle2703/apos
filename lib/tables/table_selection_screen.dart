@@ -26,6 +26,8 @@ import '../../services/discount_service.dart';
 import '../../models/discount_model.dart';
 import '../screens/sales/return_order_screen.dart';
 import '../tables/add_edit_table_screen.dart';
+import 'dart:io'; // Để dùng Platform
+import 'package:flutter/foundation.dart'; // Để dùng kIsWeb
 
 enum TableStatusFilter { all, occupied, empty }
 
@@ -324,8 +326,12 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
   }
 
   void _initPendingOrdersListener() {
-    _audioPlayer.setSource(AssetSource('tiengchuong.wav'));
-    _audioPlayer.setReleaseMode(ReleaseMode.stop);
+    try {
+      _audioPlayer.setSource(AssetSource('tiengchuong.wav'));
+      _audioPlayer.setReleaseMode(ReleaseMode.stop);
+    } catch (e) {
+      debugPrint("Lỗi set source âm thanh: $e");
+    }
 
     final query = FirebaseFirestore.instance
         .collection('web_orders')
@@ -411,16 +417,37 @@ class _TableSelectionScreenState extends State<TableSelectionScreen> {
   void _startNotificationSound() {
     _notificationTimer?.cancel();
 
-    _audioPlayer.stop().then((_) {
+    _audioPlayer.stop().then((_) async {
       if (mounted) {
-        _audioPlayer.play(AssetSource('tiengchuong.wav'));
+        try {
+          // [SỬA LỖI WINDOWS] Kiểm tra nền tảng để tránh crash do file locking
+          if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+            // Mobile: Chạy bình thường
+            await _audioPlayer.play(AssetSource('tiengchuong.wav'));
+          } else {
+            // Windows/Desktop: Dùng mode lowLatency để hạn chế lỗi file, và bọc try-catch
+            await _audioPlayer.play(AssetSource('tiengchuong.wav'), mode: PlayerMode.lowLatency);
+          }
+        } catch (e) {
+          debugPrint(">>> [LỖI ÂM THANH] Không thể phát tiếng chuông: $e");
+        }
       }
     });
-    _notificationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+
+    _notificationTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
       if (mounted) {
-        _audioPlayer.stop().then((_) {
+        _audioPlayer.stop().then((_) async {
           if (mounted) {
-            _audioPlayer.play(AssetSource('tiengchuong.wav'));
+            try {
+              // [SỬA LỖI WINDOWS] Lặp lại logic kiểm tra như trên
+              if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+                await _audioPlayer.play(AssetSource('tiengchuong.wav'));
+              } else {
+                await _audioPlayer.play(AssetSource('tiengchuong.wav'), mode: PlayerMode.lowLatency);
+              }
+            } catch (e) {
+              debugPrint(">>> [LỖI ÂM THANH LOOP] Không thể phát tiếng chuông: $e");
+            }
           }
         });
       } else {

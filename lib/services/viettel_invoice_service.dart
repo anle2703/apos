@@ -442,6 +442,21 @@ class ViettelEInvoiceService implements EInvoiceProvider {
     });
     if (payments.isEmpty) payments.add({"paymentMethodName": "Tiền mặt"});
 
+    String rawTaxId = customer?.taxId?.trim() ?? "";
+    final bool hasValidTaxId = rawTaxId.length >= 10;
+
+    String buyerLegalName = "";
+    if (hasValidTaxId) {
+      buyerLegalName = customer?.companyName?.trim() ?? "";
+      if (buyerLegalName.isEmpty) {
+        buyerLegalName = customer?.name.trim() ?? "Khách lẻ";
+      }
+    }
+
+    String finalAddress = customer?.address ?? "Không có địa chỉ";
+    if (hasValidTaxId && customer?.companyAddress != null && customer!.companyAddress!.trim().isNotEmpty) {
+      finalAddress = customer.companyAddress!.trim();
+    }
     return {
       "generalInvoiceInfo": {
         "invoiceType": invoiceType,
@@ -455,9 +470,9 @@ class ViettelEInvoiceService implements EInvoiceProvider {
       },
       "buyerInfo": {
         "buyerName": customer?.name ?? billData['customerName'] ?? "Khách lẻ",
-        "buyerLegalName": customer?.companyName ?? customer?.name ?? "Khách lẻ",
-        "buyerTaxCode": customer?.taxId,
-        "buyerAddressLine": customer?.companyAddress ?? customer?.address ?? "Không có địa chỉ",
+        "buyerLegalName": buyerLegalName,
+        "buyerTaxCode": hasValidTaxId ? rawTaxId : "",
+        "buyerAddressLine": finalAddress,
         "buyerPhoneNumber": customer?.phone ?? billData['customerPhone'],
         "buyerEmail": customer?.email,
         "buyerNotGetInvoice": "0",

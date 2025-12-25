@@ -398,6 +398,14 @@ class MisaEInvoiceService implements EInvoiceProvider {
       }
     }
 
+    String rawTaxId = customer?.taxId?.trim() ?? "";
+    final bool hasValidTaxId = rawTaxId.length >= 10;
+
+    String finalAddress = customer?.address ?? "Không có địa chỉ";
+    if (hasValidTaxId && customer?.companyAddress != null && customer!.companyAddress!.trim().isNotEmpty) {
+      finalAddress = customer.companyAddress!.trim();
+    }
+
     return {
       "TransactionID": transactionId,
       "RefID": _uuid.v4(),
@@ -407,17 +415,17 @@ class MisaEInvoiceService implements EInvoiceProvider {
         "InvoiceSeries": config.invoiceSeries
       },
       "Customer": {
-        "CustomerName": customer?.name ?? billData['customerName'] ?? "Khách lẻ",
-        "Buyer": customer?.companyName ?? customer?.name ?? billData['customerName'] ?? "Khách lẻ",
-        "TaxCode": customer?.taxId,
-        "Address": customer?.companyAddress ?? customer?.address ?? "Không có địa chỉ",
+        "CustomerName": hasValidTaxId
+            ? (customer?.companyName?.trim() ?? "")
+            : (customer?.name ?? billData['customerName'] ?? "Khách lẻ"),
+        "Buyer": customer?.name ?? billData['customerName'] ?? "",
+        "TaxCode": hasValidTaxId ? rawTaxId : "",
+        "Address": finalAddress,
         "Email": customer?.email,
         "Phone": customer?.phone ?? billData['customerPhone'],
       },
       "Items": items,
       "PaymentMethod": paymentMethod,
-
-      // Các trường tổng hợp (quan trọng để khớp thuế)
       "TotalSaleAmount": totalAmountNet.roundToDouble(), // Tổng tiền hàng sau giảm
       "DiscountAmount": 0, // Đã trừ vào từng dòng rồi
       "TotalTaxAmount": totalTaxVal.roundToDouble(),

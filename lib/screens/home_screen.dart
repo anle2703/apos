@@ -109,6 +109,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _setupNotificationSystem() async {
     if (_isNotificationSetup || _currentUser == null) return;
+    if (!kIsWeb && !(Platform.isAndroid || Platform.isIOS)) {
+      debugPrint(">>> [INFO] Bỏ qua Notification setup trên Desktop (Windows/Mac/Linux)");
+      return;
+    }
     _isNotificationSetup = true;
 
     final prefs = await SharedPreferences.getInstance();
