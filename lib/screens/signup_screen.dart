@@ -10,6 +10,8 @@ import 'home_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'auth_gate.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:url_launcher/url_launcher.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -67,10 +69,9 @@ class _SignupScreenState extends State<SignupScreen> {
     final phoneNumber = _phoneController.text.trim();
     final password = _passwordController.text.trim();
 
-    User? createdUser; // Biến lưu user tạm
+    User? createdUser;
 
     try {
-      // --- 1. KIỂM TRA MÃ ĐẠI LÝ (Rule app_config đã mở read) ---
       String? finalAgentId;
       if (_agentIdController.text.trim().isNotEmpty) {
         final rawAgentId = _generateStoreId(_agentIdController.text.trim());
@@ -85,15 +86,11 @@ class _SignupScreenState extends State<SignupScreen> {
         finalAgentId = rawAgentId;
       }
 
-      // --- 2. TẠO TÀI KHOẢN AUTH TRƯỚC (Để có request.auth) ---
       createdUser = await _authService.signUpWithEmailPassword(email, password);
 
       if (createdUser == null) {
         throw Exception("Không thể tạo tài khoản. Vui lòng thử lại.");
       }
-
-      // --- 3. BÂY GIỜ MỚI CHECK TRÙNG LẶP TRONG FIRESTORE ---
-      // (Lúc này request.auth != null nên Rule users mới cho phép đọc)
 
       bool shopIdExists = await _firestoreService.isFieldInUse(field: 'storeId', value: shopId);
       if (shopIdExists) {
@@ -105,7 +102,6 @@ class _SignupScreenState extends State<SignupScreen> {
         throw Exception('Số điện thoại này đã được đăng ký.');
       }
 
-      // --- 4. NẾU KHÔNG TRÙNG -> TẠO PROFILE ---
       await _firestoreService.createUserProfile(
         uid: createdUser.uid,
         email: createdUser.email!,
@@ -118,7 +114,6 @@ class _SignupScreenState extends State<SignupScreen> {
         storePhone: phoneNumber,
       );
 
-      // --- 5. RELOAD TOKEN ---
       await createdUser.reload();
       await createdUser.getIdToken(true);
 
@@ -128,6 +123,20 @@ class _SignupScreenState extends State<SignupScreen> {
             type: ToastType.success
         );
         AuthGate.isManualProcess = false;
+
+        if (kIsWeb) {
+          // 1. Đăng xuất ngay để không lưu session
+          await FirebaseAuth.instance.signOut();
+
+          // 2. Quay về trang chủ và kích hoạt popup download
+          // Đường dẫn này trùng khớp với script trong index.html
+          final Uri landingUri = Uri.parse('/?action=download');
+
+          // Dùng _self để load lại chính tab hiện tại
+          await launchUrl(landingUri, webOnlyWindowName: '_self');
+          return;
+        }
+
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const HomeScreen()),
               (route) => false,
@@ -136,11 +145,10 @@ class _SignupScreenState extends State<SignupScreen> {
     } catch (e) {
       debugPrint("Lỗi đăng ký: $e");
 
-      // ROLLBACK: Xóa user nếu lỗi trùng lặp
       if (createdUser != null) {
         try {
-          await createdUser.delete(); // Xóa user khỏi Auth
-          await FirebaseAuth.instance.signOut(); // Đảm bảo signout sạch sẽ
+          await createdUser.delete();
+          await FirebaseAuth.instance.signOut();
         } catch (delError) {
           debugPrint("Lỗi khi xóa user rollback: $delError");
         }

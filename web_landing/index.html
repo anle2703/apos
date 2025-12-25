@@ -64,7 +64,7 @@
         }
 
         .logo img {
-            height: 100px; 
+            height: 80px; 
             object-fit: contain;
         }
 
@@ -98,20 +98,89 @@
             cursor: pointer;
         }
 
-        .btn-login {
-            background: white;
-            color: var(--accent);
-            border: 2px solid var(--accent);
+        /* --- MÀU SẮC & NÚT ĐĂNG KÝ --- */
+        :root {
+            /* Sửa lại màu đỏ tươi hơn */
+            --bright-red: #ff1a1a; 
+            --red-glow: rgba(255, 26, 26, 0.4);
+        }
+
+        /* Animation nhịp đập */
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 var(--red-glow); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 26, 26, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 26, 26, 0); }
+        }
+
+        /* Style chung cho nút Đăng ký */
+        .btn-signup-style {
+            background: rgba(255, 26, 26, 0.05) !important;
+            color: var(--bright-red) !important;
+            border: 2px solid var(--bright-red) !important;
             padding: 8px 25px;
             border-radius: 50px;
             text-decoration: none;
-            font-weight: 700;
-            transition: 0.3s;
+            font-weight: 800;
+            transition: all 0.3s ease;
+            animation: pulse-red 2s infinite;
+            cursor: pointer;
         }
 
-        .btn-login:hover {
-            background: var(--accent);
-            color: white;
+        .btn-signup-style:hover {
+            background: var(--bright-red) !important;
+            color: white !important;
+            box-shadow: 0 5px 20px var(--red-glow);
+            transform: translateY(-2px);
+        }
+
+        /* 1. Nút trên Header (Chỉ hiện ở Desktop) */
+        .login-btn {
+            display: inline-block; /* Mặc định hiện */
+        }
+
+        /* 2. Nút trong Menu (Chỉ hiện ở Mobile) */
+        .mobile-login {
+            display: none; /* Mặc định ẩn trên Desktop */
+        }
+
+        /* Xử lý hiển thị theo màn hình */
+        @media (max-width: 768px) {
+            .login-btn { display: none; } /* Ẩn nút PC khi về Mobile */
+            
+            .nav-links .mobile-login { 
+                display: inline-block; /* Hiện nút Mobile */
+                margin-top: 10px;
+            }
+        }
+
+        /* --- MÀN HÌNH LOADING (New) --- */
+        #global-loader {
+            display: none; /* Mặc định ẩn */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--bright-red);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
 
         /* --- Hero Section --- */
@@ -485,7 +554,11 @@
     </style>
 </head>
 <body>
-
+<div id="global-loader">
+        <div class="spinner"></div>
+        <h3 style="color: #333;">Đang kết nối đến hệ thống...</h3>
+        <p style="color: #666;">Vui lòng đợi trong giây lát</p>
+    </div>
     <header>
         <a href="#" class="logo">
             <img src="images/icon.png" alt="APOS Logo">
@@ -500,11 +573,9 @@
             <a href="#features" onclick="toggleMenu()">Tính năng</a>
             <a href="#" onclick="openPricingModal(); toggleMenu()">Bảng giá</a>
             <a href="#" onclick="openContactModal(); toggleMenu()">Liên hệ</a>
-            
-            <a href="/app/" class="mobile-login">Đăng nhập Web</a>
+            <a href="#" onclick="handleSignupClick(event)" class="mobile-login btn-signup-style">Đăng ký ngay</a>
         </nav>
-
-        <a href="/app/" class="btn-login">Đăng nhập Web</a>
+	<a href="#" onclick="handleSignupClick(event)" class="login-btn btn-signup-style">Đăng ký ngay</a>
     </header>
 
     <section class="hero">
@@ -696,15 +767,12 @@
     </div>
 
     <script>
-        // Toggle Menu Mobile
+        // --- 1. CÁC HÀM XỬ LÝ SỰ KIỆN CƠ BẢN ---
         function toggleMenu() {
             var nav = document.getElementById("navLinks");
             nav.classList.toggle("active");
-            
-            // Đã xóa phần xử lý hiển thị mobile-login ở đây vì đã dùng CSS
         }
 
-        // Mở các modal
         function openDownloadModal() {
             document.getElementById("downloadModal").style.display = "block";
         }
@@ -715,18 +783,76 @@
             document.getElementById("contactModal").style.display = "block";
         }
 
-        // Đóng modal theo ID
         function closeModal(modalId) {
             document.getElementById(modalId).style.display = "none";
         }
 
-        // Bấm ra ngoài vùng modal thì tự đóng
+        function handleSignupClick(event) {
+            event.preventDefault(); 
+            // Hiện màn hình loading
+            document.getElementById('global-loader').style.display = 'flex';
+            
+            // Đợi 100ms rồi chuyển trang để user kịp thấy hiệu ứng
+            setTimeout(function() {
+                window.location.href = '/app/?mode=signup';
+            }, 100);
+        }
+
+        // Đóng modal khi bấm ra ngoài
         window.onclick = function(event) {
             if (event.target.classList.contains('modal')) {
                 event.target.style.display = "none";
             }
         }
-    </script>
 
+        // --- 2. XỬ LÝ LỖI KẸT LOADING KHI BẤM BACK (MỚI THÊM) ---
+        // Sự kiện này chạy mỗi khi trang được hiển thị (kể cả khi bấm Back)
+        window.onpageshow = function(event) {
+            // Luôn tắt loading khi trang hiện lên
+            var loader = document.getElementById('global-loader');
+            if (loader) {
+                loader.style.display = 'none';
+            }
+        };
+
+        // --- 3. XỬ LÝ KHI TRANG ĐÃ TẢI XONG & POPUP THÀNH CÔNG ---
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Kiểm tra tham số ?action=download
+            if (urlParams.get('action') === 'download') {
+                const modal = document.getElementById("downloadModal");
+                const titleElement = modal.querySelector('.modal-title');
+                
+                if (titleElement) {
+                    // Đổi nội dung tiêu đề
+                    titleElement.innerHTML = '<i class="fas fa-check-circle"></i> Đăng ký thành công!';
+                    titleElement.style.color = "#28a745"; // Xanh lá
+                    titleElement.style.fontSize = "2rem";
+                    
+                    // Thêm dòng thông báo phụ
+                    if (!document.getElementById('success-msg')) {
+                        const msg = document.createElement('p');
+                        msg.id = 'success-msg';
+                        msg.innerText = "Tải ứng dụng để tiếp tục sử dụng phần mềm APOS";
+                        msg.style.fontSize = "1.2rem";
+                        msg.style.fontWeight = "600";
+                        msg.style.color = "#555";
+                        msg.style.marginBottom = "25px";
+                        msg.style.marginTop = "-15px";
+                        
+                        titleElement.parentNode.insertBefore(msg, titleElement.nextSibling);
+                    }
+                }
+
+                // Mở Modal lên
+                openDownloadModal();
+                
+                // Xóa tham số trên thanh địa chỉ
+                const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                window.history.replaceState({path: newUrl}, '', newUrl);
+            }
+        });
+    </script>
 </body>
 </html>

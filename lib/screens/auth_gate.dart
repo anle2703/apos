@@ -16,14 +16,18 @@ import '../services/settings_service.dart';
 import '../models/store_settings_model.dart';
 import 'sales/guest_order_screen.dart';
 import '../screens/subscription_expired_screen.dart';
+import 'signup_screen.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
   static bool isManualProcess = false;
+
   Widget _handleWebAppUrl(BuildContext context) {
     final Uri uri = Uri.base;
     final queryParams = uri.queryParameters;
-
+    if (queryParams['mode'] == 'signup') {
+      return const SignupScreen();
+    }
     // Tất cả QR đều cần storeId
     final String? storeId = queryParams['store'];
     if (storeId == null) {
@@ -70,10 +74,16 @@ class AuthGate extends StatelessWidget {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         if (snapshot.hasData) {
-          // 1. Nếu có session của Owner, vào thẳng ProfileCheck
           return ProfileCheck(user: snapshot.data!);
         }
-        // 2. Nếu không, kiểm tra session của Nhân viên
+
+        if (kIsWeb) {
+          final uri = Uri.base.toString();
+          if (uri.contains('signup')) {
+            return const SignupScreen();
+          }
+        }
+
         return const EmployeeSessionChecker();
       },
     );
