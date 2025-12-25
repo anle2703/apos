@@ -46,7 +46,6 @@
         /* --- Header --- */
         header {
             background: white;
-            /* GIẢM PADDING HEADER ĐỂ GỌN HƠN */
             padding: 0.5rem 5%; 
             display: flex;
             justify-content: space-between;
@@ -61,12 +60,10 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            /* Đã xóa font-weight/color vì không còn chữ */
             text-decoration: none;
         }
 
         .logo img {
-            /* TĂNG KÍCH THƯỚC LOGO LÊN 130PX */
             height: 100px; 
             object-fit: contain;
         }
@@ -86,6 +83,11 @@
 
         .nav-links a:hover {
             color: var(--primary);
+        }
+        
+        /* Mặc định ẩn nút mobile login trên PC */
+        .mobile-login {
+            display: none;
         }
 
         /* Nút Menu Mobile (Mặc định ẩn trên PC) */
@@ -115,7 +117,7 @@
         /* --- Hero Section --- */
         .hero {
             background: linear-gradient(135deg, #e0fbf8 0%, #ffffff 100%);
-            padding: 2rem 5% 2rem; /* Giảm padding top một chút */
+            padding: 2rem 5% 2rem;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -129,7 +131,6 @@
             padding-right: 2rem;
         }
 
-        /* SLOGAN: GIẢM CỠ CHỮ XUỐNG 3rem */
         .hero-text h1 {
             font-size: 3rem; 
             color: var(--accent); 
@@ -140,7 +141,7 @@
         }
 
         .hero-text p {
-            font-size: 1.1rem; /* Giảm nhẹ cỡ chữ mô tả */
+            font-size: 1.1rem;
             color: var(--gray);
             margin-bottom: 2rem;
             max-width: 500px;
@@ -413,10 +414,15 @@
             margin-top: 20px;
             padding-top: 20px;
             border-top: 1px dashed #ddd;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
         }
         .btn-test {
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 8px;
             background: #ffecec;
             color: var(--accent);
@@ -426,8 +432,9 @@
             font-size: 0.9rem;
             font-weight: 700;
             transition: 0.3s;
+            width: 100%;
         }
-        .btn-test:hover { background: var(--accent); color: white; }
+        .btn-test:hover { filter: brightness(0.95); }
 
         /* --- RESPONSIVE MOBILE --- */
         @media (max-width: 768px) {
@@ -442,7 +449,7 @@
             /* Hiện nút Menu Mobile */
             .menu-toggle { display: block; }
 
-            /* Ẩn Login Button trên header để đưa vào menu hoặc giữ nguyên tùy ý (ở đây giữ nguyên nhưng chỉnh vị trí) */
+            /* Ẩn Login Button trên header */
             .btn-login { display: none; } 
 
             /* Menu Mobile dạng thả xuống */
@@ -465,7 +472,7 @@
                 display: flex; /* Hiện khi có class active */
             }
             
-            /* Thêm nút login vào trong menu mobile cho tiện */
+            /* Hiển thị nút login trong menu mobile */
             .nav-links .mobile-login {
                 display: inline-block;
                 background: var(--accent);
@@ -494,7 +501,7 @@
             <a href="#" onclick="openPricingModal(); toggleMenu()">Bảng giá</a>
             <a href="#" onclick="openContactModal(); toggleMenu()">Liên hệ</a>
             
-            <a href="/app/" class="mobile-login" style="display: none;">Đăng nhập Web</a>
+            <a href="/app/" class="mobile-login">Đăng nhập Web</a>
         </nav>
 
         <a href="/app/" class="btn-login">Đăng nhập Web</a>
@@ -514,54 +521,99 @@
     </section>
 
     <section class="features" id="features">
-        <div class="section-header">
-            <h2 class="section-title">Giải pháp quản lý toàn diện</h2>
-            <p class="section-desc">APOS là giải pháp quản lý bán hàng toàn diện dành cho cửa hàng F&B và Bán lẻ, giúp chủ cửa hàng tối ưu quy trình và tiết kiệm chi phí. APOS hỗ trợ đa nền tảng: Mobile, Máy POS, Máy tính Windows.</p>
-        </div>
-        
-        <div class="feature-grid">
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-bolt"></i></div>
-                <h3>Lên đơn siêu tốc</h3>
-                <p>Tạo đơn hàng nhanh chóng, đồng bộ dữ liệu ngay lập tức trên tất cả các thiết bị bán hàng.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-layer-group"></i></div>
-                <h3>Quản lý Phòng/Bàn</h3>
-                <p>Tính năng chuyên sâu: Tính tiền theo giờ, chuyển bàn, tách/gộp bàn dễ dàng và chính xác.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-qrcode"></i></div>
-                <h3>Order thông minh</h3>
-                <p>Hỗ trợ bán hàng qua mã QR. Khách chủ động chọn món, đặt đơn giao hàng hoặc đặt lịch hẹn ngay trên điện thoại.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-print"></i></div>
-                <h3>Kết nối máy in</h3>
-                <p>Hỗ trợ in qua LAN, USB và in gián tiếp qua mạng nội bộ hoặc Cloud cho nhiều thiết bị.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-file-invoice-dollar"></i></div>
-                <h3>Hóa đơn điện tử</h3>
-                <p>Tích hợp sẵn tính năng xuất Hóa đơn điện tử từ máy tính tiền và hỗ trợ kê khai thuế.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-chart-line"></i></div>
-                <h3>Báo cáo chi tiết</h3>
-                <p>Theo dõi thu/chi, doanh thu, lợi nhuận thực (Real-time), chốt ca cuối ngày ngay trên điện thoại.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-users-cog"></i></div>
-                <h3>Quản lý nhân viên</h3>
-                <p>Phân quyền chặt chẽ cho từng vị trí, theo dõi lịch sử thao tác của nhân viên chi tiết.</p>
-            </div>
-            <div class="feature-card">
-                <div class="icon-box"><i class="fas fa-laptop-house"></i></div>
-                <h3>Đa nền tảng</h3>
-                <p>Sử dụng mượt mà và đồng bộ trên mọi thiết bị: Điện thoại (Android/iOS), Máy POS, Máy tính bảng, PC.</p>
+    <div class="section-header">
+        <h2 class="section-title">TÍNH NĂNG NỔI BẬT – PHIÊN BẢN 1.0.0</h2>
+        <p class="section-desc">Cập nhật những tính năng quản lý chuyên sâu và tối ưu nhất cho mọi mô hình kinh doanh.</p>
+    </div>
+    
+    <div class="feature-grid">
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-utensils"></i></div>
+            <h3>Nghiệp vụ Bán hàng</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Gán topping nhanh, ghi chú nhanh</p>
+                <p>- Chuyển bàn – gộp bàn linh hoạt</p>
+                <p>- Đổi / trả hàng đầy đủ</p>
+                <p>- Tính giờ, phân loại sản phẩm theo mô hình</p>
             </div>
         </div>
-    </section>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-qrcode"></i></div>
+            <h3>Order & QR Code</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Order qua QR quy trình khép kín:</p>
+                <p style="padding-left: 10px;">+ Tại bàn</p>
+                <p style="padding-left: 10px;">+ Giao hàng</p>
+                <p style="padding-left: 10px;">+ Đặt lịch / Đặt bàn</p>
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-file-invoice-dollar"></i></div>
+            <h3>Hóa đơn & Thuế</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Xuất hóa đơn điện tử (HDDT)</p>
+                <p>- Hỗ trợ: VNPAY, VIETTEL, VNPT, MISA</p>
+                <p>- Gán thuế theo từng sản phẩm</p>
+                <p>- Phương thức thanh toán mặc định</p>
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-print"></i></div>
+            <h3>Kết nối Máy in</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- In LAN / USB / Cloud / In nội bộ</p>
+                <p>- Thiết lập mẫu in linh hoạt</p>
+                <p>- Tự động tách bếp/bar</p>
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-clock"></i></div>
+            <h3>Quản lý Ca & Quỹ</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Phân ca – chốt ca chi tiết</p>
+                <p>- Quản lý tiền đầu kỳ</p>
+                <p>- Thiết lập giờ chốt báo cáo hàng ngày</p>
+                <p>- Báo cáo thu chi, dòng tiền</p>
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-boxes"></i></div>
+            <h3>Kho hàng & Tồn kho</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Xuất – nhập – tồn kho</p>
+                <p>- Thống kê hàng hóa bán ra</p>
+                <p>- Cảnh báo tồn kho kịp thời</p>
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-gift"></i></div>
+            <h3>CSKH & Khuyến mãi</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Gán voucher, phụ thu</p>
+                <p>- Tích điểm, quản lý điểm tích lũy</p>
+                <p>- Tự động áp dụng bảng giá</p>
+                <p>- Chương trình mua hàng tặng hàng</p>
+            </div>
+        </div>
+
+        <div class="feature-card">
+            <div class="icon-box"><i class="fas fa-chart-line"></i></div>
+            <h3>Báo cáo & Realtime</h3>
+            <div style="text-align: left; font-size: 0.95rem; color: #666;">
+                <p>- Thông báo giao dịch realtime trên ĐT</p>
+                <p>- Báo cáo doanh thu – lợi nhuận – thuế</p>
+                <p>- Xem chi tiết lịch sử giao dịch</p>
+                <p>- Theo dõi tổng dư nợ</p>
+            </div>
+        </div>
+    </div>
+</section>
 
     <footer>
         <p>&copy; 2024 APOS. All Rights Reserved.</p>
@@ -591,9 +643,14 @@
             </div>
 
             <div class="test-link-container">
-                <p style="margin-bottom: 10px; font-size: 0.9rem; color: #888;">Dành cho đội ngũ phát triển</p>
+                <p style="margin-bottom: 5px; font-size: 0.9rem; color: #888;">Dành cho đội ngũ phát triển</p>
+                
+                <a href="files/APOS.apk" class="btn-test" style="background: #e0fbf8; color: var(--primary);">
+                    <i class="fab fa-android"></i> Tải file APK trực tiếp (Release)
+                </a>
+
                 <a href="https://play.google.com/apps/testing/com.aposcompany.apos?authuser=2" target="_blank" class="btn-test">
-                    <i class="fas fa-flask"></i> Thử nghiệm nội bộ Android
+                    <i class="fas fa-flask"></i> Thử nghiệm nội bộ Google Play
                 </a>
             </div>
         </div>
@@ -605,10 +662,9 @@
             <h2 class="modal-title">Bảng giá Dịch vụ</h2>
             
             <div class="price-box">
-                <span class="price-old">999.000đ / năm</span>
-                <span class="price-new">499.000đ</span>
-                <span style="font-size: 1.2rem; display:block; margin-bottom: 10px;">/ 1 năm</span>
-                <p class="price-note">🔥 Ưu đãi đặc biệt dành cho 100 khách hàng đầu tiên!</p>
+                <span class="price-old">1.499.000đ / năm</span>
+                <span class="price-new">999.000đ</span>
+                <p class="price-note">🔥 Ưu đãi có hạn. Liên hệ ngay để nhận được chính sách tốt nhất dành cho Đại lý!</p>
             </div>
 
             <p style="margin-bottom: 25px; color: #666;">Liên hệ ngay với chúng tôi để được tư vấn và kích hoạt gói ưu đãi này.</p>
@@ -645,13 +701,7 @@
             var nav = document.getElementById("navLinks");
             nav.classList.toggle("active");
             
-            // Xử lý nút đăng nhập trên mobile
-            var mobileLogin = document.querySelector('.mobile-login');
-            if(nav.classList.contains('active')) {
-                mobileLogin.style.display = 'inline-block';
-            } else {
-                mobileLogin.style.display = 'none';
-            }
+            // Đã xóa phần xử lý hiển thị mobile-login ở đây vì đã dùng CSS
         }
 
         // Mở các modal
