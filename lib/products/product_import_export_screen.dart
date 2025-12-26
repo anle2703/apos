@@ -13,6 +13,7 @@ import '../../services/toast_service.dart';
 import '../services/storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/number_utils.dart';
+import '../../screens/tax_management_screen.dart';
 
 class ProductImportExportScreen extends StatelessWidget {
   final UserModel currentUser;
@@ -53,7 +54,6 @@ class _ExportTab extends StatefulWidget {
 }
 
 class _ExportTabState extends State<_ExportTab> {
-  // ... code không đổi ...
   final FirestoreService _firestoreService = FirestoreService();
   bool _isLoading = false;
 
@@ -67,6 +67,7 @@ class _ExportTabState extends State<_ExportTab> {
     'Giá vốn',
     'Tồn kho',
     'Tồn tối thiểu',
+    '% Thuế',
     'Loại SP',
     'Mã vạch phụ (Cách nhau bởi dấu ,)',
     'Máy in bếp (Cách nhau bởi dấu ,)',
@@ -93,12 +94,41 @@ class _ExportTabState extends State<_ExportTab> {
         return;
       }
 
+      // 2. [MỚI] Lấy cấu hình thuế để map ngược từ ID sản phẩm -> % Thuế
+      final taxSettings = await _firestoreService.getStoreTaxSettings(widget.currentUser.storeId);
+      final Map<String, List<dynamic>> taxAssignmentMap = {};
+      if (taxSettings != null && taxSettings['taxAssignmentMap'] is Map) {
+        final rawMap = taxSettings['taxAssignmentMap'] as Map<String, dynamic>;
+        rawMap.forEach((key, value) {
+          if (value is List) taxAssignmentMap[key] = value;
+        });
+      }
+
+      // Helper function để tìm thuế suất của sản phẩm
+      double getTaxRateForProduct(String productId) {
+        // Tìm xem productId nằm trong list nào của taxAssignmentMap
+        for (var entry in taxAssignmentMap.entries) {
+          if (entry.value.contains(productId)) {
+            final taxKey = entry.key;
+            // Tra cứu rate trong các bảng hằng số (kDeductionRates / kDirectRates từ tax_management_screen)
+            if (kDeductionRates.containsKey(taxKey)) {
+              return (kDeductionRates[taxKey]?['rate'] as num?)?.toDouble() ?? 0.0;
+            }
+            if (kDirectRates.containsKey(taxKey)) {
+              return (kDirectRates[taxKey]?['rate'] as num?)?.toDouble() ?? 0.0;
+            }
+          }
+        }
+        return 0.0;
+      }
+
       final excel = Excel.createExcel();
       final Sheet sheet = excel[excel.getDefaultSheet()!];
 
       sheet.appendRow(_headers.map((header) => TextCellValue(header)).toList());
 
       for (final product in products) {
+        final double taxRate = getTaxRateForProduct(product.id);
         final row = [
           TextCellValue(product.id),
           TextCellValue(product.productName),
@@ -109,6 +139,7 @@ class _ExportTabState extends State<_ExportTab> {
           DoubleCellValue(product.costPrice),
           DoubleCellValue(product.stock),
           DoubleCellValue(product.minStock),
+          DoubleCellValue(taxRate * 100),
           TextCellValue(product.productType ?? ''),
           TextCellValue(product.additionalBarcodes.join(',')),
           TextCellValue(product.kitchenPrinters.join(',')),
@@ -181,23 +212,21 @@ class _ExportTabState extends State<_ExportTab> {
   }
 }
 
-// --- Lớp Helper để chứa dữ liệu tạm thời ---
 class _ProductImportJob {
   final Map<String, dynamic> data;
   final ProductModel? existingProduct;
   final String? idFromFile; // id từ file Excel
   final int excelRow;
-
+  final double? taxPercent;
   _ProductImportJob({
     required this.data,
     this.existingProduct,
     this.idFromFile,
     required this.excelRow,
+    this.taxPercent,
   });
 }
 
-
-// --- TAB NHẬP FILE (Đã sửa đổi toàn bộ) ---
 class _ImportTab extends StatefulWidget {
   final UserModel currentUser;
   const _ImportTab({required this.currentUser});
@@ -214,6 +243,28 @@ class _ImportTabState extends State<_ImportTab> {
   bool _updateExisting = false;
   bool _updateStockCost = false;
   bool _updateComplexData = false;
+
+  final List<String> _templateHeaders = [
+    'ID (Không sửa)',
+    'Tên sản phẩm',
+    'Mã SP',
+    'Nhóm SP',
+    'ĐVT',
+    'Giá bán',
+    'Giá vốn',
+    'Tồn kho',
+    'Tồn tối thiểu',
+    '% Thuế', // [MỚI]
+    'Loại SP',
+    'Mã vạch phụ (Cách nhau bởi dấu ,)',
+    'Máy in bếp (Cách nhau bởi dấu ,)',
+    'Cho phép bán (true/false)',
+    'QL Kho riêng (true/false)',
+    'ĐVT phụ (JSON)',
+    'Định lượng (JSON)',
+    'Bán kèm (JSON)',
+    'Dịch vụ (JSON)',
+  ];
 
   String? parseString(dynamic v) {
     final str = v?.toString().trim();
@@ -280,15 +331,65 @@ class _ImportTabState extends State<_ImportTab> {
     }
   }
 
+  Future<void> _downloadSampleFile() async {
+    final excel = Excel.createExcel();
+    final Sheet sheet = excel[excel.getDefaultSheet()!];
+
+    // Tạo Header
+    sheet.appendRow(_templateHeaders.map((e) => TextCellValue(e)).toList());
+
+    // Tạo 1 dòng mẫu (Optional)
+    sheet.appendRow([
+      TextCellValue(''), // ID trống
+      TextCellValue('Cà phê sữa đá (Mẫu)'),
+      TextCellValue(''), // Mã SP trống (tự sinh)
+      TextCellValue('Cà phê'),
+      TextCellValue('Ly'),
+      DoubleCellValue(25000), // Giá bán
+      DoubleCellValue(10000), // Giá vốn
+      DoubleCellValue(100),   // Tồn kho
+      DoubleCellValue(10),    // Min stock
+      DoubleCellValue(8),     // % Thuế (ví dụ 8%)
+      TextCellValue('Hàng hóa'), // Loại SP
+      TextCellValue(''),
+      TextCellValue('Máy in A'),
+      TextCellValue('true'),
+      TextCellValue(''),
+      TextCellValue(''), // JSON
+      TextCellValue(''),
+      TextCellValue(''),
+      TextCellValue(''),
+    ]);
+
+    final String fileName = 'APOS_FileMauHangHoa.xlsx';
+    final fileBytes = excel.save();
+
+    if (fileBytes != null) {
+      final String? result = await FilePicker.platform.saveFile(
+        dialogTitle: 'Lưu file mẫu',
+        fileName: fileName,
+        bytes: Uint8List.fromList(fileBytes),
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+      );
+      if (result != null) {
+        ToastService().show(message: "Đã tải file mẫu!", type: ToastType.success);
+      }
+    }
+  }
+
   Future<void> _importProducts() async {
+    // 1. Kiểm tra mounted đầu hàm
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _statusText = 'Đang chọn file...';
     });
+
     final toastService = ToastService();
     final storeId = widget.currentUser.storeId;
 
-    // Các loại SP hợp lệ
     const allowedProductTypes = {
       'Hàng hóa',
       'Thành phẩm/Combo',
@@ -306,12 +407,12 @@ class _ImportTabState extends State<_ImportTab> {
         withData: true,
       );
       if (result == null || result.files.first.bytes == null) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
 
-      // 2. ĐỌC FILE VÀ HEADER
-      setState(() => _statusText = 'Đang đọc file Excel...');
+      // 2. ĐỌC FILE
+      if (mounted) setState(() => _statusText = 'Đang đọc file Excel...');
       final bytes = result.files.first.bytes!;
       final excel = Excel.decodeBytes(bytes);
       final sheet = excel.tables[excel.tables.keys.first]!;
@@ -329,11 +430,13 @@ class _ImportTabState extends State<_ImportTab> {
         throw Exception("Thiếu cột 'Tên sản phẩm'");
       }
 
-      // 3. TẢI DỮ LIỆU HIỆN CÓ (ĐỂ SO SÁNH)
-      setState(() => _statusText = 'Đang lấy dữ liệu hiện tại...');
+      // 3. TẢI DỮ LIỆU HIỆN TẠI
+      if (mounted) setState(() => _statusText = 'Đang lấy dữ liệu hệ thống...');
       final allProducts = await _firestoreService.getAllProductsStream(storeId).first;
+
       final productMapByCode = <String, ProductModel>{};
       final productMapById = <String, ProductModel>{};
+
       for (var p in allProducts) {
         if (p.productCode != null && p.productCode!.isNotEmpty) {
           productMapByCode[p.productCode!] = p;
@@ -341,27 +444,29 @@ class _ImportTabState extends State<_ImportTab> {
         productMapById[p.id] = p;
       }
 
+      final taxSettingsDoc = await _firestoreService.getStoreTaxSettings(storeId);
+      final taxMethod = taxSettingsDoc?['calcMethod'] ?? 'direct';
+
       final allGroupsSnapshot = await FirebaseFirestore.instance
           .collection('product_groups').where('storeId', isEqualTo: storeId).get();
       final existingGroupNames = allGroupsSnapshot.docs
           .map((doc) => doc.data()['name'] as String).toSet();
 
-      // 4. PHA 1: XÁC THỰC (VALIDATION)
-      setState(() => _statusText = 'Đang xác thực dữ liệu...');
+      // 4. PHA 1: XÁC THỰC & PARSE DỮ LIỆU
+      if (mounted) setState(() => _statusText = 'Đang xác thực dữ liệu...');
+
       final List<_ProductImportJob> jobsToProcess = [];
       final Set<String> newGroupNamesToCreate = {};
-      final Set<String> skusInFile = {}; // Kiểm tra trùng lặp SKU trong file
+      final Set<String> skusInFile = {};
 
       int skippedCount = 0;
       int newCount = 0;
       int updatedCount = 0;
 
-      // Bắt đầu từ hàng 1 (dòng 2 trong Excel)
       for (int i = 1; i < sheet.rows.length; i++) {
         final int excelRow = i + 1;
         final row = sheet.rows[i];
 
-        // Hàm helper để đọc cell
         dynamic getCell(String headerName) {
           if (!headerMap.containsKey(headerName) || headerMap[headerName]! >= row.length) {
             return null;
@@ -369,61 +474,42 @@ class _ImportTabState extends State<_ImportTab> {
           return row[headerMap[headerName]!]?.value;
         }
 
-        // --- Bắt đầu kiểm tra ---
         final productName = parseString(getCell('Tên sản phẩm'));
-        if (productName == null) continue; // Bỏ qua hàng trống
+        if (productName == null) continue;
 
         final String? id = parseString(getCell('ID (Không sửa)'));
         final String? code = parseString(getCell('Mã SP'));
         final String? productType = parseString(getCell('Loại SP'));
+        final double? taxPercent = parseDouble(getCell('% Thuế'));
 
-        // 1. Kiểm tra Loại SP
-        if (productType == null) {
-          throw Exception("Dòng $excelRow: 'Loại SP' không được để trống.");
-        }
-        if (!allowedProductTypes.contains(productType)) {
-          throw Exception("Dòng $excelRow: 'Loại SP' không hợp lệ: '$productType'.");
-        }
+        if (productType == null) throw Exception("Dòng $excelRow: Thiếu 'Loại SP'");
+        if (!allowedProductTypes.contains(productType)) throw Exception("Dòng $excelRow: Loại SP '$productType' sai");
 
-        // 2. Kiểm tra trùng lặp SKU trong file
         if (code != null) {
-          if (skusInFile.contains(code)) {
-            throw Exception("Dòng $excelRow: 'Mã SP' ($code) bị lặp lại trong file Excel.");
-          }
+          if (skusInFile.contains(code)) throw Exception("Dòng $excelRow: Trùng Mã SP '$code' trong file");
           skusInFile.add(code);
         }
 
-        // 3. Tìm sản phẩm hiện có (CHỈ DỰA VÀO ID)
         ProductModel? existingProduct;
-        if (id != null) {
-          existingProduct = productMapById[id];
-        }
+        if (id != null) existingProduct = productMapById[id];
 
-        // 3.1. Kiểm tra trùng lặp Mã SP với CSDL (QUAN TRỌNG)
         if (code != null) {
           final productWithThisCode = productMapByCode[code];
           if (productWithThisCode != null) {
-            // Đã tìm thấy Mã SP này trong CSDL
             if (existingProduct == null) {
-              // Đây là SẢN PHẨM MỚI (vì không có ID), nhưng Mã SP lại trùng
-              throw Exception("Dòng $excelRow: 'Mã SP' ($code) đã tồn tại cho một sản phẩm khác. Sản phẩm mới phải có Mã SP duy nhất hoặc để trống để tự tạo.");
+              throw Exception("Dòng $excelRow: Mã SP '$code' đã tồn tại (ID: ${productWithThisCode.id})");
             } else if (existingProduct.id != productWithThisCode.id) {
-              // Đây là SẢN PHẨM CẬP NHẬT (vì có ID), nhưng Mã SP lại trùng với một SP KHÁC
-              throw Exception("Dòng $excelRow: 'Mã SP' ($code) bạn đang cố cập nhật đã thuộc về một sản phẩm khác (ID: ${productWithThisCode.id}).");
+              throw Exception("Dòng $excelRow: Mã SP '$code' thuộc về SP khác");
             }
-            // Nếu "existingProduct.id == productWithThisCode.id", thì đây là chính nó, không có vấn đề.
           }
         }
-
 
         if (existingProduct != null && !_updateExisting) {
           skippedCount++;
           continue;
         }
 
-        // 4. Parse dữ liệu và lưu vào job
         final Map<String, dynamic> productData = {};
-
         productData['productName'] = productName;
         productData['productCode'] = code;
         productData['productType'] = productType;
@@ -434,12 +520,14 @@ class _ImportTabState extends State<_ImportTab> {
         productData['kitchenPrinters'] = parseStringList(getCell('Máy in bếp (Cách nhau bởi dấu ,)'));
         productData['isVisibleInMenu'] = parseBool(getCell('Cho phép bán (true/false)'));
         productData['manageStockSeparately'] = parseBool(getCell('QL Kho riêng (true/false)'));
+
         if (_updateComplexData) {
           productData['additionalUnits'] = parseJsonList(getCell('ĐVT phụ (JSON)'));
           productData['recipeItems'] = parseJsonList(getCell('Định lượng (JSON)'));
           productData['accompanyingItems'] = parseJsonList(getCell('Bán kèm (JSON)'));
           productData['serviceSetup'] = parseServiceJson(getCell('Dịch vụ (JSON)'));
         }
+
         if (_updateStockCost) {
           productData['costPrice'] = parseDouble(getCell('Giá vốn'));
           productData['stock'] = parseDouble(getCell('Tồn kho'));
@@ -450,7 +538,6 @@ class _ImportTabState extends State<_ImportTab> {
           productData['minStock'] = existingProduct.minStock;
         }
 
-        // 5. Chuẩn bị tạo nhóm
         final String? groupNameFromExcel = productData['productGroup'] as String?;
         if (groupNameFromExcel != null && !existingGroupNames.contains(groupNameFromExcel)) {
           newGroupNamesToCreate.add(groupNameFromExcel);
@@ -461,67 +548,40 @@ class _ImportTabState extends State<_ImportTab> {
           existingProduct: existingProduct,
           idFromFile: id,
           excelRow: excelRow,
+          taxPercent: taxPercent,
         ));
       }
 
+      // [LOGIC CŨ] Validate Complex Data (Đã khôi phục đầy đủ)
       if (_updateComplexData) {
-        setState(() => _statusText = 'Đang kiểm tra liên kết dữ liệu...');
-
-        // 1. Tạo tập hợp tất cả ID hợp lệ (Bao gồm ID trong DB + ID đang có trong file Excel)
-        // Điều này cho phép tham chiếu đến một sản phẩm vừa được định nghĩa trong cùng file Excel
+        if (mounted) setState(() => _statusText = 'Đang kiểm tra liên kết dữ liệu...');
         final Set<String> validIds = Set.from(productMapById.keys);
         for (var job in jobsToProcess) {
-          if (job.idFromFile != null && job.idFromFile!.isNotEmpty) {
-            validIds.add(job.idFromFile!);
-          }
+          if (job.idFromFile != null && job.idFromFile!.isNotEmpty) validIds.add(job.idFromFile!);
         }
-
-        // 2. Duyệt qua từng job để kiểm tra
         for (var job in jobsToProcess) {
-          final rowName = job.data['productName'];
-          final rowLine = job.excelRow;
-
-          // Hàm helper để kiểm tra danh sách
-          void validateRefIds(String listKey, String contextName) {
+          void validateRefIds(String listKey) {
             final listData = job.data[listKey] as List<Map<String, dynamic>>?;
             if (listData == null || listData.isEmpty) return;
-
             for (var item in listData) {
               String? refId;
+              if (item.containsKey('productId')) {refId = item['productId'];}
+              else if (item.containsKey('product') && item['product'] is Map) {refId = item['product']['id'];}
+              else if (item.containsKey('id')) {refId = item['id'];}
 
-              // Check các cấu trúc JSON phổ biến có thể gặp
-              if (item.containsKey('productId')) {
-                refId = item['productId']; // Cấu trúc Firestore flattened
-              } else if (item.containsKey('product') && item['product'] is Map) {
-                refId = item['product']['id']; // Cấu trúc Object lồng nhau
-              } else if (item.containsKey('id')) {
-                refId = item['id']; // Cấu trúc dự phòng
-              }
-
-              // Nếu item có tham chiếu ID, thì ID đó phải tồn tại
-              if (refId != null && refId.isNotEmpty) {
-                if (!validIds.contains(refId)) {
-                  throw Exception(
-                      "Lỗi tại dòng $rowLine ($rowName):\n"
-                          "Không tìm thấy sản phẩm $contextName với ID: $refId.\n"
-                          "ID này không tồn tại trên hệ thống và không có trong file Excel.\n"
-                          "Giải pháp: Kiểm tra lại ID hoặc bỏ chọn 'Cập nhật dữ liệu phức tạp'."
-                  );
-                }
+              if (refId != null && refId.isNotEmpty && !validIds.contains(refId)) {
+                throw Exception("Dòng ${job.excelRow}: ID tham chiếu '$refId' không tồn tại.");
               }
             }
           }
-
-          // Thực hiện kiểm tra
-          validateRefIds('recipeItems', 'nguyên liệu/thành phần');
-          validateRefIds('accompanyingItems', 'bán kèm/topping');
+          validateRefIds('recipeItems');
+          validateRefIds('accompanyingItems');
         }
       }
 
-      // 5. PHA 2: KHỞI TẠO MÃ SP VÀ NHÓM MỚI
-      setState(() => _statusText = 'Đang khởi tạo Mã SP và Nhóm...');
+      // 5. PHA 2: TẠO NHÓM & SINH MÃ TỰ ĐỘNG
+      if (mounted) setState(() => _statusText = 'Đang khởi tạo Mã SP và Nhóm...');
 
-      // 5.1 Tạo nhóm mới
       if (newGroupNamesToCreate.isNotEmpty) {
         var groupBatch = FirebaseFirestore.instance.batch();
         int highestStt = allGroupsSnapshot.docs
@@ -536,112 +596,89 @@ class _ImportTabState extends State<_ImportTab> {
           });
         }
         await groupBatch.commit();
-        existingGroupNames.addAll(newGroupNamesToCreate); // Thêm vào danh sách để không tạo lại
+        existingGroupNames.addAll(newGroupNamesToCreate);
       }
 
-      // SỬA LINT: Hàm helper được định nghĩa bên trong hàm _importProducts,
-      // và đổi tên, bỏ dấu gạch dưới
+      // [LOGIC CŨ] Sinh mã SP (Đã khôi phục đầy đủ)
       int extractNumericCode(String code, String prefix) {
-        if (code.startsWith(prefix)) {
-          final numericPart = code.substring(prefix.length);
-          return int.tryParse(numericPart) ?? 0;
-        }
+        if (code.startsWith(prefix)) return int.tryParse(code.substring(prefix.length)) ?? 0;
         return 0;
       }
-
-      // 5.2 Lấy và cập nhật counters (LOGIC TÌM MAX)
       final countersRef = FirebaseFirestore.instance.collection('counters').doc('product_codes_$storeId');
       final countersDoc = await countersRef.get();
       final countersData = countersDoc.data() ?? {};
-
       Map<String, int> currentCounters = {};
       final prefixes = {'HH', 'TP', 'DV', 'BK', 'NL', 'VL', 'SP'};
 
       for (final prefix in prefixes) {
-        int counterFromFirestore = (countersData['${prefix}_count'] as num?)?.toInt() ?? 0;
-
-        if (counterFromFirestore == 0) {
-          // Nếu counter trên DB = 0, tìm max trong DB và Excel
+        int dbCount = (countersData['${prefix}_count'] as num?)?.toInt() ?? 0;
+        if (dbCount == 0) {
           int maxInDb = 0;
           for (final product in allProducts) {
-            if (product.productCode != null && product.productCode!.startsWith(prefix)) {
-              final codeNum = extractNumericCode(product.productCode!, prefix);
-              if (codeNum > maxInDb) {
-                maxInDb = codeNum;
-              }
+            if (product.productCode?.startsWith(prefix) == true) {
+              final n = extractNumericCode(product.productCode!, prefix);
+              if (n > maxInDb) maxInDb = n;
             }
           }
-
           int maxInExcel = 0;
           if (headerMap.containsKey('Mã SP')) {
-            final codeIndex = headerMap['Mã SP']!;
-            for (int i = 1; i < sheet.rows.length; i++) {
-              final row = sheet.rows[i];
-              if (codeIndex >= row.length) continue;
-              final cell = row[codeIndex];
-              if (cell != null) {
-                final code = cell.value?.toString().trim();
-                if (code != null && code.startsWith(prefix)) {
-                  final codeNum = extractNumericCode(code, prefix);
-                  if (codeNum > maxInExcel) {
-                    maxInExcel = codeNum;
-                  }
-                }
+            final idx = headerMap['Mã SP']!;
+            for (int i=1; i<sheet.rows.length; i++) {
+              final v = sheet.rows[i][idx]?.value?.toString().trim();
+              if (v != null && v.startsWith(prefix)) {
+                final n = extractNumericCode(v, prefix);
+                if (n > maxInExcel) maxInExcel = n;
               }
             }
           }
-
           currentCounters[prefix] = maxInDb > maxInExcel ? maxInDb : maxInExcel;
         } else {
-          // Nếu counter trên DB > 0, dùng số đó
-          currentCounters[prefix] = counterFromFirestore;
+          currentCounters[prefix] = dbCount;
         }
       }
 
       for (final job in jobsToProcess) {
-        // Chỉ gán Mã SP nếu: là sản phẩm mới (không có existingProduct) VÀ Mã SP trong file bị trống
         if (job.existingProduct == null && job.data['productCode'] == null) {
-
-          // SỬA LINT: Sử dụng hàm _getProductPrefix (đã có ở ngoài)
           final prefix = _getProductPrefix(job.data['productType']) ?? 'SP';
           final nextCount = (currentCounters[prefix] ?? 0) + 1;
-
           job.data['productCode'] = '$prefix${nextCount.toString().padLeft(5, '0')}';
-
-          currentCounters[prefix] = nextCount; // Cập nhật số đếm
+          currentCounters[prefix] = nextCount;
         }
       }
 
-      // 6. PHA 3: BATCH COMMIT
-      setState(() => _statusText = 'Đang lưu ${jobsToProcess.length} sản phẩm...');
+      // 6. PHA 3: LƯU SẢN PHẨM
+      if (mounted) setState(() => _statusText = 'Đang lưu ${jobsToProcess.length} sản phẩm...');
+
       var batch = FirebaseFirestore.instance.batch();
       int batchCount = 0;
 
-      for (final job in jobsToProcess) {
+      // Map<ID, TaxKey?>. Nếu TaxKey là null nghĩa là XÓA thuế (đối với thuế 0%)
+      final Map<String, String?> productTaxUpdates = {};
+
+      for (int i = 0; i < jobsToProcess.length; i++) {
+        final job = jobsToProcess[i];
         final data = job.data;
 
-        // --- Áp dụng giá trị MẶC ĐỊNH ---
-        data['isVisibleInMenu'] = data['isVisibleInMenu'] ?? true;
-        data['manageStockSeparately'] = data['manageStockSeparately'] ?? false;
-        if (data['kitchenPrinters'] == null || (data['kitchenPrinters'] as List).isEmpty) {
-          data['kitchenPrinters'] = ['Máy in A'];
-        }
-        data['sellPrice'] = data['sellPrice'] ?? 0.0;
-        data['costPrice'] = data['costPrice'] ?? 0.0;
-        data['stock'] = data['stock'] ?? 0.0;
-        data['minStock'] = data['minStock'] ?? 0.0;
-        data['additionalBarcodes'] = data['additionalBarcodes'] ?? [];
-        data['additionalUnits'] = data['additionalUnits'] ?? [];
-        data['recipeItems'] = data['recipeItems'] ?? [];
-        data['accompanyingItems'] = data['accompanyingItems'] ?? [];
+        // Default values
+        data['isVisibleInMenu'] ??= true;
+        data['manageStockSeparately'] ??= false;
+        data['kitchenPrinters'] ??= ['Máy in A'];
+        data['sellPrice'] ??= 0.0;
+        data['costPrice'] ??= 0.0;
+        data['stock'] ??= 0.0;
+        data['minStock'] ??= 0.0;
+        data['additionalBarcodes'] ??= [];
+        data['additionalUnits'] ??= [];
+        data['recipeItems'] ??= [];
+        data['accompanyingItems'] ??= [];
+
+        String productId;
 
         if (job.existingProduct != null) {
-          // --- CẬP NHẬT SẢN PHẨM ---
           updatedCount++;
-          final docRef = FirebaseFirestore.instance.collection('products').doc(job.existingProduct!.id);
-          batch.update(docRef, data);
+          productId = job.existingProduct!.id;
+          batch.update(FirebaseFirestore.instance.collection('products').doc(productId), data);
         } else {
-          // --- TẠO MỚI SẢN PHẨM ---
           newCount++;
           data['storeId'] = storeId;
           data['ownerUid'] = widget.currentUser.uid;
@@ -653,9 +690,33 @@ class _ImportTabState extends State<_ImportTab> {
           }
           data['imageUrl'] = imageUrl;
 
-          final DocumentReference docRef;
-          docRef = FirebaseFirestore.instance.collection('products').doc();
+          final docRef = FirebaseFirestore.instance.collection('products').doc();
+          productId = docRef.id;
           batch.set(docRef, data);
+        }
+
+        // --- [LOGIC MỚI] XỬ LÝ THUẾ ---
+        if (job.taxPercent != null) {
+          final rateVal = job.taxPercent! / 100.0;
+
+          if (rateVal < 0.001) {
+            // Trường hợp Thuế = 0%: Đánh dấu là null để XÓA khỏi DB thuế
+            productTaxUpdates[productId] = null;
+          } else {
+            // Trường hợp Thuế > 0%: Tìm key và đánh dấu để UPDATE
+            String? matchedKey;
+            final targetMap = (taxMethod == 'deduction') ? kDeductionRates : kDirectRates;
+            for (var entry in targetMap.entries) {
+              final dbRate = (entry.value['rate'] as num).toDouble();
+              if ((dbRate - rateVal).abs() < 0.001) {
+                matchedKey = entry.key;
+                break;
+              }
+            }
+            if (matchedKey != null) {
+              productTaxUpdates[productId] = matchedKey;
+            }
+          }
         }
 
         batchCount++;
@@ -666,28 +727,83 @@ class _ImportTabState extends State<_ImportTab> {
         }
       }
 
-      // Commit batch cuối
       if (batchCount > 0) {
         await batch.commit();
       }
 
-      // 7. CẬP NHẬT COUNTERS MỚI
-      final Map<String, dynamic> newCountersData = {};
+      // 7. CẬP NHẬT THUẾ (KHÔNG DÙNG TRANSACTION)
+      if (productTaxUpdates.isNotEmpty) {
+        if (mounted) setState(() => _statusText = 'Đang cập nhật thuế...');
 
-      // SỬA LINT: đổi tên 'count' thành 'value'
-      currentCounters.forEach((prefix, value) {
-        newCountersData['${prefix}_count'] = value;
-      });
-      await countersRef.set(newCountersData, SetOptions(merge: true));
+        // Delay nhẹ để giảm tải thread
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        final docRef = FirebaseFirestore.instance.collection('store_tax_settings').doc(storeId);
+
+        try {
+          // 1. Đọc
+          final snapshot = await docRef.get();
+
+          if (snapshot.exists) {
+            Map<String, dynamic> currentMap = Map<String, dynamic>.from(snapshot.data()?['taxAssignmentMap'] ?? {});
+            Map<String, Set<String>> typedMap = {};
+
+            // Ép kiểu an toàn
+            currentMap.forEach((k, v) {
+              if (v is List) {
+                typedMap[k] = v.map((e) => e.toString()).toSet();
+              }
+            });
+
+            // 2. Xử lý logic Update
+            productTaxUpdates.forEach((productId, newTaxKey) {
+              // Bước A: Luôn xóa ID khỏi tất cả các nhóm thuế cũ (Dù là 0% hay >0% đều phải xóa cũ trước)
+              typedMap.forEach((key, idSet) {
+                idSet.remove(productId);
+              });
+
+              // Bước B: Chỉ thêm vào nhóm mới nếu newTaxKey KHÁC NULL (Tức là > 0%)
+              if (newTaxKey != null) {
+                if (!typedMap.containsKey(newTaxKey)) {
+                  typedMap[newTaxKey] = {};
+                }
+                typedMap[newTaxKey]!.add(productId);
+              }
+            });
+
+            // 3. Chuyển lại Map để lưu
+            Map<String, List<String>> finalMap = {};
+            typedMap.forEach((k, v) {
+              if (v.isNotEmpty) finalMap[k] = v.toList();
+            });
+
+            // 4. Ghi (Update)
+            await docRef.update({'taxAssignmentMap': finalMap});
+          }
+        } catch (e) {
+          toastService.show(message: "Lỗi cập nhật thuế: $e", type: ToastType.warning);
+        }
+      }
+
+      // 8. CẬP NHẬT COUNTERS
+      try {
+        final Map<String, dynamic> newCountersData = {};
+        currentCounters.forEach((prefix, value) {
+          newCountersData['${prefix}_count'] = value;
+        });
+        await countersRef.set(newCountersData, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Counter update error: $e');
+      }
 
       toastService.show(
-        message: 'Hoàn tất! Thêm mới: $newCount, Cập nhật: $updatedCount, Bỏ qua: $skippedCount. Đã tạo: ${newGroupNamesToCreate.length} nhóm mới.',
+        message: 'Hoàn tất! Thêm: $newCount, Sửa: $updatedCount, Bỏ qua: $skippedCount.',
         type: ToastType.success,
         duration: const Duration(seconds: 5),
       );
 
     } catch (e) {
-      toastService.show(message: "$e", type: ToastType.error, duration: const Duration(seconds: 7));
+      toastService.show(message: "Lỗi: $e", type: ToastType.error, duration: const Duration(seconds: 7));
     } finally {
       if (mounted) {
         setState(() {
@@ -712,6 +828,14 @@ class _ImportTabState extends State<_ImportTab> {
               'Nhập hàng hóa hàng loạt từ file Excel. Vui lòng sử dụng file mẫu được xuất từ chức năng "Xuất File" để đảm bảo đúng định dạng cột.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            Center(
+              child: TextButton.icon(
+                onPressed: _isLoading ? null : _downloadSampleFile,
+                icon: const Icon(Icons.download),
+                label: const Text('Tải file Excel mẫu'),
+              ),
             ),
             const SizedBox(height: 24),
             CheckboxListTile(
