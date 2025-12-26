@@ -89,14 +89,22 @@ class ReceiptWidget extends StatelessWidget {
     final String? voucherCode = summary['voucherCode'] as String?;
     final List surcharges = (summary['surcharges'] is List) ? summary['surcharges'] : const [];
     Map<double, double> taxBreakdown = {};
+    final bool isTaxInclusive = summary['isTaxInclusive'] == true;
     if (summary['items'] is List) {
       for (var item in summary['items']) {
         if (item is Map) {
-          double tRate = (item['taxRate'] as num?)?.toDouble() ?? 0.0;
+          double rate = (item['taxRate'] as num?)?.toDouble() ?? 0.0;
           double tAmount = (item['taxAmount'] as num?)?.toDouble() ?? 0.0;
-          // Chỉ gom nhóm nếu có thuế
-          if (tRate > 0 && tAmount > 0) {
-            taxBreakdown[tRate] = (taxBreakdown[tRate] ?? 0) + tAmount;
+          if (tAmount == 0 && rate > 0) {
+            double sub = (item['subtotal'] as num?)?.toDouble() ?? 0.0;
+            if (isTaxInclusive) {
+              tAmount = sub - (sub / (1 + rate));
+            } else {
+              tAmount = sub * rate;
+            }
+          }
+          if (rate > 0 && tAmount > 0) {
+            taxBreakdown[rate] = (taxBreakdown[rate] ?? 0) + tAmount;
           }
         }
       }
@@ -322,21 +330,6 @@ class ReceiptWidget extends StatelessWidget {
               if (!isSimplifiedMode) ...[
                 _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal),
                     baseTextStyle.copyWith(fontSize: fsInfo)),
-                if (settings.billShowTax && returnTax > 0) ...[
-                  _buildRow(isReturnBill ? 'Hoàn thuế:' : 'Thuế:', '+ ${currencyFormat.format(returnTax)}',
-                      baseTextStyle.copyWith(fontSize: fsInfo)),
-                  ...sortedTaxRates.map((rate) {
-                    final amount = taxBreakdown[rate]!;
-                    return Padding(
-                      padding: const EdgeInsets.only(left: 8.0), // Thụt đầu dòng nhẹ
-                      child: _buildRow(
-                        '${percentFormat.format(rate * 100)}%:',
-                        currencyFormat.format(amount),
-                        baseTextStyle.copyWith(fontSize: fsInfo - 1), // Chữ nhỏ hơn xíu và nghiêng
-                      ),
-                    );
-                  }),
-                ],
                 if (settings.billShowDiscount && discount > 0)
                   _buildRow(isReturnBill ? 'Hoàn chiết khấu:' : (summary['discountName'] ?? 'Chiết khấu:'),
                       '- ${currencyFormat.format(discount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
@@ -349,6 +342,21 @@ class ReceiptWidget extends StatelessWidget {
                 if (settings.billShowSurcharge && surcharges.isNotEmpty)
                   ...surcharges.map((s) => _buildRow(isReturnBill ? 'Hoàn phụ thu ${s['name']}:' : '${s['name']}:',
                       '+ ${currencyFormat.format((s['amount'] as num).toDouble())}', baseTextStyle.copyWith(fontSize: fsInfo))),
+                if (settings.billShowTax && returnTax > 0) ...[
+                  _buildRow(isReturnBill ? 'Hoàn thuế:' : 'Thuế:', '+ ${currencyFormat.format(returnTax)}',
+                      baseTextStyle.copyWith(fontSize: fsInfo)),
+                  ...sortedTaxRates.map((rate) {
+                    final amount = taxBreakdown[rate]!;
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: _buildRow(
+                        '${percentFormat.format(rate * 100)}%:',
+                        currencyFormat.format(amount),
+                        baseTextStyle.copyWith(fontSize: fsInfo - 1),
+                      ),
+                    );
+                  }),
+                ],
               ],
               if (isSimplifiedMode)
                 _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal),
@@ -362,9 +370,6 @@ class ReceiptWidget extends StatelessWidget {
                 ],
               ),
             ] else ...[
-              // [SỬA] Đã xóa dòng "Tổng giá trị trả" ở đây vì đã hiện ở Phần 1
-              // Chỉ hiện "Giá trị mua" để so sánh nếu cần, nhưng ở trên cũng có rồi.
-              // Vậy ở đây chỉ cần hiện dòng kết luận.
 
               if (netDifference > 0)
                 Row(

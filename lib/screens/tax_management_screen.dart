@@ -143,7 +143,7 @@ class _TaxSettingsTabState extends State<TaxSettingsTab> {
   // 4. Dữ liệu gán thuế
   Map<String, List<String>> _taxAssignmentMap = {};
   List<ProductModel> _allProducts = [];
-
+  bool _isTaxInclusive = false;
   bool _isLoading = true;
 
   @override
@@ -181,7 +181,7 @@ class _TaxSettingsTabState extends State<TaxSettingsTab> {
         _calcMethod = (savedMethod == 'deduction')
             ? TaxCalcMethod.deduction
             : TaxCalcMethod.direct;
-
+        _isTaxInclusive = settings['isTaxInclusive'] ?? false;
         final rawMap = settings['taxAssignmentMap'] as Map<String, dynamic>? ?? {};
         _taxAssignmentMap = {};
         rawMap.forEach((key, value) {
@@ -231,6 +231,7 @@ class _TaxSettingsTabState extends State<TaxSettingsTab> {
         'entityType': _entityType == LegalEntityType.dn ? 'dn' : 'hkd',
         'revenueRange': rangeStr,
         'calcMethod': _calcMethod == TaxCalcMethod.deduction ? 'deduction' : 'direct',
+        'isTaxInclusive': _isTaxInclusive,
         'taxAssignmentMap': _taxAssignmentMap,
         'updatedAt': FieldValue.serverTimestamp(),
         'snapshot_threshold1': _threshold1,
@@ -367,7 +368,22 @@ class _TaxSettingsTabState extends State<TaxSettingsTab> {
                   ],
                 ),
               ),
-            ]
+            ],
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text("Giá bán đã bao gồm thuế",
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              subtitle: const Text("Hệ thống sẽ tự động tách ngược tiền thuế từ giá bán sản phẩm khi thanh toán.",
+                  style: TextStyle(fontSize: 13, color: Colors.grey)),
+              value: _isTaxInclusive,
+              onChanged: (val) {
+                setState(() {
+                  _isTaxInclusive = val;
+                });
+              },
+              activeColor: AppTheme.primaryColor,
+            ),
           ],
         ),
       ),
