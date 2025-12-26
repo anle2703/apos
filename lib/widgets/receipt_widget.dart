@@ -88,7 +88,20 @@ class ReceiptWidget extends StatelessWidget {
     final double pointsValue = ((summary['customerPointsUsed'] as num?)?.toDouble() ?? 0.0) * 1000.0;
     final String? voucherCode = summary['voucherCode'] as String?;
     final List surcharges = (summary['surcharges'] is List) ? summary['surcharges'] : const [];
-
+    Map<double, double> taxBreakdown = {};
+    if (summary['items'] is List) {
+      for (var item in summary['items']) {
+        if (item is Map) {
+          double tRate = (item['taxRate'] as num?)?.toDouble() ?? 0.0;
+          double tAmount = (item['taxAmount'] as num?)?.toDouble() ?? 0.0;
+          // Chỉ gom nhóm nếu có thuế
+          if (tRate > 0 && tAmount > 0) {
+            taxBreakdown[tRate] = (taxBreakdown[tRate] ?? 0) + tAmount;
+          }
+        }
+      }
+    }
+    final sortedTaxRates = taxBreakdown.keys.toList()..sort();
     final double exchangeTotalPayable = (exchangeSummary?['totalPayable'] as num?)?.toDouble() ?? 0.0;
     final double netDifference = exchangeTotalPayable - returnTotalPayable;
     final double changeAmount = (summary['changeAmount'] as num?)?.toDouble() ?? 0.0;
@@ -309,9 +322,21 @@ class ReceiptWidget extends StatelessWidget {
               if (!isSimplifiedMode) ...[
                 _buildRow(isReturnBill ? 'Tổng cộng hoàn:' : 'Tổng cộng:', currencyFormat.format(returnSubtotal),
                     baseTextStyle.copyWith(fontSize: fsInfo)),
-                if (settings.billShowTax && returnTax > 0)
+                if (settings.billShowTax && returnTax > 0) ...[
                   _buildRow(isReturnBill ? 'Hoàn thuế:' : 'Thuế:', '+ ${currencyFormat.format(returnTax)}',
                       baseTextStyle.copyWith(fontSize: fsInfo)),
+                  ...sortedTaxRates.map((rate) {
+                    final amount = taxBreakdown[rate]!;
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8.0), // Thụt đầu dòng nhẹ
+                      child: _buildRow(
+                        '${percentFormat.format(rate * 100)}%:',
+                        currencyFormat.format(amount),
+                        baseTextStyle.copyWith(fontSize: fsInfo - 1), // Chữ nhỏ hơn xíu và nghiêng
+                      ),
+                    );
+                  }),
+                ],
                 if (settings.billShowDiscount && discount > 0)
                   _buildRow(isReturnBill ? 'Hoàn chiết khấu:' : (summary['discountName'] ?? 'Chiết khấu:'),
                       '- ${currencyFormat.format(discount)}', baseTextStyle.copyWith(fontSize: fsInfo)),
