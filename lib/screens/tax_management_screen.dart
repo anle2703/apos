@@ -382,7 +382,7 @@ class _TaxSettingsTabState extends State<TaxSettingsTab> {
                   _isTaxInclusive = val;
                 });
               },
-              activeColor: AppTheme.primaryColor,
+              activeTrackColor: AppTheme.primaryColor,
             ),
           ],
         ),

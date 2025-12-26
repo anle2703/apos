@@ -28,7 +28,7 @@ class ReturnService {
     final datePrefix = DateFormat('ddMMyy').format(now);
     final counterRef = _db.collection('counters').doc('${prefix}_${storeId}_$datePrefix');
     try {
-      await counterRef.set({'count': FieldValue.increment(1)}, SetOptions(merge: true));
+      await counterRef.set({'count': FieldValue.increment(1), 'storeId': storeId}, SetOptions(merge: true));
       final doc = await counterRef.get();
       final count = doc.data()?['count'] ?? 1;
       return '$prefix$datePrefix${count.toString().padLeft(3, '0')}';
@@ -383,7 +383,8 @@ class ReturnService {
         finalCalculationSubtotal = originalBill.subtotal * ratio;
       }
 
-      double calculatedPayable = (finalCalculationSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
+      double calculatedPayable =
+          (finalCalculationSubtotal + returnSurcharge + totalReturnTax) - totalBillLevelReductions;
       returnTotalPayable = calculatedPayable.roundToDouble();
     }
 
@@ -559,9 +560,11 @@ class ReturnService {
     if (deltaReturnTax != 0) {
       reportUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);
     }
-    if (deltaReturnBillDiscount != 0) reportUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);
-    if (deltaReturnVoucherDiscount != 0)
+    if (deltaReturnBillDiscount != 0){
+      reportUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);}
+    if (deltaReturnVoucherDiscount != 0) {
       reportUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
+    }
     if (deltaReturnSurcharges != 0) {
       reportUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);
     }
@@ -604,9 +607,11 @@ class ReturnService {
       if (deltaReturnTax != 0) {
         shiftUpdates['totalReturnTax'] = FieldValue.increment(deltaReturnTax);
       }
-      if (deltaReturnBillDiscount != 0) shiftUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);
-      if (deltaReturnVoucherDiscount != 0)
+      if (deltaReturnBillDiscount != 0){
+        shiftUpdates['totalReturnBillDiscount'] = FieldValue.increment(deltaReturnBillDiscount);}
+      if (deltaReturnVoucherDiscount != 0) {
         shiftUpdates['totalReturnVoucherDiscount'] = FieldValue.increment(deltaReturnVoucherDiscount);
+      }
       if (deltaReturnSurcharges != 0) {
         shiftUpdates['totalReturnSurcharges'] = FieldValue.increment(deltaReturnSurcharges);
       }
@@ -1185,7 +1190,8 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
       CustomerModel? customer;
       if (widget.originalBill.customerId != null) {
         try {
-          final doc = await FirebaseFirestore.instance.collection('customers').doc(widget.originalBill.customerId).get();
+          final doc =
+              await FirebaseFirestore.instance.collection('customers').doc(widget.originalBill.customerId).get();
           if (doc.exists) customer = CustomerModel.fromFirestore(doc);
         } catch (_) {}
       }
@@ -1273,11 +1279,13 @@ class _SelectReturnItemsDialogState extends State<_SelectReturnItemsDialog> {
                           child: Row(
                             children: [
                               IconButton(
-                                  icon: const Icon(Icons.remove, color: Colors.red), onPressed: () => _decrementQty(index)),
+                                  icon: const Icon(Icons.remove, color: Colors.red),
+                                  onPressed: () => _decrementQty(index)),
                               SizedBox(
                                   width: 30,
                                   child: Text(formatNumber(returnQty),
-                                      textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold))),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontWeight: FontWeight.bold))),
                               IconButton(
                                   icon: const Icon(Icons.add, color: Colors.green),
                                   onPressed: () => _incrementQty(index, remainingQty)),
@@ -1569,7 +1577,13 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
                 if (isMobile) {
                   // Giao diện Mobile: Xếp chồng dọc
                   return Column(
-                    children: [searchInput, const SizedBox(height: 10), datePicker, const SizedBox(height: 10), searchButton],
+                    children: [
+                      searchInput,
+                      const SizedBox(height: 10),
+                      datePicker,
+                      const SizedBox(height: 10),
+                      searchButton
+                    ],
                   );
                 } else {
                   // Giao diện PC: Xếp hàng ngang
@@ -1608,7 +1622,8 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
                         itemBuilder: (context, index) {
                           final bill = _foundBills[index];
                           final bool hasReturn = bill.items.any((i) => i is Map && (i['returnedQuantity'] ?? 0) > 0);
-                          final bool isReturnBill = bill.billCode.startsWith("TH") || bill.status == 'return'; // Check cả mã TH
+                          final bool isReturnBill =
+                              bill.billCode.startsWith("TH") || bill.status == 'return'; // Check cả mã TH
 
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
@@ -1633,14 +1648,17 @@ class _ReturnOrderScreenState extends State<ReturnOrderScreen> {
                                           isReturnBill
                                               ? Icons.assignment_return
                                               : (hasReturn ? Icons.sync_problem : Icons.receipt_long),
-                                          color: isReturnBill ? Colors.purple : (hasReturn ? Colors.orange : Colors.green)),
+                                          color: isReturnBill
+                                              ? Colors.purple
+                                              : (hasReturn ? Colors.orange : Colors.green)),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(bill.billCode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                          Text(bill.billCode,
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                           const SizedBox(height: 4),
                                           Text(bill.customerName ?? 'Khách lẻ',
                                               style: TextStyle(color: Colors.grey[800], fontSize: 13)),
@@ -1901,7 +1919,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
         discountVal = widget.originalBill!.subtotal * (widget.originalBill!.discountInput / 100);
       }
 
-      originalBillTotalDiscount = discountVal + widget.originalBill!.voucherDiscount + widget.originalBill!.customerPointsValue;
+      originalBillTotalDiscount =
+          discountVal + widget.originalBill!.voucherDiscount + widget.originalBill!.customerPointsValue;
     }
 
     for (var item in _returnList) {
@@ -2155,7 +2174,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                   Center(
                       child: Text(confirmMsg,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor))),
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primaryColor))),
                 ],
               ),
               actions: [
@@ -2241,7 +2261,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: Colors.black87)),
+          Text(label,
+              style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: Colors.black87)),
           Text("${isNegative ? '-' : ''}${formatNumber(value)}",
               style: TextStyle(
                   fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
@@ -2257,9 +2278,10 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       color: bg,
       width: double.infinity,
-      child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: text)), if (action != null) action]),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: text)),
+        if (action != null) action
+      ]),
     );
   }
 
@@ -2270,7 +2292,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
       child: Column(
         children: [
           _buildSummaryRow("Tổng tiền hàng trả:", _dispReturnSubtotal),
-          if (_dispReturnBillDiscount > 0) _buildSummaryRow("Trừ chiết khấu Bill:", _dispReturnBillDiscount, isNegative: true),
+          if (_dispReturnBillDiscount > 0)
+            _buildSummaryRow("Trừ chiết khấu Bill:", _dispReturnBillDiscount, isNegative: true),
           if (_dispReturnSurcharge > 0) _buildSummaryRow("Hoàn phụ thu:", _dispReturnSurcharge),
           if (_dispReturnTax > 0) _buildSummaryRow("Hoàn thuế:", _dispReturnTax),
           const Divider(),
@@ -2340,7 +2363,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
               Color discountColor = Colors.grey[700]!;
 
               if (discountVal != 0) {
-                String val = item.discountUnit == '%' ? "${formatNumber(discountVal.abs())}%" : formatNumber(discountVal.abs());
+                String val =
+                    item.discountUnit == '%' ? "${formatNumber(discountVal.abs())}%" : formatNumber(discountVal.abs());
                 String sign = discountVal > 0 ? "-" : "+";
                 discountStr = " [$sign$val]";
               }
@@ -2364,7 +2388,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                       overflow: TextOverflow.ellipsis,
                       text: TextSpan(style: const TextStyle(fontSize: 13, color: Colors.black), children: [
                         TextSpan(
-                            text: item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            text: item.product.productName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         if (item.selectedUnit.isNotEmpty)
                           TextSpan(text: " (${item.selectedUnit})", style: TextStyle(color: Colors.grey[700])),
                         if (discountStr.isNotEmpty) TextSpan(text: discountStr, style: TextStyle(color: discountColor)),
@@ -2427,7 +2452,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
 
                         // 3.3 Thành tiền
                         Text(formatNumber(item.subtotal),
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 14)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, color: AppTheme.primaryColor, fontSize: 14)),
                       ],
                     ),
                   ],
@@ -2592,8 +2618,9 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                                       : _paymentMethods
                                           .map((e) => DropdownMenuItem(
                                               value: e,
-                                              child:
-                                                  Text(e, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13))))
+                                              child: Text(e,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(fontSize: 13))))
                                           .toList(),
                                   onChanged: (val) {
                                     if (val != null) setState(() => _selectedRefundMethod = val);
@@ -2610,7 +2637,8 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                       children: [
                         Expanded(
                             child: Text(diffText,
-                                style: TextStyle(fontSize: isMobile ? 18 : 20, fontWeight: FontWeight.bold, color: diffColor))),
+                                style: TextStyle(
+                                    fontSize: isMobile ? 18 : 20, fontWeight: FontWeight.bold, color: diffColor))),
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
                               backgroundColor: AppTheme.primaryColor,
@@ -2619,7 +2647,9 @@ class _ExchangeProcessorWidgetState extends State<ExchangeProcessorWidget> {
                           onPressed: _isProcessing ? null : _submitTransaction,
                           child: _isProcessing
                               ? const SizedBox(
-                                  width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                               : const Text("HOÀN TẤT", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
                       ],
@@ -3059,14 +3089,16 @@ class _ProductOptionsDialogState extends State<_ProductOptionsDialog> {
                 keyboardType: TextInputType.number,
                 // Thêm formatter số
                 inputFormatters: [ThousandDecimalInputFormatter()],
-                decoration:
-                    const InputDecoration(labelText: "Đơn giá (đã gồm topping)", border: OutlineInputBorder(), suffixText: "đ"),
+                decoration: const InputDecoration(
+                    labelText: "Đơn giá (đã gồm topping)", border: OutlineInputBorder(), suffixText: "đ"),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _noteCtrl,
                 decoration: const InputDecoration(
-                    labelText: "Ghi chú sản phẩm", border: OutlineInputBorder(), prefixIcon: Icon(Icons.note_alt_outlined)),
+                    labelText: "Ghi chú sản phẩm",
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.note_alt_outlined)),
               ),
               const SizedBox(height: 16),
               if (_accompanyingProducts.isNotEmpty) ...[
@@ -3188,7 +3220,9 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                 children: [
                   Expanded(
                     child: Text.rich(TextSpan(children: [
-                      TextSpan(text: item.product.productName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      TextSpan(
+                          text: item.product.productName,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       if (widget.taxDisplay.isNotEmpty)
                         TextSpan(
                             text: ' ${widget.taxDisplay}',
@@ -3213,7 +3247,8 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                     children: item.toppings.entries
                         .map((e) => Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
+                              decoration:
+                                  BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
                               child: Text("+${e.key.productName} (x${formatNumber(e.value)})",
                                   style: TextStyle(fontSize: 11, color: Colors.orange.shade900)),
                             ))
@@ -3237,14 +3272,16 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                       value: uniqueUnits.contains(item.selectedUnit) ? item.selectedUnit : uniqueUnits.first,
                       items: uniqueUnits
                           .map((e) => DropdownMenuItem(
-                              value: e, child: Text(e, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)))
+                              value: e,
+                              child: Text(e, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)))
                           .toList(),
                       isDense: true,
                       onChanged: (val) {
                         if (val != null) {
                           double newBasePrice = item.product.sellPrice;
                           if (val != item.product.unit) {
-                            final u = item.product.additionalUnits.firstWhereOrNull((element) => element['unitName'] == val);
+                            final u =
+                                item.product.additionalUnits.firstWhereOrNull((element) => element['unitName'] == val);
                             if (u != null) newBasePrice = (u['sellPrice'] as num).toDouble();
                           }
                           widget.onUpdate(item.copyWith(selectedUnit: val, price: newBasePrice, toppings: {}));
@@ -3264,9 +3301,10 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         InkWell(
-                          onTap: () => item.quantity > 1 ? widget.onUpdate(item.copyWith(quantity: item.quantity - 1)) : null,
-                          child:
-                              const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.remove, size: 14, color: Colors.black)),
+                          onTap: () =>
+                              item.quantity > 1 ? widget.onUpdate(item.copyWith(quantity: item.quantity - 1)) : null,
+                          child: const Padding(
+                              padding: EdgeInsets.all(4), child: Icon(Icons.remove, size: 14, color: Colors.black)),
                         ),
                         Expanded(
                           child: TextField(
@@ -3274,8 +3312,8 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                             textAlign: TextAlign.center,
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             keyboardType: TextInputType.number,
-                            decoration:
-                                const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero),
+                            decoration: const InputDecoration(
+                                border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero),
                             onChanged: (val) {
                               final q = double.tryParse(val);
                               if (q != null && q > 0) widget.onUpdate(item.copyWith(quantity: q));
@@ -3285,7 +3323,8 @@ class _ExchangeItemCardState extends State<ExchangeItemCard> {
                         InkWell(
                           onTap: () => widget.onUpdate(item.copyWith(quantity: item.quantity + 1)),
                           child: const Padding(
-                              padding: EdgeInsets.all(4), child: Icon(Icons.add, size: 14, color: AppTheme.primaryColor)),
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.add, size: 14, color: AppTheme.primaryColor)),
                         ),
                       ],
                     ),

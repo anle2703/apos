@@ -279,7 +279,7 @@ class FirestoreService {
       if (!kIsWeb && Platform.isWindows) {
         final counterSnapshot = await counterDocRef.get();
         if (!counterSnapshot.exists) {
-          await counterDocRef.set({counterField: 1});
+          await counterDocRef.set({counterField: 1, 'storeId': storeId,});
           nextNumber = 1;
         } else {
           final data = counterSnapshot.data() as Map<String, dynamic>;
@@ -291,7 +291,7 @@ class FirestoreService {
         await _db.runTransaction((transaction) async {
           final counterSnapshot = await transaction.get(counterDocRef);
           if (!counterSnapshot.exists) {
-            transaction.set(counterDocRef, {counterField: 1});
+            transaction.set(counterDocRef, {counterField: 1, 'storeId': storeId,});
             nextNumber = 1;
           } else {
             final currentCount = (counterSnapshot.data()

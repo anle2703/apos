@@ -681,6 +681,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           onTap: _selectReportCutoffTime,
         ),
+        if (widget.currentUser.role == 'owner' && widget.currentUser.storeId == 'apos') ...[
+          const SizedBox(height: 24),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.red.withAlpha(20),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.withAlpha(50)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "VÙNG NGUY HIỂM (ADMIN)",
+                  style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.delete_forever, color: Colors.red, size: 30),
+                  title: const Text(
+                    "Xóa dữ liệu cửa hàng",
+                    style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: const Text("Công cụ dành cho quản trị viên/kỹ thuật để reset dữ liệu."),
+                  onTap: _showDeleteDataDialog,
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1166,4 +1198,168 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Text(title, style: Theme.of(context).textTheme.titleLarge),
     );
   }
+
+  Future<void> _deleteByQuery(Query query) async {
+    bool hasMore = true;
+    while (hasMore) {
+      final snapshot = await query.limit(400).get();
+      if (snapshot.docs.isEmpty) {
+        hasMore = false;
+        break;
+      }
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
+  Future<void> _performDelete(String targetStoreId, bool deleteAll) async {
+    // 1. HIỆN POPUP LOADING (Chặn mọi thao tác)
+    // Dùng dialog riêng biệt, không dùng biến state -> Không bao giờ bị đen màn hình
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Colors.white),
+                SizedBox(height: 15),
+                Text("Đang xử lý dữ liệu...", style: TextStyle(color: Colors.white))
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    final toast = ToastService();
+    final firestore = FirebaseFirestore.instance;
+
+    try {
+      // 2. LOGIC XÓA (Giữ nguyên như cũ)
+      await _deleteByQuery(firestore.collection('products').where('storeId', isEqualTo: targetStoreId));
+      await _deleteByQuery(firestore.collection('product_groups').where('storeId', isEqualTo: targetStoreId));
+      await _deleteByQuery(firestore.collection('quick_notes').where('storeId', isEqualTo: targetStoreId));
+      await _deleteByQuery(firestore.collection('discounts').where('storeId', isEqualTo: targetStoreId));
+      await _deleteByQuery(firestore.collection('counters').where('storeId', isEqualTo: targetStoreId));
+
+      final taxRef = firestore.collection('store_tax_settings').doc(targetStoreId);
+
+      if (deleteAll) {
+        await taxRef.delete();
+        await _deleteByQuery(firestore.collection('bills').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('counters').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('customer_groups').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('customers').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('daily_reports').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('employee_shifts').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('orders').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('payment_methods').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('table_groups').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('tables').where('storeId', isEqualTo: targetStoreId));
+        await _deleteByQuery(firestore.collection('web_orders').where('storeId', isEqualTo: targetStoreId));
+
+        await firestore.collection('store_settings').doc(targetStoreId).delete();
+        await firestore.collection('e_invoice_configs').doc(targetStoreId).delete();
+        await firestore.collection('e_invoice_main_configs').doc(targetStoreId).delete();
+      } else {
+        await taxRef.update({'taxAssignmentMap': FieldValue.delete()}).catchError((e) {});
+      }
+
+      toast.show(message: "Đã xóa dữ liệu thành công!", type: ToastType.success);
+    } catch (e) {
+      toast.show(message: "Lỗi xóa dữ liệu: $e", type: ToastType.error);
+    } finally {
+      // 3. TẮT POPUP LOADING
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
+  }
+
+  void _showDeleteDataDialog() {
+    final textController = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.red),
+            SizedBox(width: 8),
+            Expanded(child: Text("ADMIN: Xóa Dữ Liệu", style: TextStyle(color: Colors.red))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Nhập chính xác Store ID để xác nhận:"),
+            const SizedBox(height: 10),
+            TextField(
+              controller: textController,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: "Ví dụ: demohaisoft",
+                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text("Hủy", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+            onPressed: () {
+              if (textController.text.trim().isEmpty) return;
+              Navigator.of(ctx).pop(); // Đóng popup nhập
+              // Gọi hàm xóa (tự hiện loading)
+              _performDelete(textController.text.trim(), false);
+            },
+            child: const Text("Chỉ xóa Hàng hóa"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () {
+              if (textController.text.trim().isEmpty) return;
+              Navigator.of(ctx).pop(); // Đóng popup nhập
+
+              // Hiện thêm 1 popup xác nhận lần cuối cho chắc
+              showDialog(
+                  context: context,
+                  builder: (confirmCtx) => AlertDialog(
+                    title: const Text("Xác nhận Reset?"),
+                    content: Text("Dữ liệu của '${textController.text}' sẽ bị xóa vĩnh viễn."),
+                    actions: [
+                      TextButton(onPressed: ()=>Navigator.pop(confirmCtx), child: const Text("Hủy")),
+                      ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                          onPressed: () {
+                            Navigator.pop(confirmCtx);
+                            _performDelete(textController.text.trim(), true);
+                          },
+                          child: const Text("XÓA TẤT CẢ")
+                      )
+                    ],
+                  )
+              );
+            },
+            child: const Text("Reset Store"),
+          ),
+        ],
+      ),
+    );
+  }
+// --- KẾT THÚC: LOGIC XÓA DỮ LIỆU ---
 }

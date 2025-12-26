@@ -791,6 +791,7 @@ class _ImportTabState extends State<_ImportTab> {
         currentCounters.forEach((prefix, value) {
           newCountersData['${prefix}_count'] = value;
         });
+        newCountersData['storeId'] = storeId;
         await countersRef.set(newCountersData, SetOptions(merge: true));
       } catch (e) {
         debugPrint('Counter update error: $e');
