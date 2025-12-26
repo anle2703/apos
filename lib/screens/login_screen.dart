@@ -274,8 +274,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(
-                    height: 120,
-                    width: 120,
+                    height: 150,
+                    width: 150,
                     child: Image.asset(
                       'assets/images/logo.png',
                       fit: BoxFit.contain,

@@ -45,7 +45,7 @@ class InventoryService {
 
         // 2. Ghi lại giá trị mới (dùng set với merge: true để tạo hoặc cập nhật)
         // SetOptions(merge: true) sẽ tạo doc nếu chưa có, hoặc chỉ cập nhật field nếu đã có
-        await counterRef.set({dayFieldName: newOrderNumber}, SetOptions(merge: true));
+        await counterRef.set({dayFieldName: newOrderNumber, 'storeId': storeId}, SetOptions(merge: true));
 
         debugPrint('>>> Lấy và cập nhật số thứ tự (không dùng transaction): $newOrderNumber cho ngày ${now.day}');
       } catch (e, stackTrace) {

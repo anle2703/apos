@@ -297,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (_currentUser!.role != 'guest') {
       final String realOwnerUid =
-          _currentUser!.role == 'owner' ? _currentUser!.uid : (_currentUser!.ownerUid ?? _currentUser!.uid);
+      _currentUser!.role == 'owner' ? _currentUser!.uid : (_currentUser!.ownerUid ?? _currentUser!.uid);
 
       ShiftService().ensureShiftOpen(
         _currentUser!.storeId,
@@ -683,59 +683,59 @@ class _HomeScreenState extends State<HomeScreen> {
             elevation: 0,
             title: (_currentUser?.role == 'owner' && _currentUser?.subscriptionExpiryDate != null)
                 ? Builder(builder: (context) {
-                    final expiry = _currentUser!.subscriptionExpiryDate!.toDate();
+              final expiry = _currentUser!.subscriptionExpiryDate!.toDate();
 
-                    // Format thời gian
-                    final hour = expiry.hour.toString().padLeft(2, '0');
-                    final minute = expiry.minute.toString().padLeft(2, '0');
-                    final day = expiry.day.toString().padLeft(2, '0');
-                    final month = expiry.month.toString().padLeft(2, '0');
-                    final year = expiry.year;
+              // Format thời gian
+              final hour = expiry.hour.toString().padLeft(2, '0');
+              final minute = expiry.minute.toString().padLeft(2, '0');
+              final day = expiry.day.toString().padLeft(2, '0');
+              final month = expiry.month.toString().padLeft(2, '0');
+              final year = expiry.year;
 
-                    // Logic màu
-                    final daysLeft = expiry.difference(DateTime.now()).inDays;
-                    final isUrgent = daysLeft <= 30;
-                    final Color displayColor = isUrgent ? Colors.red : Theme.of(context).primaryColor;
+              // Logic màu
+              final daysLeft = expiry.difference(DateTime.now()).inDays;
+              final isUrgent = daysLeft <= 30;
+              final Color displayColor = isUrgent ? Colors.red : Theme.of(context).primaryColor;
 
-                    // Container đóng vai trò là dải nền cắt ngang
-                    return Container(
-                      width: double.infinity,
-                      // Full chiều ngang
-                      height: kToolbarHeight,
-                      // Chiều cao bằng đúng AppBar (56.0)
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      // Padding nội dung bên trong
-                      color: displayColor.withAlpha(12),
-                      // Màu nền mờ
-                      alignment: Alignment.centerLeft,
-                      // Căn nội dung sang trái
-                      child: Row(
-                        children: [
-                          Icon(Icons.workspace_premium, color: displayColor),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'Hạn sử dụng: $hour:$minute $day/$month/$year',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: displayColor,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+              // Container đóng vai trò là dải nền cắt ngang
+              return Container(
+                width: double.infinity,
+                // Full chiều ngang
+                height: kToolbarHeight,
+                // Chiều cao bằng đúng AppBar (56.0)
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                // Padding nội dung bên trong
+                color: displayColor.withAlpha(12),
+                // Màu nền mờ
+                alignment: Alignment.centerLeft,
+                // Căn nội dung sang trái
+                child: Row(
+                  children: [
+                    Icon(Icons.workspace_premium, color: displayColor),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Hạn sử dụng: $hour:$minute $day/$month/$year',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: displayColor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    );
-                  })
-                : Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      'Tài khoản: ${_currentUser?.name ?? "Lỗi hiển thị tên TK"}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
+                  ],
+                ),
+              );
+            })
+                : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Tài khoản: ${_currentUser?.name ?? "Lỗi hiển thị tên TK"}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ),
           body: ListView(
             children: [
@@ -942,7 +942,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _authService.signOut();
                   navigator.pushAndRemoveUntil(
                     MaterialPageRoute(builder: (context) => const AuthGate()),
-                    (route) => false,
+                        (route) => false,
                   );
                 },
               ),
@@ -950,7 +950,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       default:
-        // Default trả về Bán hàng để an toàn
+      // Default trả về Bán hàng để an toàn
         if (_currentUser!.businessType == 'fnb') {
           return TableSelectionScreen(currentUser: _currentUser!);
         } else {
@@ -976,20 +976,20 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: isZalo
             ? Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(icon, color: color, size: 23), // Icon nhỏ size 20
-                  Text(
-                    'Zalo',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 7,
-                      fontWeight: FontWeight.bold,
-                      shadows: [Shadow(offset: const Offset(1, 1), blurRadius: 2, color: color)],
-                    ),
-                  ),
-                ],
-              )
+          alignment: Alignment.center,
+          children: [
+            Icon(icon, color: color, size: 23), // Icon nhỏ size 20
+            Text(
+              'Zalo',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 7,
+                fontWeight: FontWeight.bold,
+                shadows: [Shadow(offset: const Offset(1, 1), blurRadius: 2, color: color)],
+              ),
+            ),
+          ],
+        )
             : Icon(icon, color: color, size: 23), // Icon bình thường nhỏ size 20
       ),
     );
@@ -1189,20 +1189,20 @@ class _BusinessTypePickerPopupState extends State<BusinessTypePickerPopup> {
           onPressed: (_selectedType == null || _isUpdating)
               ? null
               : () {
-                  setState(() => _isUpdating = true);
+            setState(() => _isUpdating = true);
 
-                  // 1. Đóng Popup NGAY LẬP TỨC
-                  Navigator.of(context).pop();
+            // 1. Đóng Popup NGAY LẬP TỨC
+            Navigator.of(context).pop();
 
-                  // 2. Gửi dữ liệu về HomeScreen để xử lý sau
-                  widget.onConfirm(_selectedType!, _useSampleData);
-                },
+            // 2. Gửi dữ liệu về HomeScreen để xử lý sau
+            widget.onConfirm(_selectedType!, _useSampleData);
+          },
           child: _isUpdating
               ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
               : const Text('Bắt đầu ngay'),
         ),
       ],

@@ -73,10 +73,22 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/icon/ic_foreground.png"
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/icon/ic_foreground.png"
+
+  # 1. Dùng ảnh CÓ NỀN TRẮNG cho iOS và Android cũ
+  # Khắc phục lỗi mất nền trên thiết bị cũ và đảm bảo chuẩn iOS
+  image_path: "assets/icon/icon_nen_trang.png"
+
+  # 2. Cấu hình Adaptive Icon cho Android mới (8.0+)
   min_sdk_android: 21
+
+  # Màu nền (Đây là lớp nằm dưới cùng)
+  adaptive_icon_background: "#FFFFFF"
+
+  # Lớp trên cùng (Chỉ logo, nền trong suốt)
+  # Android sẽ ghép lớp này đè lên lớp màu #FFFFFF ở trên
+  adaptive_icon_foreground: "assets/icon/icon_trong_suot.png"
+
+  # Tự động xóa kênh alpha cho iOS (an toàn, giữ nguyên)
   remove_alpha_ios: true
 
 flutter:
