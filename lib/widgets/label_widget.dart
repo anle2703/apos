@@ -4,7 +4,6 @@ import '../models/order_item_model.dart';
 import '../models/label_template_model.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 
-/// Class chứa đầy đủ thông tin cho 1 con tem để in
 class LabelItemData {
   final OrderItem item;
   final String headerTitle; // Tên bàn hoặc Bill Code
@@ -22,7 +21,7 @@ class LabelItemData {
 }
 
 class LabelRowWidget extends StatelessWidget {
-  final List<LabelItemData?> items; // Thay OrderItem bằng LabelItemData
+  final List<LabelItemData?> items;
   final double widthMm;
   final double heightMm;
   final double gapMm;
@@ -86,12 +85,9 @@ class LabelRowWidget extends StatelessWidget {
     );
   }
 
-  // Chuyển đổi Point (Settings) sang Pixel (Máy in)
-  // PDF Preview dùng 72dpi, Máy in dùng 203dpi -> tỉ lệ ~2.83
   double _sf(double sizeFromSettings) => sizeFromSettings * 2.83;
   double _m(double mm) => mm * 8.0;
 
-  // --- LAYOUT 1: F&B (Trà sữa, Cafe) - Chuẩn theo PDF ---
   Widget _buildFnBLayout(LabelItemData data, double w, double h) {
     final s = settings;
     final currencyFormat = NumberFormat('#,##0');
@@ -374,7 +370,6 @@ class LabelRowWidget extends StatelessWidget {
   }
 }
 
-// --- WIDGET MỚI: TẠO NÉT ĐỨT ---
 class DashedDivider extends StatelessWidget {
   final double height;
   final Color color;

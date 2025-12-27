@@ -15,7 +15,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart' as printing_lib;
 import 'package:screenshot/screenshot.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/cash_flow_transaction_model.dart';
 import '../models/configured_printer_model.dart';
 import '../models/label_template_model.dart';
@@ -73,6 +73,31 @@ class PrintingService {
       return ReceiptTemplateModel.fromJson(jsonStr);
     }
     return ReceiptTemplateModel();
+  }
+
+  // --- HÀM MỚI: Lấy tên cửa hàng từ Firestore ---
+  Future<void> _updateStoreNameFromFirestore(String storeId, LabelTemplateModel settings) async {
+    try {
+      if (storeId.isEmpty) return;
+
+      final doc = await FirebaseFirestore.instance
+          .collection('store_settings')
+          .doc(storeId)
+          .get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data() as Map<String, dynamic>;
+        // Lấy storeName, nếu null thì giữ nguyên cái cũ
+        String? dbStoreName = data['storeName'];
+
+        if (dbStoreName != null && dbStoreName.isNotEmpty) {
+          settings.retailStoreName = dbStoreName.toUpperCase();
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi lấy tên cửa hàng in tem: $e");
+      // Nếu lỗi thì giữ nguyên mặc định, không crash app
+    }
   }
 
   // Cập nhật lại hàm này
@@ -308,6 +333,7 @@ class PrintingService {
     bool isRetailMode = false,
     String? billCode,
     String? templateSettingsJson,
+    String? currentStoreId,
   }) async {
     try {
       final labelPrinter = configuredPrinters.firstWhere(
@@ -341,7 +367,9 @@ class PrintingService {
           settings.labelColumns = (width >= 65) ? 2 : 1;
         }
       }
-
+      if (currentStoreId != null && currentStoreId.isNotEmpty) {
+        await _updateStoreNameFromFirestore(currentStoreId, settings);
+      }
       // --- BƯỚC 2: CHUẨN HÓA KÍCH THƯỚC (QUAN TRỌNG) ---
       // Bắt buộc dùng kích thước trong settings để đảm bảo giống hệt lúc In Test
       final double finalWidth = settings.labelWidth;

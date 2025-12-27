@@ -34,7 +34,9 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
   void initState() {
     super.initState();
     _isRetailMode = widget.currentUser.businessType == 'retail';
-    _loadSettings();
+    _loadSettings().then((_) {
+      _fetchAndApplyStoreName();
+    });
   }
 
   Future<void> _loadSettings() async {
@@ -71,6 +73,35 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
 
     if (mounted) {
       ToastService().show(message: "Đã lưu cài đặt!", type: ToastType.success);
+    }
+  }
+
+  Future<void> _fetchAndApplyStoreName() async {
+    // Chỉ cần làm cho chế độ Bán lẻ (Retail) vì F&B dùng tên bàn
+    if (!_isRetailMode) return;
+
+    try {
+      final String storeId = widget.currentUser.storeId;
+      if (storeId.isEmpty) return;
+
+      final doc = await FirebaseFirestore.instance
+          .collection('store_settings')
+          .doc(storeId)
+          .get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data() as Map<String, dynamic>;
+        final String? dbName = data['storeName'];
+
+        if (dbName != null && dbName.isNotEmpty) {
+          setState(() {
+            // Cập nhật tên cửa hàng viết hoa
+            _settings.retailStoreName = dbName.toUpperCase();
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Lỗi lấy tên cửa hàng: $e");
     }
   }
 
@@ -115,6 +146,7 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
         width: _settings.labelWidth,
         height: _settings.labelHeight,
         isRetailMode: _isRetailMode,
+        currentStoreId: widget.currentUser.storeId,
       );
 
       ToastService().show(message: "Đã gửi lệnh in ${_settings.labelColumns} tem", type: ToastType.success);
@@ -427,6 +459,7 @@ class _LabelSetupScreenState extends State<LabelSetupScreen> {
       children: [
         _buildSectionHeader("Hàng 1: Tên cửa hàng"),
         TextFormField(
+          key: ValueKey(_settings.retailStoreName),
           initialValue: _settings.retailStoreName,
           decoration: const InputDecoration(labelText: "Nội dung", border: OutlineInputBorder(), isDense: true),
           onChanged: (v) => setState(() => _settings.retailStoreName = v),
